@@ -8,11 +8,107 @@ Sorry about the brevity of this ReadMe for now, but there will be more to come i
 
 :rocket: Steps to Running the TA-Bot Docker Development Environment:
 
-1. Clone the repository.
-2. In the main directory run "git submodule update --init --recursive"
-2. Navigate to the /ui directory.
-3. Run yarn install.
-4. Download and install Docker.
+
+
+
+## 1. Clone the repository.
+
+The Active Branch is multi-filechanges
+
+---
+
+## 2. In the main directory run "git submodule update --init --recursive"
+
+ 
+
+## 3.  Download and install Docker runner.
+
+Mac and Linux follow similar steps: 
+
+### Mac
+
+execute
+1.  `brew install docker` - Installs Docker CLI tools
+2. `brew install --cask docker` - Installs Docker VM Damien
+
+
+often, this won't include the `docker compose` command, so a few additional steps may be required. 
+
+run `docker compose version`, if you get a response skip the following steps. 
+
+1.  Make a docker config directory
+    - `mkdir -p ~/.docker `
+2. Create a docker config file
+    - `vim ~/.docker/config.json`
+    - Place the following snippet into the file:
+```{
+  "cliPluginsExtraDirs": [
+    "/opt/homebrew/lib/docker/cli-plugins"
+  ]
+}
+```
+3. You can verify this worked via `docker compose version`
+
+
+Launch Docker via applications, or via cli via: 
+`open /Applications/Docker.app`
+
+
+### Linux:
+TODO
+
+---
+
+
+## 3.  Install the correct version of Node using nvm
+- Node can be installed via
+  - Mac: `brew install node`
+  - Linux: TODO
+
+- Nvm Can be installed via:
+  - Mac: `brew install nvm`
+    - Follow the install steps output by the cli
+
+
+### Mac M Chips:
+Node 14 requires a special command to run on ARM Mac machines:
+
+`NVM_NODEJS_ORG_MIRROR=https://nodejs.raccoon-tw.dev/release nvm install v14.21.3`
+
+If you are not on mac, run:
+  - `nvm install 14`
+
+
+`npm install --legacy-peer-deps`
+
+
+
+
+
+
+
+
+
+
+## 4.  Run yarn install.
+## 5.  Download and install Docker.
+
+
+
+## Mac
+
+
+
+
+
+
+
+
+
+
+
+
+
 Note for WSL Users: If you are using WSL, follow the instructions at https://medium.com/geekculture/run-docker-in-windows-10-11-wsl-without-docker-desktop-a2a7eb90556d to install Docker in your WSL environment.
 Note for WSL Users: To enable port forwarding from the WSL environment to your localhost, follow the instructions at https://dev.to/vishnumohanrk/wsl-port-forwarding-2e22
 Note: Make sure to edit the shell script to include 3000

@@ -26,8 +26,12 @@ def create_app():
     container.wire(modules=[classes, auth, projects, submission, upload, settings, timeout_service])
     
     # CORS configuration
-    CORS(app)
-    
+    CORS(
+        app,
+        supports_credentials=True, # Add This
+        origins=["http://localhost:3000"], # You'll need this, you cannot use * (wildcard domain) when using supports_credentials=True
+    )
+        
     # App configuration
     app.config['TABOT_PATH'] = os.getenv('TABOT_DIR') + '/tabot.sh'
     app.config["JWT_SECRET_KEY"] = "ob1L04WeQ1U0H5Kiybk9rMoQigVhoGJCKBxC6KxF85G89vAK3L903I073JXQ"
