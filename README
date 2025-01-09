@@ -1,27 +1,45 @@
 Welcome to TA-Bot!
 
-Sorry about the brevity of this ReadMe for now, but there will be more to come in the future. In the meantime, you can check out the current state of TA-Bot at http://tabot.sh.
+Welcome to **TA-Bot**! This repository contains everything you need to set up and run the TA-Bot development environment. Stay tuned for updates as we continue to enhance this documentation.
 
-:warning: Known Issue: There is currently a bug that prevents yarn from working in our Docker container.
+Check out the current state of TA-Bot at: [http://tabot.sh](http://tabot.sh).
 
-:bulb: Workaround for Windows Users: To run the TA-Bot Docker development environment on Windows, you will need to install WSL2 (which is required for Docker) and a Linux environment of your choice (e.g. Ubuntu). Follow the steps at https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windows-10#1-overview to set this up. Then, follow the steps below to run TA-Bot.
+---
 
-:rocket: Steps to Running the TA-Bot Docker Development Environment:
+## :warning: Known Issues
 
+- **Yarn in Docker**: A bug currently prevents Yarn from functioning in our Docker container.
 
+---
 
+## :bulb: Workaround for Windows Users
 
-## 1. Clone the repository.
+To run the TA-Bot Docker development environment on Windows, you will need to:
+
+1. Install **WSL2** (required for Docker).
+2. Install a Linux distribution (e.g., Ubuntu).
+
+Follow [this guide](https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windows-10#1-overview) to set up WSL2 and Ubuntu. Then, proceed with the steps below to run TA-Bot.
+
+---
+
+## :rocket: Steps to Running the TA-Bot Docker Development Environment
+
+Clone the Repository
+
+```bash
+git clone <repository-url>
+cd <repository-directory>
 
 The Active Branch is multi-filechanges
 
 ---
 
-## 2. In the main directory run "git submodule update --init --recursive"
+2. In the main directory run "git submodule update --init --recursive"
 
- 
+--- 
 
-## 3.  Download and install Docker runner.
+3.  Download and install Docker runner.
 
 Mac and Linux follow similar steps: 
 
