@@ -1,8 +1,4 @@
-Welcome to TA-Bot!
-
-Welcome to **TA-Bot**! This repository contains everything you need to set up and run the TA-Bot development environment. Stay tuned for updates as we continue to enhance this documentation.
-
-Check out the current state of TA-Bot at: [http://tabot.sh](http://tabot.sh).
+Welcome to **TA-Bot**!
 
 ---
 
@@ -11,6 +7,10 @@ Check out the current state of TA-Bot at: [http://tabot.sh](http://tabot.sh).
 - **Yarn in Docker**: A bug currently prevents Yarn from functioning in our Docker container.
 
 ---
+
+## Dependencies
+
+- Docker Desktop (windows and mac)
 
 ## :bulb: Workaround for Windows Users
 
@@ -24,16 +24,6 @@ Follow [this guide](https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windo
 ---
 
 ## :rocket: Steps to Running the TA-Bot Docker Development Environment
-
-Clone the Repository
-
-```bash
-git clone <repository-url>
-cd <repository-directory>
-
-The Active Branch is multi-filechanges
-
----
 
 2. In the main directory run "git submodule update --init --recursive"
 
