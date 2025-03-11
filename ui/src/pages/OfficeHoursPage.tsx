@@ -1,6 +1,5 @@
 import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css'
-import { Redirect } from 'react-router-dom'
 import OfficeHoursComponent from '../components/OfficeHoursComponent';
 import { Helmet } from 'react-helmet';
 import MenuComponent from '../components/MenuComponent';

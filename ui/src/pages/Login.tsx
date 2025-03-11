@@ -4,7 +4,7 @@ import mscsimg from '../MUCS-tag.png'
 import axios from 'axios';
 import ErrorMessage from '../components/ErrorMessage';
 import NewUserModal from '../components/NewUserModal';
-import { Redirect } from 'react-router-dom'
+import { Navigate  } from 'react-router-dom'
 import { Button, Form, Grid, Header, Message, Image, Segment } from 'semantic-ui-react'
 import { Helmet } from 'react-helmet';
 
@@ -72,13 +72,13 @@ class Login extends Component<{}, LoginPageState> {
 
   render() {
     if (this.state.isLoggedIn && this.state.role === 0 ){
-      return ( <Redirect to={{pathname: '/class/classes'}}/> );
+      return ( <Navigate to={{pathname: '/class/classes'}}/> );
     }
     if (this.state.isLoggedIn && this.state.role === 1 ){
-      return ( <Redirect to={{pathname: '/admin/classes'}}/> );
+      return ( <Navigate to={{pathname: '/admin/classes'}}/> );
     }
     if (this.state.isLoggedIn && this.state.role === 2 ){
-      return ( <Redirect to={{pathname: '/admin/TaLanding'}}/> );
+      return ( <Navigate to={{pathname: '/admin/TaLanding'}}/> );
     }
     return (
     <div>    

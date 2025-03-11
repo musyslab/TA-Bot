@@ -1,6 +1,5 @@
 import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css'
-import { Redirect } from 'react-router-dom'
 import { Helmet } from 'react-helmet';
 import MenuComponent from '../components/MenuComponent';
 import ClassSelectionPageComponent from '../components/ClassSelectionPageComponent';

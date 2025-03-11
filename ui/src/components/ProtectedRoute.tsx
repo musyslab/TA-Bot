@@ -1,14 +1,21 @@
-import React from 'react'
-import { Redirect, Route } from 'react-router-dom'
-import ErrorBoundary from './ErrorComponent'
+import { Navigate, Route, Outlet } from 'react-router-dom'; // Import Outlet if needed for nested routes
+import ErrorBoundary from './ErrorComponent';
 
-const ProtectedRoute = ({component, ...rest}: any) => {
-    const routeComponent = (props: any) => (
-        localStorage.getItem("AUTOTA_AUTH_TOKEN") != null
-            ? (<ErrorBoundary>{React.createElement(component, props)}</ErrorBoundary>)
-            : <Redirect to={{pathname: '/login'}}/>
-    );
-    return <Route {...rest} render={routeComponent}/>;
+const ProtectedRoute = ({ component: Component, ...rest }: any) => {
+  return (
+    <Route
+      {...rest}
+      element={
+        localStorage.getItem("AUTOTA_AUTH_TOKEN") != null ? (
+          <ErrorBoundary>
+            <Component />
+          </ErrorBoundary>
+        ) : (
+          <Navigate to="/login" />
+        )
+      }
+    />
+  );
 };
 
 export default ProtectedRoute;

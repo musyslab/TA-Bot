@@ -1,7 +1,5 @@
 import { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css'
-import { Redirect } from 'react-router-dom'
-import { Helmet } from 'react-helmet';
+import 'semantic-ui-css/semantic.min.css';
 import AccountCreationPageComponent from '../components/AccountCreationPageComponent';
 
 class AccountCreationPage extends Component {

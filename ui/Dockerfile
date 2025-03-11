@@ -1,24 +1,23 @@
-# Pull node base image
-FROM node:14
+# Use official Node.js image
+FROM node:20.11.1
 
-ENV CHOKIDAR_USEPOLLING true
+# Enable polling for file changes in Docker
+ENV CHOKIDAR_USEPOLLING=true
 
-# set working directory
+# Set working directory
 WORKDIR /app
 
-# Install depenencies
-COPY package.json .
-#COPY yarn.lock .
-RUN yarn install 
-#RUN yarn global add react-scripts --silent
+# Copy package.json and yarn.lock first (to leverage caching)
+COPY package.json yarn.lock .  
 
-# Update package lists
+# Install dependencies inside the container
+RUN yarn install --check-files
 
-
-# Add app
+# Copy the rest of the application files
 COPY . .
 
+# Expose the port the app runs on
 EXPOSE 3000
 
-# Start yarn dev server
+# Start the React app
 CMD ["yarn", "start"]
