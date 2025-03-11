@@ -1,6 +1,6 @@
 import React, { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css'
-import { BrowserRouter, Route, Switch } from 'react-router-dom';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import LoginPage from './pages/Login';
 import LandingPage from './pages/Landing';
 import UploadPage from './pages/UploadPage';
@@ -15,11 +15,11 @@ import AdminUpload from './AdminPages/AdminUpload';
 import AdminSettingsPage from './AdminPages/AdminSettingsPage';
 import ClassSelectionPage from './pages/ClassSelectionPage';
 import AdminProjectConfig from './AdminPages/AdminProjectConfig';
-import CodeHelpComponent from './components/CodeHelpComponent';
+
 import CodeHelpPage from './pages/CodeHelpPage';
-import AdminLandingComponent from './components/AdminLandingComponent';
+
 import AdminProject from './AdminPages/AdminProject';
-import AdminComponent from './components/AdminLandingComponent';
+
 import CreateAccountPage from './pages/AccountCreationPage';
 import TaLanding from './AdminPages/TaLanding';
 import OfficeHoursPage from './pages/OfficeHoursPage';
@@ -41,38 +41,32 @@ class App extends Component {
                 return Promise.reject(error);
             });
 
-        return (
-            <BrowserRouter>
-                <Switch>
-                    <Route path="/login">
-                        <LoginPage></LoginPage>
-                    </Route>
-                    <Route exact path="/">
-                        <LandingPage></LandingPage>
-                    </Route>
-                    <ProtectedRoute exact path="/submissions" component={PastSubmissionPage} />
-                    <ProtectedRoute exact path="/class/:class_id/upload" component={UploadPage} />
-                    <ProtectedRoute exact path="/class/:class_id/code/:id?" component={CodePage} />
-                    <ProtectedRoute exact path="/class/classes" component={ClassSelectionPage} />
-                    <ProtectedRoute exact path="/admin/classes" component={AdminLanding} />
-                    <ProtectedRoute exact path="/admin/TaLanding" component={TaLanding} />
-                    <ProtectedRoute exact path="/admin/projects/:id" component={AdminProject} />
-                    <ProtectedRoute exact path="/admin/project/:id" component={ProjectBreakdown} />
-                    <ProtectedRoute exact path="/admin/upload" component={AdminUpload} />
-                    <ProtectedRoute exact path="/admin/settings" component={AdminSettingsPage} />
-                    <ProtectedRoute exact path="/admin/project/edit/:class_id/:id" component={AdminProjectConfig} />
-                    <ProtectedRoute exact path="/class/:class_id/codeHelp" component={CodeHelpPage} />
-                    <ProtectedRoute exact path="/class/OfficeHours/:id" component={OfficeHoursPage} />
-                    <ProtectedRoute exact path="/user/createAccount" component={CreateAccountPage} />
-                    <ProtectedRoute exact path="/admin/AdminAnalytics/:id" component={ProjectAnalytics} />
-
-                    <Route>
-                        <NotFoundComponent></NotFoundComponent>
-                    </Route>
-                </Switch>
-            </BrowserRouter>
-        );
-    }
+    return (
+        <BrowserRouter>
+            <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route exact path="/" element={<LandingPage />} />
+                <Route element={<ProtectedRoute />}>
+                    <Route exact path="/submissions" element={<PastSubmissionPage />} />
+                    <Route exact path="/class/:class_id/upload" element={<UploadPage />} />
+                    <Route exact path="/class/:class_id/code/:id?" element={<CodePage />} />
+                    <Route exact path="/class/classes" element={<ClassSelectionPage />} />
+                    <Route exact path="/admin/classes" element={<AdminLanding />} />
+                    <Route exact path="/admin/TaLanding" element={<TaLanding />} />
+                    <Route exact path="/admin/projects/:id" element={<AdminProject />} />
+                    <Route exact path="/admin/project/:id" element={<ProjectBreakdown />} />
+                    <Route exact path="/admin/upload" element={<AdminUpload />} />
+                    <Route exact path="/admin/settings" element={<AdminSettingsPage />} />
+                    <Route exact path="/admin/project/edit/:class_id/:id" element={<AdminProjectConfig />} />
+                    <Route exact path= "/class/:class_id/codeHelp" element={<CodeHelpPage />} />
+                    <Route exact path= "/class/OfficeHours" element={<OfficeHoursPage />} />
+                    <Route exact path= "/user/createAccount" element={<CreateAccountPage />} />
+                </Route>
+                <Route path="*" element={<NotFoundComponent />} />
+            </Routes>
+        </BrowserRouter>
+    );
+  }
 }
 
 export default App;
