@@ -27,9 +27,6 @@ interface CodeComponentProps {
     pylintData: Array<PylintObject>;
     codedata: string;
 }
-interface CodeComponentState {
-    dismissed: boolean[]
-}
 
 class CodeComponent extends Component<CodeComponentProps, {}> {
     constructor(props: CodeComponentProps) {

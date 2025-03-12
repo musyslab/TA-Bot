@@ -222,7 +222,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         }).catch(function (error) {
             console.log(error);
         });
-        setModalOpen(false);
     }
 
     function reloadtests(){
