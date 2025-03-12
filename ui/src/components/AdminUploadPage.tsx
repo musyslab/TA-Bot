@@ -93,7 +93,6 @@ class AdminUploadPage extends Component<{}, UploadPageState> {
             for(let i=0; i< students.length;i++){
                 studentsDropdown.push({ key: students[i].id, text: students[i].name +"("+students[i].mscsnet+")", value: students[i].id });
             }
-            console.log(studentsDropdown);
             this.setState({ studentList: studentsDropdown });
 
         })
@@ -117,7 +116,6 @@ class AdminUploadPage extends Component<{}, UploadPageState> {
             for(let i=0; i< projects.length;i++){
                 projectDropdown.push({ key: projects[i].Id, text: projects[i].Name, value: projects[i].Id });
             }
-            console.log(projectDropdown);
             this.setState({ projects: projectDropdown });
         })
         .catch(err => {
@@ -128,7 +126,7 @@ class AdminUploadPage extends Component<{}, UploadPageState> {
     }
 
     componentDidMount() {
-        axios.get(process.env.REACT_APP_BASE_API_URL + `/class/all_classes_and_ids`, {
+        axios.get(process.env.REACT_APP_BASE_API_URL + `/class/all`, {
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` 
             }
@@ -139,7 +137,6 @@ class AdminUploadPage extends Component<{}, UploadPageState> {
             for(let i=0; i< classes.length;i++){
                 classesDropdown.push({ key: classes[i].id, text: classes[i].name, value: classes[i].id });
             }
-            console.log(classesDropdown);
             this.setState({ classlist: classesDropdown });
 
         })

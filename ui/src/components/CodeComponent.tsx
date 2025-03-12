@@ -31,9 +31,20 @@ interface CodeComponentProps {
 class CodeComponent extends Component<CodeComponentProps, {}> {
     constructor(props: CodeComponentProps) {
         super(props);
+        this.state = {
+            dismissed: Array(props.pylintData.length).fill(false)
+        };
         this.stylelinenumbers = this.stylelinenumbers.bind(this);
+        this.handleDismiss = this.handleDismiss.bind(this);
     }
 
+    handleDismiss(index: number) {
+        this.setState(prevState => {
+            const newDismissed = [...prevState.dismissed];
+            newDismissed[index] = true;
+            return { dismissed: newDismissed };
+        });
+    }
     stylelinenumbers(linenumber: number) {
         for (let index = 0; index < this.props.pylintData.length; index++) {
             const error = this.props.pylintData[index];

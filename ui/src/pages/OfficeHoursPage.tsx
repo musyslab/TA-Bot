@@ -28,4 +28,20 @@ class OfficeHoursPage extends Component {
   }
 }
 
+const OfficeHoursPage = () => {
+    let { id } = useParams<OfficeHoursProps>();
+    console.log("This is the project id", id);
+
+    return (
+        <div>
+            <Helmet>
+                <title>[Admin] Students | TA-Bot</title>
+            </Helmet>
+            <MenuComponent showUpload={true} showAdminUpload={false} showHelp={false} showCreate={false} showLast={false} showReviewButton={false}></MenuComponent>
+            <OfficeHoursComponent project_id={id} question="Enter your question here"></OfficeHoursComponent>
+        </div>
+    )
+}
+
+
 export default OfficeHoursPage;

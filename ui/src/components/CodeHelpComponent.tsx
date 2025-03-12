@@ -151,7 +151,7 @@ class CodeHelpComponent extends Component<CodeHelpComponentProps, CodeHelpCompon
           }
         })
         .catch(err => {
-            console.log(this.state.question);
+            console.log(err);
         });
     }
 

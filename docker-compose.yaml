@@ -13,7 +13,7 @@ services:
     expose:
       - '3306'
     volumes:
-      - ./database:/var/lib/mysql
+      # - ./database:/var/lib/mysql  Remove this line to use persistent mysql database between builds
       - ./init-db:/docker-entrypoint-initdb.d
   backend:
     container_name: backend
@@ -28,7 +28,7 @@ services:
     build:
       context: api
     ports:
-      - "5000:5000"
+      - "5001:5001"
     volumes:
       - "./api:/app"
       - "./ta-bot:/ta-bot"
