@@ -3,9 +3,13 @@ import 'semantic-ui-css/semantic.min.css';
 import { Grid } from 'semantic-ui-react';
 import MenuComponent from '../components/MenuComponent';
 import '../css/AdminComponent.scss';
-import { Helmet } from "react-helmet-async";
+import { Helmet } from "react-helmet";
 import AdminComponent from '../components/AdminComponent';
 import { useParams } from 'react-router-dom';
+import React from 'react';
+
+// Cast Helmet to `any` to avoid typescript issue
+const SafeHelmet: any = Helmet;
 
 function withParams(Component: any) {
   return (props: any) => {
@@ -27,10 +31,17 @@ class AdminProject extends Component<AdminProjectProps, {}> {
     return (
       <div>
         <div>hi</div>
-        <Helmet>
+        <SafeHelmet>
           <title>[Admin] Projects | TA-Bot</title>
-        </Helmet>
-        <MenuComponent showUpload={false} showAdminUpload={true} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} ></MenuComponent>
+        </SafeHelmet>
+        <MenuComponent 
+          showUpload={false} 
+          showAdminUpload={true} 
+          showHelp={false} 
+          showCreate={false} 
+          showLast={false} 
+          showReviewButton={false} 
+        />
         <Grid className="main-grid">
           <AdminComponent id={id!} />
         </Grid>

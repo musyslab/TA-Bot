@@ -1,5 +1,6 @@
 import {  useEffect, useState  } from 'react';
 import {  Grid, Tab, Form, Input, Radio, Button,  TextArea,  Checkbox,  Segment, Popup } from 'semantic-ui-react'
+import React from 'react';
 
 import 'semantic-ui-css/semantic.min.css';
 

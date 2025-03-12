@@ -10,6 +10,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 // If you're using highlight.js, import from 'react-syntax-highlighter/dist/esm/styles/hljs'
 import { vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+
 interface StudentListProps {
     project_id: number
 }

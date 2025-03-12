@@ -1,15 +1,17 @@
-import { Helmet } from "react-helmet-async";
+import { Helmet } from "react-helmet";
 import { useParams } from 'react-router-dom';
-import 'semantic-ui-css/semantic.min.css'
-import { Grid } from 'semantic-ui-react'
+import 'semantic-ui-css/semantic.min.css';
+import { Grid } from 'semantic-ui-react';
 import MenuComponent from '../components/MenuComponent';
 import StudentList from '../components/StudentList';
-import '../css/AdminComponent.scss'
+import '../css/AdminComponent.scss';
+import React from 'react';
+// Cast Helmet to `any` to avoid TypeScript issue
+const SafeHelmet: any = Helmet;
 
 interface ProjectBreakdownProps extends Record<string, string | undefined> {
-    id: string  
+    id: string;
 }
-
 
 const ProjectBreakdown = () => {
     let { id } = useParams<ProjectBreakdownProps>();
@@ -17,15 +19,22 @@ const ProjectBreakdown = () => {
 
     return (
         <div>
-            <Helmet>
+            <SafeHelmet>
                 <title>[Admin] Students | TA-Bot</title>
-            </Helmet>
-            <MenuComponent showUpload={false} showAdminUpload={true} showHelp={false} showCreate={false} showLast={false} showReviewButton={false}></MenuComponent>
+            </SafeHelmet>
+            <MenuComponent 
+                showUpload={false} 
+                showAdminUpload={true} 
+                showHelp={false} 
+                showCreate={false} 
+                showLast={false} 
+                showReviewButton={false} 
+            />
             <Grid className="main-grid">
-                <StudentList project_id={project_id}></StudentList>
+                <StudentList project_id={project_id} />
             </Grid>
         </div>
-    )
-}
+    );
+};
 
 export default ProjectBreakdown;

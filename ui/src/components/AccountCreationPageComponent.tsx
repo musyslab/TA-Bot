@@ -2,6 +2,7 @@ import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css';
 
 import { Form, Grid, Header, Segment } from 'semantic-ui-react';
+import React from 'react';
 
 
 

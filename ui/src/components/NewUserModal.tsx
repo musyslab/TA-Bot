@@ -4,6 +4,7 @@ import '../css/CodePage.scss';
 import { Form, Modal } from 'semantic-ui-react'
 import axios from 'axios';
 import ErrorMessage from './ErrorMessage';
+import React from 'react';
 
 interface NewUserModalProps {
     username: string,

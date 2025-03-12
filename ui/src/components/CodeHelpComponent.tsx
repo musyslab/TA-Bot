@@ -6,6 +6,7 @@ import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import 'semantic-ui-css/semantic.min.css';
 import { Dropdown, DropdownProps, Form, Icon } from 'semantic-ui-react';
 import '../css/codeHelpComponent.scss';
+import React from 'react';
 
 // Register language
 SyntaxHighlighter.registerLanguage('python', python);

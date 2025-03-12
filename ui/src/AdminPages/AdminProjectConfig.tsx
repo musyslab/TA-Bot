@@ -1,13 +1,16 @@
-
-import 'semantic-ui-css/semantic.min.css'
+import 'semantic-ui-css/semantic.min.css';
 import MenuComponent from '../components/MenuComponent';
 import AdminProjectConfigComponent from '../components/AdminProjectConfigComponent';
-import { Helmet } from "react-helmet-async";
+import { Helmet } from "react-helmet";
 import { useParams } from 'react-router-dom';
+import React from 'react';
+
+// Cast Helmet to `any` to avoid TypeScript issue
+const SafeHelmet: any = Helmet;
 
 interface AdminProjectConfigProps extends Record<string, string | undefined> {
-    id: string
-    class_id : string  
+    id: string;
+    class_id: string;  
 }
 
 const AdminProjectConfig = () => {
@@ -18,15 +21,22 @@ const AdminProjectConfig = () => {
 
    return (
         <div style={{height: "100%"}}>
-            <Helmet>
+            <SafeHelmet>
                 <title>[Admin] Projects | TA-Bot</title>
-            </Helmet>
-            <MenuComponent showUpload={false} showAdminUpload={true} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} ></MenuComponent>
+            </SafeHelmet>
+            <MenuComponent 
+                showUpload={false} 
+                showAdminUpload={true} 
+                showHelp={false} 
+                showCreate={false} 
+                showLast={false} 
+                showReviewButton={false} 
+            />
             <div style={{height: "100%"}} className="main-grid">
-                <AdminProjectConfigComponent id={project_id} class_id={classId}  ></AdminProjectConfigComponent>
+                <AdminProjectConfigComponent id={project_id} class_id={classId} />
             </div>
         </div>
-   )
-}
+   );
+};
 
 export default AdminProjectConfig;

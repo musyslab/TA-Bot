@@ -4,6 +4,7 @@ import { Menu, Container } from 'semantic-ui-react';
 import { StyledIcon } from '../styled-components/StyledIcon';
 import { Button, Popup, Dropdown } from 'semantic-ui-react';
 import axios from 'axios';
+import React from 'react';
 
 interface MenuComponentProps {
     showUpload: boolean,
