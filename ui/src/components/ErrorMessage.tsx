@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css'
 import { Message } from 'semantic-ui-react'
 

@@ -1,4 +1,4 @@
-import { Component, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import 'semantic-ui-css/semantic.min.css'
 import { Button, Form, Grid, Segment, Dimmer, Header, Icon, Table } from 'semantic-ui-react'
 import axios from 'axios';
@@ -7,12 +7,15 @@ import React from 'react'
 import { SemanticCOLORS } from 'semantic-ui-react'
 import ErrorMessage from '../components/ErrorMessage';
 import Countdown from 'react-countdown';
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 import { useParams } from 'react-router-dom';
 
-interface UploadProps {
+
+interface UploadProps extends Record<string, string | undefined> {
     class_id?: string
 }
+
+
 
 interface UploadPageState {
     file?: File,

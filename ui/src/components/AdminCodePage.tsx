@@ -11,11 +11,11 @@ class AdminCodePageComponent extends Component<{}, {}> {
     render() {
         const panes1 = [
             { menuItem: 'main.py', render: () => <Tab.Pane>
-                <div id="code-container">
+                {/* <div id="code-container">
                     <SyntaxHighlighter language="python" style={vs} showLineNumbers={true} >
                         print("hello world")
                     </SyntaxHighlighter>
-                </div>
+                </div> */}
             </Tab.Pane> },
             { menuItem: 'test.py', render: () => <Tab.Pane>test.py</Tab.Pane> }
         ]

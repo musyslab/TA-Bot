@@ -3,7 +3,7 @@ import 'semantic-ui-css/semantic.min.css'
 import { Grid } from 'semantic-ui-react'
 import MenuComponent from '../components/MenuComponent';
 import AdminSettingsPageComponent from '../components/AdminSettingsPageComponent';
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 
 class AdminSettingsPage extends Component<{}, {}> {
 

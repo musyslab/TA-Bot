@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import '../css/AdminComponent.scss'
 import { Grid } from 'semantic-ui-react'
 import MenuComponent from '../components/MenuComponent';
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 
 class Row {
     constructor() {

@@ -1,27 +1,28 @@
 import axios from 'axios';
 import { Component, SyntheticEvent } from 'react';
-import SyntaxHighlighter from 'react-syntax-highlighter';
-import { vs, vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
+import python from 'react-syntax-highlighter/dist/esm/languages/hljs/python';
+import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import 'semantic-ui-css/semantic.min.css';
-import { Dropdown, DropdownProps, Form, Icon } from  'semantic-ui-react';
+import { Dropdown, DropdownProps, Form, Icon } from 'semantic-ui-react';
 import '../css/codeHelpComponent.scss';
-import { useEffect, useState } from "react";
-import { format } from 'path';
+
+// Register language
+SyntaxHighlighter.registerLanguage('python', python);
 
 interface CodeHelpComponentProps {
     codedata: string,
 }
 interface CodeHelpComponentState {
-    api_response:string,
+    api_response: string,
     question: string,
-    api_visible:boolean,
+    api_visible: boolean,
     isLoading: boolean,
     bad_response: boolean,
     eq_check: boolean,
-    q1:string,
-    q2:string,
-    q3:string;
-
+    q1: string,
+    q2: string,
+    q3: string;
 }
 
 const sliderOptions = [
@@ -52,7 +53,7 @@ const sliderOptions = [
     },
 ]
 
-class CodeHelpComponent extends Component<CodeHelpComponentProps, CodeHelpComponentState, {}> {
+class CodeHelpComponent extends Component<CodeHelpComponentProps, CodeHelpComponentState> {
     constructor(props: CodeHelpComponentProps) {
         super(props);
         this.state = {
@@ -62,10 +63,9 @@ class CodeHelpComponent extends Component<CodeHelpComponentProps, CodeHelpCompon
             isLoading: false,
             bad_response: false,
             eq_check: true,
-            q1:"",
-            q2:"7",
-            q3:""
-            
+            q1: "",
+            q2: "7",
+            q3: ""
         }
         this.handleSubmit = this.handleSubmit.bind(this);
         this.handleChange = this.handleChange.bind(this);
@@ -90,75 +90,80 @@ class CodeHelpComponent extends Component<CodeHelpComponentProps, CodeHelpCompon
             }
         })
         .catch(err => {
-           
+           // Error handling
         });
     }
 
     handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         this.setState({ question: event.target.value });
     }
+    
     handleq1Change = (event: SyntheticEvent<HTMLElement, Event>, data: DropdownProps) => {
         this.setState({ q1: data.value as string });
     } 
+    
     handleq2Change = (event: SyntheticEvent<HTMLElement, Event>, data: DropdownProps) => {
         this.setState({ q2: data.value as string });
     } 
-    handleq3Change =(event: React.ChangeEvent<HTMLInputElement>) => {
+    
+    handleq3Change = (event: React.ChangeEvent<HTMLInputElement>) => {
         this.setState({ q3: event.target.value });
     }
 
-    handleFormSubmit(){
-        this.setState({isLoading:true});
+    handleFormSubmit() {
+        this.setState({isLoading: true});
         axios.get(process.env.REACT_APP_BASE_API_URL + `/submissions/chatform?q1=${this.state.q1}&q2=${this.state.q2}&q3=${this.state.q3}`, {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` 
             }
-          })
-          .then(res => {    
-            this.setState({isLoading:false});
+        })
+        .then(res => {    
+            this.setState({isLoading: false});
             if(!this.state.bad_response){
                 window.location.reload();
             }
-          })
+        });
     }
 
-    handleSubmit () {
-        this.setState({isLoading:true});
+    handleSubmit() {
+        this.setState({isLoading: true});
         axios.get(process.env.REACT_APP_BASE_API_URL + `/submissions/chatupload?code=${this.props.codedata}&question=${this.state.question}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` 
           }
         })
         .then(res => {    
-          var role=parseInt(res.data);
           if(res.data.includes("TA-BOT")){
-            this.setState({ q1: "11" as string });
-            this.setState({ q2: "11" as string });
-            this.setState({ q3: "INVALID" as string });
+            this.setState({ q1: "11" });
+            this.setState({ q2: "11" });
+            this.setState({ q3: "INVALID" });
             this.setState({api_response: res.data});
             this.setState({api_visible: true});
             this.setState({bad_response: false}); //setting this to temp as a testing outcome
             this.handleFormSubmit();
-            this.setState({isLoading:false});
+            this.setState({isLoading: false});
           }
-          else{
-          this.setState({api_response: res.data})
-          this.setState({api_visible: true});
-          this.setState({isLoading:false});
+          else {
+            this.setState({api_response: res.data});
+            this.setState({api_visible: true});
+            this.setState({isLoading: false});
           }
         })
         .catch(err => {
             console.log(this.state.question);
         });
-      }
+    }
 
     render() {
+        // Workaround to fix TypeScript error with SyntaxHighlighter
+        const HighlighterComponent = SyntaxHighlighter as any;
+        
         return (
             <div className="full-height">
                 <div id="code-container" className="code-container highlight">
-                    <SyntaxHighlighter language="python" style={vs2015} showLineNumbers={true} >
+                    <HighlighterComponent language="python" style={vs2015} showLineNumbers={true}>
                         {this.props.codedata}
-                    </SyntaxHighlighter>
+                    </HighlighterComponent>
                 </div>
                 { this.state.api_visible ? 
                 <div>
@@ -269,8 +274,6 @@ class CodeHelpComponent extends Component<CodeHelpComponentProps, CodeHelpCompon
             </div>
         );
     }
-    
-    
 }
 
 export default CodeHelpComponent;

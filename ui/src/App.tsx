@@ -43,26 +43,27 @@ class App extends Component {
         <BrowserRouter>
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
-                <Route exact path="/" element={<LandingPage />} />
+                <Route path="/" element={<LandingPage />} />
                 <Route element={<ProtectedRoute />}>
-                    <Route exact path="/submissions" element={<PastSubmissionPage />} />
-                    <Route exact path="/class/:class_id/upload" element={<UploadPage />} />
-                    <Route exact path="/class/:class_id/code/:id?" element={<CodePage />} />
-                    <Route exact path="/class/classes" element={<ClassSelectionPage />} />
-                    <Route exact path="/admin/classes" element={<AdminLanding />} />
-                    <Route exact path="/admin/TaLanding" element={<TaLanding />} />
-                    <Route exact path="/admin/projects/:id" element={<AdminProject />} />
-                    <Route exact path="/admin/project/:id" element={<ProjectBreakdown />} />
-                    <Route exact path="/admin/upload" element={<AdminUpload />} />
-                    <Route exact path="/admin/settings" element={<AdminSettingsPage />} />
-                    <Route exact path="/admin/project/edit/:class_id/:id" element={<AdminProjectConfig />} />
-                    <Route exact path= "/class/:class_id/codeHelp" element={<CodeHelpPage />} />
-                    <Route exact path= "/class/OfficeHours" element={<OfficeHoursPage />} />
-                    <Route exact path= "/user/createAccount" element={<CreateAccountPage />} />
+                <Route path="/submissions" element={<PastSubmissionPage />} />
+                <Route path="/class/:class_id/upload" element={<UploadPage />} />
+                <Route path="/class/:class_id/code/:id?" element={<CodePage />} />
+                <Route path="/class/classes" element={<ClassSelectionPage />} />
+                <Route path="/admin/classes" element={<AdminLanding />} />
+                <Route path="/admin/TaLanding" element={<TaLanding />} />
+                <Route path="/admin/projects/:id" element={<AdminProject />} />
+                <Route path="/admin/project/:id" element={<ProjectBreakdown />} />
+                <Route path="/admin/upload" element={<AdminUpload />} />
+                <Route path="/admin/settings" element={<AdminSettingsPage />} />
+                <Route path="/admin/project/edit/:class_id/:id" element={<AdminProjectConfig />} />
+                <Route path="/class/:class_id/codeHelp" element={<CodeHelpPage />} />
+                <Route path="/class/OfficeHours" element={<OfficeHoursPage />} />
+                <Route path="/user/createAccount" element={<CreateAccountPage />} />
                 </Route>
                 <Route path="*" element={<NotFoundComponent />} />
             </Routes>
         </BrowserRouter>
+
     );
   }
 }

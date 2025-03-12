@@ -1,4 +1,4 @@
-import React, { Component, PureComponent } from 'react';
+import { Component, PureComponent } from 'react';
 import 'semantic-ui-css/semantic.min.css'
 import { Button, Dimmer, Header, Icon, Loader, Tab } from 'semantic-ui-react'
 import '../css/TestResultComponent.scss';
@@ -6,7 +6,6 @@ import { StyledIcon } from '../styled-components/StyledIcon';
 import Split from 'react-split';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer';
 import axios from 'axios';
-import internal from 'stream';
 
 interface TestResultComponentProps {
     codedata: string,

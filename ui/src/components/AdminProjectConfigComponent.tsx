@@ -1,15 +1,10 @@
-import { Component, useEffect, useState, useReducer } from 'react';
-import { Image, Grid, Tab, Dropdown, Form, Input, Radio, Button, Icon, TextArea, Label, Checkbox, Table, Header, Segment, Popup } from 'semantic-ui-react'
-import { Helmet } from 'react-helmet';
+import {  useEffect, useState  } from 'react';
+import {  Grid, Tab, Form, Input, Radio, Button,  TextArea,  Checkbox,  Segment, Popup } from 'semantic-ui-react'
+
 import 'semantic-ui-css/semantic.min.css';
-import { DropdownItemProps, } from 'semantic-ui-react';
-import MenuComponent from './MenuComponent';
-import codeimg from '../codeex.png'
+
 import axios from 'axios';
-import { textSpanEnd } from 'typescript';
-import AdminProjectSettingsComponent from './AdminProjectSettingsComponent';
-import { useParams } from 'react-router-dom';
-import { StyledIcon } from '../styled-components/StyledIcon';
+
 import { render } from '@testing-library/react';
 
 interface AdminProjectConfigProps {
@@ -43,7 +38,6 @@ class Testcase {
 const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [CreateNewState, setCreateNewState] = useState<boolean>();
     const [testcases, setTestcases] = useState<Array<Testcase>>([]);
-    const [checked, setChecked] = useState<string>("Level 1");
     const [ProjectName,setProjectName] = useState<string>("");
     const [ProjectStartDate,setProjectStartDate] = useState<string>("");
     const [ProjectEndDate,setProjectEndDate] = useState<string>("");
@@ -193,19 +187,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         }
     }
 
-    function handleOutputChange(testcase_id:number, output_data: string){
-        let new_testcases = [...testcases];
-
-        for (var i = 0; i < new_testcases.length; i++) {
-            if (new_testcases[i].id === testcase_id) {
-                new_testcases[i].output = output_data;
-                setTestcases(new_testcases);
-                break;
-            }
-        }
-    }
-
-
      
     function buttonhandleTrashClick(testcase: number) {
         //loop through testcase and return the one with the id
@@ -229,11 +210,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         }).catch(function (error) {
             console.log(error);
         });
-    }
-
-    function handlesubmit(){
-        console.log(ProjectStartDate);
-        console.log(ProjectEndDate);
     }
 
     function reloadtests(){
@@ -627,7 +603,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                             value={testcase.output}
                                             style={testcase.output === "" ? {backgroundColor: "lightgray"} : {}}
                                             readOnly={true}
-                                            //onChange={(ev: React.ChangeEvent<HTMLInputElement>) => handleOutputChange(testcase.id, ev.target.value)}
                                         >
                                         </Form.Field>
                                         <Form.Field

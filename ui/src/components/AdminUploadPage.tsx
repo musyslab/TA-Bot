@@ -1,4 +1,4 @@
-import { Component, FormEvent, SyntheticEvent } from 'react';
+import { Component, SyntheticEvent } from 'react';
 import 'semantic-ui-css/semantic.min.css'
 import '../css/AdminComponent.scss'
 import { Button, Dropdown, DropdownProps, Form, Segment } from 'semantic-ui-react';
