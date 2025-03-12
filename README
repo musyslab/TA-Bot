@@ -9,7 +9,6 @@ Sorry about the brevity of this ReadMe for now, but there will be more to come i
 :rocket: Steps to Running the TA-Bot Docker Development Environment:
 
 1. Clone the repository.
-2. In the main directory run "git submodule update --init --recursive"
 2. Navigate to the /ui directory.
 3. Run yarn install.
 4. Download and install Docker.
@@ -18,7 +17,7 @@ Note for WSL Users: To enable port forwarding from the WSL environment to your l
 Note: Make sure to edit the shell script to include 3000
 
 
-5. Run docker compose up from the main directory.
+5. Run `docker compose up` from the main directory.
 
 The Development environment should now be up on localhost:3000
 
