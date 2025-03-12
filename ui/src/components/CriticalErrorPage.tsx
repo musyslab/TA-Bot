@@ -1,5 +1,5 @@
 import { Component } from 'react';
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 import 'semantic-ui-css/semantic.min.css';
 import { Grid } from 'semantic-ui-react';
 import MenuComponent from './MenuComponent';

@@ -1,12 +1,11 @@
-import { Component } from 'react';
+
 import 'semantic-ui-css/semantic.min.css'
-import { Grid } from 'semantic-ui-react'
 import MenuComponent from '../components/MenuComponent';
 import AdminProjectConfigComponent from '../components/AdminProjectConfigComponent';
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 import { useParams } from 'react-router-dom';
 
-interface AdminProjectConfigProps {
+interface AdminProjectConfigProps extends Record<string, string | undefined> {
     id: string
     class_id : string  
 }
@@ -14,8 +13,8 @@ interface AdminProjectConfigProps {
 const AdminProjectConfig = () => {
 
     let { class_id, id } = useParams<AdminProjectConfigProps>();
-    var project_id = parseInt(id);
-    var classId = parseInt(class_id);
+    var project_id = parseInt(id || '0');
+    var classId = parseInt(class_id || '0');
 
    return (
         <div style={{height: "100%"}}>

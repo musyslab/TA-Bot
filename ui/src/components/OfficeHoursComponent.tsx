@@ -1,10 +1,7 @@
-import React, { Component, SyntheticEvent } from 'react';
+import { Component, SyntheticEvent } from 'react';
 import 'semantic-ui-css/semantic.min.css'
-import { Tab, Icon, Table, Form, TextArea, Dropdown, DropdownProps, Button, Feed, Header, ButtonOr, Modal, Input, Radio, Segment, Checkbox, Label, Grid, StepGroup, StepContent, StepDescription, Step, StepTitle } from 'semantic-ui-react'
-import { StyledIcon } from '../styled-components/StyledIcon';
-import Split from 'react-split';
-import SyntaxHighlighter from 'react-syntax-highlighter/dist/cjs/prism';
-import { vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { Tab,Icon,Table,Form, TextArea, Dropdown, DropdownProps, Button } from 'semantic-ui-react'
+
 import axios from 'axios';
 import codeimg from '../codeex.png'
 import AceEditor from 'react-ace';

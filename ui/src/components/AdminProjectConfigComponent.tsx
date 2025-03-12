@@ -1,15 +1,10 @@
-import { Component, useEffect, useState, useReducer } from 'react';
-import { Image, Grid, Tab, Dropdown, Form, Input, Radio, Button, Icon, TextArea, Label, Checkbox, Table, Header, Segment, Popup, DropdownProps, List, Modal } from 'semantic-ui-react'
-import { Helmet } from 'react-helmet';
+import {  useEffect, useState  } from 'react';
+import {  Grid, Tab, Form, Input, Radio, Button,  TextArea,  Checkbox,  Segment, Popup } from 'semantic-ui-react'
+
 import 'semantic-ui-css/semantic.min.css';
-import { DropdownItemProps, } from 'semantic-ui-react';
-import MenuComponent from './MenuComponent';
-import codeimg from '../codeex.png'
+
 import axios from 'axios';
-import { textSpanEnd } from 'typescript';
-import AdminProjectSettingsComponent from './AdminProjectSettingsComponent';
-import { useParams } from 'react-router-dom';
-import { StyledIcon } from '../styled-components/StyledIcon';
+
 import { render } from '@testing-library/react';
 
 interface AdminProjectConfigProps {
@@ -45,12 +40,11 @@ class Testcase {
 const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [CreateNewState, setCreateNewState] = useState<boolean>();
     const [testcases, setTestcases] = useState<Array<Testcase>>([]);
-    const [checked, setChecked] = useState<string>("Level 1");
-    const [ProjectName, setProjectName] = useState<string>("");
-    const [ProjectStartDate, setProjectStartDate] = useState<string>("");
-    const [ProjectEndDate, setProjectEndDate] = useState<string>("");
-    const [ProjectLanguage, setProjectLanguage] = useState<string>("");
-    const [SubmitButton, setSubmitButton] = useState<string>("Create new assignment");
+    const [ProjectName,setProjectName] = useState<string>("");
+    const [ProjectStartDate,setProjectStartDate] = useState<string>("");
+    const [ProjectEndDate,setProjectEndDate] = useState<string>("");
+    const [ProjectLanguage,setProjectLanguage] = useState<string>("");
+    const [SubmitButton,setSubmitButton] = useState<string>("Create new assignment");
     const [SubmitJSON, setSubmitJSON] = useState<string>("Submit .JSON file");
     const [getJSON, setGetJSON] = useState<string>("Export test cases");
     const [File, setFile] = useState<File>();
@@ -204,20 +198,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         }
     }
 
-    function handleOutputChange(testcase_id: number, output_data: string) {
-        let new_testcases = [...testcases];
-
-        for (var i = 0; i < new_testcases.length; i++) {
-            if (new_testcases[i].id === testcase_id) {
-                new_testcases[i].output = output_data;
-                setTestcases(new_testcases);
-                break;
-            }
-        }
-    }
-
-
-
+     
     function buttonhandleTrashClick(testcase: number) {
         //loop through testcase and return the one with the id
         var test: Testcase = new Testcase();
@@ -242,7 +223,8 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         });
         setModalOpen(false);
     }
-    function reloadtests() {
+
+    function reloadtests(){
         axios.get(process.env.REACT_APP_BASE_API_URL + `/projects/get_testcases?id=${props.id}`, {
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
@@ -692,50 +674,122 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                             </Tab.Pane>
                     },
                     {
-                        menuItem: {
-                            key: 'testcases',
-                            icon: 'clipboard check',
-                            content: 'Test Cases',
-                            style: {
-                                color: '#007bff',
-                                fontWeight: 'bold',
-                                fontSize: '1.2em',
-                                padding: '10px 20px',
-                                borderRadius: '5px',
-                                transition: 'background-color 0.3s ease',
-                                ':hover': {
-                                    backgroundColor: '#f5f5f5'
-                                }
-                            }
-                        }, render: () =>
-                            <Tab.Pane>
-                                <Form
-                                    style={{
-                                        fontFamily: 'Arial, sans-serif',
-                                        backgroundColor: '#f4f4f4',
-                                        borderRadius: '10px',
-                                        padding: '20px',
-                                        boxShadow: '0px 0px 10px 2px rgba(0,0,0,0.1)'
-                                    }}
-                                >
-                                    <h1 style={{ borderBottom: '1px solid #ddd', fontSize: '1.5em', padding: '15px' }}>Level 1:</h1>
-                                    {testcases.map(testcase => {
-                                        if (testcase.levelname === 'Level 1') {
-                                            return (
-                                                <Button
-                                                    content={testcase.name}
-                                                    onClick={() => handleOpenModal(testcase.id)}
-                                                    style={{ marginRight: '10px', backgroundColor: '#007bff', color: 'white', borderRadius: '5px' }}
-                                                />
-                                            );
-                                        }
-                                    })}
-                                    <Button
-                                        color='green'
-                                        icon='plus square'
-                                        onClick={() => handleOpenModal(-1)}
-                                        style={{ backgroundColor: '#28a745', color: 'white', borderRadius: '5px' }}
-                                    />
+                        menuItem: { key: 'testcases', icon: 'clipboard check', content: 'Test Cases' }, render: () => 
+                        <Tab.Pane>
+                            <Form>
+                            {testcases.map(testcase => {
+                                return (
+                                    <Form.Group inline>
+                                        <Form.Field
+                                            control={Input}
+                                            label='Test Case Name'
+                                            placeholder="Please Enter Name"
+                                            value={testcase.name}
+                                            onChange={(ev: React.ChangeEvent<HTMLInputElement>) => handleNameChange(testcase.id, ev.target.value)}
+                                        >
+                                        </Form.Field>
+                                        {/*<h5 style={{ height: '3.5vh' }}>Input:  </h5>*/}
+                                        <Form.Field
+                                            control={TextArea}
+                                            label='Input'
+                                            rows={1}
+                                            placeholder="Please Enter Input"
+                                            value={testcase.input}
+                                            onChange={(ev: React.ChangeEvent<HTMLInputElement>) => handleInputChange(testcase.id, ev.target.value)}
+                                        >
+                                        </Form.Field>
+                                        <Form.Field
+                                            control={TextArea}
+                                            label='Output'
+                                            rows={1}
+                                            placeholder="Add test case to see output"
+                                            value={testcase.output}
+                                            style={testcase.output === "" ? {backgroundColor: "lightgray"} : {}}
+                                            readOnly={true}
+                                        >
+                                        </Form.Field>
+                                        <Form.Field
+                                            control={Input}
+                                            label='Description'
+                                            placeholder="Please Enter Description"
+                                            value={testcase.description}
+                                            onChange={(ev: React.ChangeEvent<HTMLInputElement>) => handleDescriptionChange(testcase.id, ev.target.value)}
+                                        />
+                                        <Form.Field
+                                        control={Checkbox}
+                                        name= {testcase.id  + "RadioGroup4"}
+                                        label='Hidden'
+                                        checked={testcase.isHidden}
+                                        onChange={(ev: React.ChangeEvent<HTMLInputElement>) => handleHiddenChange(testcase.id, true)}
+                                        />
+                                        <Form.Group inline>
+                                            <Form.Field
+                                                control={Radio}
+                                                label='Level 1'
+                                                name= {testcase.id  + "RadioGroup"}
+                                                value='Level 1'
+                                                checked={testcase.levelname === "Level 1"}
+                                                onChange={(ev: React.ChangeEvent<HTMLInputElement>) => handleLevelChange(testcase.id, 'Level 1')}
+                                            />
+                                            <Form.Field
+                                                control={Radio}
+                                                label='Level 2'
+                                                name={testcase.id  + "RadioGroup2"}
+                                                value='Level 2'
+                                                checked={testcase.levelname === 'Level 2'}                                             
+                                                onChange={(ev: React.ChangeEvent<HTMLInputElement>) => handleLevelChange(testcase.id, 'Level 2')}
+                                            />
+                                            <Form.Field
+                                                control={Radio}
+                                                label='Level 3'
+                                                name={testcase.id  + "RadioGroup3"}
+                                                value='Level 3'
+                                                checked={testcase.levelname === 'Level 3'}                                              
+                                                onChange={(ev: React.ChangeEvent<HTMLInputElement>) => handleLevelChange(testcase.id, 'Level 3')}
+                                            />
+                                        </Form.Group>
+                                        <Popup
+                                           content={
+                                            <Form>
+                                              <Form.Field>
+                                                <label>The filename must align with the expected input for the solution code.</label>
+                                                <input type="file" required onChange={handleAdditionalFileChange} />
+                                              </Form.Field>
+                                            </Form>
+                                          }
+                                            on='click'
+                                            pinned
+                                            trigger={<Button icon='file' content="Select optional additional file" />}
+                                        />
+                                        <Form.Button onClick={() => buttonhandleClick(testcase.id)}>Submit testcase</Form.Button>
+                                        <Form.Button onClick={() => buttonhandleTrashClick(testcase.id)}>Remove Test Case</Form.Button>
+                                    </Form.Group>
+                                );  
+                            })}
+                            </Form>
+                            <Segment stacked>
+                                    <h1>Upload Test Cases</h1>
+                                    <Form.Input type="file" fluid required={true} onChange={handleFileChange} />
+                                    <br></br>
+                            </Segment>
+                            <Button.Group>
+                            <Form.Button onClick={handleJsonSubmit}>{SubmitJSON}</Form.Button>
+                            <div style={{ marginLeft: '10px', marginRight: '10px' }}></div>
+                            <Form.Button color={'green'} onClick={get_testcase_json}>{getJSON}</Form.Button>
+                            </Button.Group>
+                            <Grid>
+                            <Grid.Row>
+                            <Grid.Column width={8}>
+                                <h2>Level 1: Base Cases (Simple Cases)</h2>
+                                <ul>
+                                <li>Test basic functionality with simple inputs.</li>
+                                </ul>
+                                <h2>Level 2: Main Functionality Cases</h2>
+                                <ul>
+                                <li>Test core features and main tasks.</li>
+                                <li>Use a variety of inputs, positive/negative scenarios.</li>
+                                </ul>
+                            </Grid.Column>
 
                                     <h1 style={{ borderBottom: '1px solid #ddd', fontSize: '1.5em', padding: '15px' }}>Level 2:</h1>
                                     {testcases.map(testcase => {

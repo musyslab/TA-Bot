@@ -1,31 +1,19 @@
-import { Component, useEffect, useState, useReducer, FormEvent, SetStateAction } from 'react';
-import { Image, Grid, Button, Form, } from 'semantic-ui-react'
-import { Helmet } from 'react-helmet';
+import { useEffect, useState } from 'react';
+import { Image,Grid, Button, Form, } from 'semantic-ui-react'
+
 import 'semantic-ui-css/semantic.min.css';
-import { DropdownItemProps } from 'semantic-ui-react';
-import MenuComponent from './MenuComponent';
-import NewUserModal from '../components/NewUserModal';
+
 import codeimg from '../codeex.png'
 import axios from 'axios';
 
-interface DropDownOption {
-  key: number,
-  value: number,
-  text: string
-}
-
-var Coptions = Array<DropDownOption>();
-var LectureOptions = Array<DropDownOption>();
-var Loptions = Array<DropDownOption>();
-
 const ClassSelectionPageComponent = () => {
 
-  const [studentClassNames, setstudentClassNames] = useState<Array<string>>([]);
-  const [studentClassNumbers, setstudentClassNumbers] = useState<Array<string>>([]);
-  const [addClass, setaddClass] = useState<boolean>(false);
-  const [ClassId, setClassId] = useState<String>("");
-  const [LectureId, setLectureId] = useState<String>("");
-  const [LabId, setLabId] = useState<String>("");
+    const [studentClassNames,setstudentClassNames] = useState<Array<string>>([]);
+    const [studentClassNumbers,setstudentClassNumbers] = useState<Array<string>>([]);
+    const [addClass,setaddClass] = useState<boolean>(false);
+    const [ClassId, setClassId] = useState<String>("");
+    const [LectureId, setLectureId] = useState<String>("");
+    const [LabId, setLabId] = useState<String>("");
 
 
   const handleAddClassClick = () => {

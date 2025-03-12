@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css';
 import { Menu, Container } from 'semantic-ui-react';
 import { StyledIcon } from '../styled-components/StyledIcon';

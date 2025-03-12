@@ -1,4 +1,4 @@
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 import { useParams } from 'react-router-dom';
 import 'semantic-ui-css/semantic.min.css'
 import { Grid } from 'semantic-ui-react'
@@ -6,13 +6,14 @@ import MenuComponent from '../components/MenuComponent';
 import StudentList from '../components/StudentList';
 import '../css/AdminComponent.scss'
 
-interface ProjectBreakdownProps {
+interface ProjectBreakdownProps extends Record<string, string | undefined> {
     id: string  
 }
 
+
 const ProjectBreakdown = () => {
     let { id } = useParams<ProjectBreakdownProps>();
-    var project_id = parseInt(id);
+    var project_id = id ? parseInt(id) : 0;
 
     return (
         <div>

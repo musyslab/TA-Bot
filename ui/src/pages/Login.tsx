@@ -6,7 +6,7 @@ import ErrorMessage from '../components/ErrorMessage';
 import NewUserModal from '../components/NewUserModal';
 import { Navigate  } from 'react-router-dom'
 import { Button, Form, Grid, Header, Message, Image, Segment } from 'semantic-ui-react'
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 
 interface LoginPageState {
   isLoggedIn: boolean,

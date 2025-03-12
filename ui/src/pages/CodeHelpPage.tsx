@@ -1,20 +1,17 @@
 import { useEffect, useState } from 'react';
 import 'semantic-ui-css/semantic.min.css';
 import '../css/CodePage.scss';
-import CodeComponent from '../components/CodeComponent';
-import TestResultsComponent from '../components/TestResultsComponent';
 import CodeHelpComponent from '../components/CodeHelpComponent';
 import MenuComponent from '../components/MenuComponent';
 import axios from 'axios';
 import { useParams } from 'react-router-dom';
 import Split from 'react-split';
-import {Helmet} from "react-helmet";
-
+import { Helmet } from "react-helmet-async";
 const defaultpagenumber=-1;
 
-interface CodePageProps {
-    id?: string
-    class_id?: string
+interface CodePageProps extends Record<string, string | undefined> {
+    id?: string;
+    class_id?: string;
 }
 
 interface JsonTestResponseBody {

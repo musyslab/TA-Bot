@@ -3,7 +3,7 @@ import 'semantic-ui-css/semantic.min.css'
 import { Grid } from 'semantic-ui-react'
 import MenuComponent from '../components/MenuComponent';
 import '../css/AdminComponent.scss'
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 import TaLandingComponent from '../components/TaLandingComponent';
 
 class TaLanding extends Component<{}, {}> {

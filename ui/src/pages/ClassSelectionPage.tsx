@@ -1,6 +1,6 @@
 import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css';
-import { Helmet } from 'react-helmet';
+import { Helmet } from "react-helmet-async";
 import MenuComponent from '../components/MenuComponent';
 import ClassSelectionPageComponent from '../components/ClassSelectionPageComponent';
 

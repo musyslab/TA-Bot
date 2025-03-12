@@ -1,30 +1,42 @@
 import { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css'
-import { Grid } from 'semantic-ui-react'
+import 'semantic-ui-css/semantic.min.css';
+import { Grid } from 'semantic-ui-react';
 import MenuComponent from '../components/MenuComponent';
-import '../css/AdminComponent.scss'
-import { Helmet } from 'react-helmet';
+import '../css/AdminComponent.scss';
+import { Helmet } from "react-helmet-async";
 import AdminComponent from '../components/AdminComponent';
-import { Route, RouteComponentProps } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 
-interface AdminProjectProps extends RouteComponentProps<{ id: string }> {}
+function withParams(Component: any) {
+  return (props: any) => {
+    const params = useParams();
+    return <Component {...props} params={params} />;
+  };
+}
+
+interface AdminProjectProps {
+  params?: {
+    id: string;
+  };
+}
 
 class AdminProject extends Component<AdminProjectProps, {}> {
+  render() {
+    const id = this.props.params?.id;
 
-    render() {
-        return (
-        <div>
-            <div>hi</div>
-            <Helmet>
-                <title>[Admin] Projects | TA-Bot</title>
-            </Helmet>
-            <MenuComponent showUpload={false} showAdminUpload={true} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} ></MenuComponent>
-            <Grid className="main-grid">
-            <Route path="/admin/projects/:id" component={AdminComponent} />
-            </Grid>
-        </div>
-        );
+    return (
+      <div>
+        <div>hi</div>
+        <Helmet>
+          <title>[Admin] Projects | TA-Bot</title>
+        </Helmet>
+        <MenuComponent showUpload={false} showAdminUpload={true} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} ></MenuComponent>
+        <Grid className="main-grid">
+          <AdminComponent id={id!} />
+        </Grid>
+      </div>
+    );
   }
 }
 
-export default AdminProject;
+export default withParams(AdminProject);
