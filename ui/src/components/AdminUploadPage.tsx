@@ -3,6 +3,7 @@ import 'semantic-ui-css/semantic.min.css'
 import '../css/AdminComponent.scss'
 import { Button, Dropdown, DropdownProps, Form, Segment } from 'semantic-ui-react';
 import axios from 'axios';
+import React from 'react';
 
 interface Student {
     name: string,

@@ -5,6 +5,7 @@ import { vs } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import 'semantic-ui-css/semantic.min.css';
 import Split from 'react-split';
 import { Icon } from 'semantic-ui-react';
+import React from 'react';
 
 
 SyntaxHighlighter.registerLanguage('python', python);

@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Card, Image } from 'semantic-ui-react';
 import { Link } from 'react-router-dom';
 import codeimg from '../codeex.png'
+import React from 'react';
 
 interface ClassObject {
     Id: number,
@@ -46,7 +47,8 @@ class AdminComponent extends Component<{}, ClassState> {
                 <h1>Your Classes</h1>
                 <div style={{ textAlign: "center" }}>
                   {this.state.classes.map((classObj: ClassObject) => (
-                    <Link key={classObj.Id} to={`/admin/projects/${classObj.Id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                    
+                    <Link key={classObj.Id} to={`/admin/projects/${classObj.Id}` as string} style={{ textDecoration: "none", color: "inherit" }}>
                     <Card style={{ margin: "3px", width: "200px", display: "inline-block" }}>
                         <Card.Content style={{padding: "5px", textAlign: "center" }}>
                             <Image src={codeimg} />

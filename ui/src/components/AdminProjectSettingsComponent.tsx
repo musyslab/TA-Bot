@@ -1,6 +1,7 @@
 import axios from "axios";
 import { useEffect, useState } from "react";
 import { Form, Input } from "semantic-ui-react";
+import React from 'react';
 
 interface AdminProjectConfigProps {
     id: number

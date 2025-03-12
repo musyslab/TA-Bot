@@ -3,12 +3,13 @@ FROM node:20.11.1
 
 # Enable polling for file changes in Docker
 ENV CHOKIDAR_USEPOLLING=true
+ENV NODE_OPTIONS=--openssl-legacy-provider
 
 # Set working directory
 WORKDIR /app
 
 # Copy package.json and yarn.lock first (to leverage caching)
-COPY package.json yarn.lock .  
+COPY package.json yarn.lock ./
 
 # Install dependencies inside the container
 RUN yarn install --check-files

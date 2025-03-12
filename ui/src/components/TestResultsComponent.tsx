@@ -6,6 +6,7 @@ import { StyledIcon } from '../styled-components/StyledIcon';
 import Split from 'react-split';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer';
 import axios from 'axios';
+import React from 'react';
 
 interface TestResultComponentProps {
     codedata: string,

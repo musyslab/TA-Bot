@@ -3,6 +3,7 @@ import 'semantic-ui-css/semantic.min.css';
 import axios from 'axios';
 import { Table, Button } from 'semantic-ui-react';
 import { Link } from 'react-router-dom';
+import React from 'react';
   
 interface OfficeHoursState {
     question: string;
