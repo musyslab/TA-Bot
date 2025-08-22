@@ -1,42 +1,30 @@
-import 'semantic-ui-css/semantic.min.css';
+import 'semantic-ui-css/semantic.min.css'
 import MenuComponent from '../components/MenuComponent';
 import AdminProjectConfigComponent from '../components/AdminProjectConfigComponent';
-import { Helmet } from "react-helmet";
+import { Helmet } from 'react-helmet';
 import { useParams } from 'react-router-dom';
-import React from 'react';
-
-// Cast Helmet to `any` to avoid TypeScript issue
-const SafeHelmet: any = Helmet;
-
-interface AdminProjectConfigProps extends Record<string, string | undefined> {
-    id: string;
-    class_id: string;  
-}
 
 const AdminProjectConfig = () => {
+    const params = useParams();
 
-    let { class_id, id } = useParams<AdminProjectConfigProps>();
-    var project_id = parseInt(id || '0');
-    var classId = parseInt(class_id || '0');
+    if (params.id === undefined || params.class_id === undefined) {
+        return <div>Error: Missing project or class ID.</div>;
+    }
 
-   return (
-        <div style={{height: "100%"}}>
-            <SafeHelmet>
+    const project_id = parseInt(params.id, 10);
+    const classId = parseInt(params.class_id, 10);
+
+    return (
+        <div style={{ height: "100%" }}>
+            <Helmet>
                 <title>[Admin] Projects | TA-Bot</title>
-            </SafeHelmet>
-            <MenuComponent 
-                showUpload={false} 
-                showAdminUpload={true} 
-                showHelp={false} 
-                showCreate={false} 
-                showLast={false} 
-                showReviewButton={false} 
-            />
-            <div style={{height: "100%"}} className="main-grid">
+            </Helmet>
+            <MenuComponent showUpload={false} showAdminUpload={true} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} />
+            <div style={{ height: "100%" }} className="main-grid">
                 <AdminProjectConfigComponent id={project_id} class_id={classId} />
             </div>
         </div>
-   );
-};
+    );
+}
 
 export default AdminProjectConfig;

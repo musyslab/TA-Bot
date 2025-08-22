@@ -1,13 +1,11 @@
 from collections import defaultdict
 import os
-import openai
 from src.repositories.database import db
-from .models import GPTLogs, SnippetRuns, StudentGrades, StudentQuestions, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, StudentProgress, Users, ChatGPTkeys
+from .models import SnippetRuns, StudentGrades, StudentQuestions, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, StudentProgress, Users
 from sqlalchemy import desc, and_
 from typing import Dict, List, Tuple
 from src.repositories.config_repository import ConfigRepository
 from datetime import datetime, timedelta
-from openai import AsyncOpenAI
 
 class SubmissionRepository():
     def get_submission_by_user_id(self, user_id: int) -> Submissions:
@@ -256,139 +254,6 @@ class SubmissionRepository():
                 submission_counter_dict[sub.User] = 1
         return submission_counter_dict
 
-    def chatGPT_caller(self, submission_id, question_description, student_output, student_code) -> str:
-        openai.api_key = "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"
-        # https://beta.openai.com/docs/models
-        # to find average tokens OpenAI's tiktoken Python library.
-        model_engine = "gpt-3.5-turbo"  # fastest model
-        lines = student_code.strip().split('\n')
-        max_line_number_width = len(str(len(lines)))
-        lines_with_numbers = [f"{i:>{max_line_number_width}} {line}" for i, line in enumerate(lines, start=1)]
-        lined_code = '\n'.join(lines_with_numbers)
-        
-        # Remove all comment lines from the code
-        lines = lined_code.split('\n')
-        lines = [line for line in lines if not line.strip().startswith('#')]
-        lined_code = '\n'.join(lines)
-
-        assignment_prompt = f"""
-        I failed a test case, give me a single succinct bulletpoint on why this might have happened.
-
-        The Linux diff is: {student_output}  
-        A description of the test case is: {question_description}  
-
-        Here is my code
-        {lined_code}"""
-        try:
-            completions = openai.chat.completions.create(
-                model=model_engine,
-                messages=[
-                    {"role": "system", "content": assignment_prompt},
-                ],
-                max_tokens=500,  # Reduce the number of tokens in the response
-                temperature=0.5,
-            )
-
-            # Get the generated response from completions
-            generated_response = completions.choices[0].message.content
-
-            # Save the generated response into the database
-            log = GPTLogs(SubmissionId=submission_id, GPTResponse=generated_response, StudentFeedback=-1, Type=0)
-            db.session.add(log)
-            db.session.commit()
-
-            # Return the generated response if needed (optional)
-            return [generated_response,log.Qid]
-
-        except openai.error.ServiceUnavailableError as e:
-            # Handle the error
-            message = "The server is overloaded or not ready yet."
-            return message
-
-    def chatGPT_explainer(self, submission_id, question_description, student_output) -> str:
-        openai.api_key = "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"
-        # https://beta.openai.com/docs/models
-        # to find average tokens OpenAI's tiktoken Python library.
-        model_engine = "gpt-3.5-turbo"  # fastest model
-        assignment_prompt = f"""
-        Here is my output Linux diff format: {student_output}  
-        A description of the test case is: {question_description}
-
-        Write me a sentance on what the diff is telling me, be specific"""
-        try:
-            completions = openai.chat.completions.create(
-                model=model_engine,
-                messages=[
-                    {"role": "system", "content": assignment_prompt},
-                ],
-                max_tokens=500,  # Reduce the number of tokens in the response
-                temperature=0.5,
-            )
-
-            # Get the generated response from completions
-            generated_response = completions.choices[0].message.content
-            # Save the generated response into the database
-            log = GPTLogs(SubmissionId=submission_id, GPTResponse=generated_response, StudentFeedback=-1,Type=1)
-            db.session.add(log)
-            db.session.commit()
-
-            # Return the generated response if needed (optional)
-            return [generated_response,log.Qid]
-
-        except openai.error.ServiceUnavailableError as e:
-            # Handle the error
-            message = "The server is overloaded or not ready yet."
-            return message
-        
-    def descriptionGPT_caller(self, solutionpath, input, project_id):
-        openai.api_key = "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"
-        solution_code = ""
-        if os.path.isdir(solutionpath):
-            for filename in os.listdir(solutionpath):
-                with open(filename, "r") as f:
-                    solution_code = f.read()
-                break
-        else:
-            with open(solutionpath, 'r') as file:
-                solution_code = file.read()
-        print("solution code is: ", solution_code, flush=True)
-        # https://beta.openai.com/docs/models
-        # to find average tokens OpenAI's tiktoken Python library.
-        model_engine = "gpt-3.5-turbo"  # fastest model
-        assignment_prompt = f"""
-        Please provide a brief, conversational description of what this test case aims to achieve without disclosing the specific input or solution code.
-        Here is the testcase input: {input} and here is the solution code: {solution_code}"""
-        try:
-            completions = openai.chat.completions.create(
-                model=model_engine,
-                messages=[
-                    {"role": "system", "content": assignment_prompt},
-                ],
-                max_tokens=500,  # Reduce the number of tokens in the response
-                temperature=0.5,
-            )
-
-            # Get the generated response from completions
-            generated_response = completions.choices[0].message.content
-            # Save the generated response into the database
-
-            # Return the generated response if needed (optional)
-            log = GPTLogs(SubmissionId=project_id, GPTResponse=generated_response, StudentFeedback=-2,Type=-2)
-            db.session.add(log)
-            db.session.commit()
-
-            return [generated_response]
-
-        except openai.error.ServiceUnavailableError as e:
-            # Handle the error
-            message = "The server is overloaded or not ready yet."
-            return message
-
-    def Update_GPT_Student_Feedback(self,question_id, student_feedback):
-        question = GPTLogs.query.filter(GPTLogs.Qid == question_id).first()
-        question.StudentFeedback =int(student_feedback)
-        db.session.commit()
-        return "ok"
     def Submit_Student_OH_question(self, question, user_id, project_id):
         dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
         student_question = StudentQuestions(StudentQuestionscol=question, StudentId=user_id, dismissed=0, ruling=-1, TimeSubmitted=dt_string, projectId=project_id)
@@ -665,11 +530,11 @@ class SubmissionRepository():
                 for charge in charge_redemptions:
                     #Idenify on what date the charge was redeemed
                     charge_date = charge.RedeemedTime
-                    #Identify how many days have passed since the project start date
+                    # Calculate days passed since project start and clamp to valid tbs_settings index
                     days_passed = (charge_date - project_start_date).days
-                    #If more than 7 days have passed, set the days passed to 7
-                    if days_passed > 7:
-                        days_passed = 7
+                    # ensure days_passed is within [0, len(tbs_settings)-1]
+                    days_passed = max(0, min(days_passed, len(tbs_settings) - 1))
+                    
                     #Get the TBS threshold for the given day
                     tbs_threshold = tbs_settings[days_passed]
                     #Identify the current time, and see if it's greater than the time the charge was redeemed + the TBS threshold for the given day
@@ -682,6 +547,7 @@ class SubmissionRepository():
         except  Exception as e:
             return [0, 0]
         return [charges.BaseCharge, charges.RewardCharge]
+
     def get_time_until_recharge(self, user_id, class_id, project_id):
         project_start_date = Projects.query.filter(Projects.Id == project_id).first().Start
         #Get how many days have passed since the project start date
@@ -712,49 +578,87 @@ class SubmissionRepository():
         time_until_resubmission = charge_redemptions.RedeemedTime + timedelta(minutes=tbs_threshold) - datetime.now()
 
         return time_until_resubmission
+  
     def consume_charge(self, user_id, class_id, project_id, submission_id):
         dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        charge = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
-        
-        
-        
+
+        # Ensure a SubmissionCharges row exists for this user/class.
+        charge = SubmissionCharges.query.filter(
+            and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)
+        ).first()
+        if charge is None:
+            charge = SubmissionCharges(UserId=user_id, ClassId=class_id, BaseCharge=3, RewardCharge=0)
+            db.session.add(charge)
+            db.session.commit()
+
         submission_charge = None
+        visible = 0
 
-        visible = 0 
-        #Determine if a user is in an active office hour session, if so, do not charge a student
-
-        question = StudentQuestions.query.filter(and_(StudentQuestions.StudentId == user_id, StudentQuestions.dismissed == 0)).first()
+        # Determine if a user is in an active office hour session; if so, do not charge the student.
+        question = StudentQuestions.query.filter(
+            and_(StudentQuestions.StudentId == user_id, StudentQuestions.dismissed == 0)
+        ).first()
         print("Question is: ", question, flush=True)
-        time_until_resubmission=""
+
         if question is not None and question.ruling == 1:
-            visible= 1
+            visible = 1
             submission = Submissions.query.filter(Submissions.Id == submission_id).first()
             submission.visible = visible
             db.session.commit()
             return "ok"
-        #Determine if a user has redeemed a reward charge for the given project
-        reward_charge = SubmissionChargeRedeptions.query.filter(and_(SubmissionChargeRedeptions.UserId == user_id, SubmissionChargeRedeptions.ClassId == class_id, SubmissionChargeRedeptions.projectId == project_id, SubmissionChargeRedeptions.Type=="reward")).all()
+
+        # Determine if a user has an unredeemed reward charge for the given project.
+        reward_charge = SubmissionChargeRedeptions.query.filter(
+            and_(
+                SubmissionChargeRedeptions.UserId == user_id,
+                SubmissionChargeRedeptions.ClassId == class_id,
+                SubmissionChargeRedeptions.projectId == project_id,
+                SubmissionChargeRedeptions.Type == "reward",
+            )
+        ).all()
         if len(reward_charge) > 0:
             for reward in reward_charge:
-                if reward.RedeemedTime == None:
+                if reward.RedeemedTime is None:
                     reward.RedeemedTime = dt_string
                     reward.submissionId = submission_id
                     db.session.commit()
-                    visible= 1
+                    visible = 1
                     submission = Submissions.query.filter(Submissions.Id == submission_id).first()
                     submission.visible = visible
                     db.session.commit()
                     return "ok"
-        if charge.BaseCharge > 0:
+
+        # Consume a base charge if available.
+        if charge and charge.BaseCharge > 0:
             charge.BaseCharge -= 1
-            submission_charge = SubmissionChargeRedeptions(UserId=user_id, ClassId=class_id, projectId=project_id, Type="base", ClaimedTime=dt_string, RedeemedTime=dt_string, SubmissionId=submission_id,  Recouped=0)
+            submission_charge = SubmissionChargeRedeptions(
+                UserId=user_id,
+                ClassId=class_id,
+                projectId=project_id,
+                Type="base",
+                ClaimedTime=dt_string,
+                RedeemedTime=dt_string,
+                SubmissionId=submission_id,
+                Recouped=0,
+            )
             db.session.add(submission_charge)
             db.session.commit()
-            visible= 1
-        #Update the visibility of the submission
+            visible = 1
+
+        # Update the visibility of the submission
         submission = Submissions.query.filter(Submissions.Id == submission_id).first()
         submission.visible = visible
         db.session.commit()
+        return "ok"
+
+    # --- submission_repository.py (added helper) ---
+
+    def set_submission_visibility(self, submission_id: int, visible: int = 1):
+        """Set the visibility flag for a submission (1 = visible, 0 = hidden)."""
+        submission = Submissions.query.filter(Submissions.Id == submission_id).first()
+        if submission is not None:
+            submission.visible = int(visible)
+            db.session.commit()
         return "ok"
 
     def Charge_use_accounting(self, submission_id, charge_id):

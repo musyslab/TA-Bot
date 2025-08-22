@@ -11,7 +11,7 @@ applications:
           commands:
             - yarn run build
       artifacts:
-        baseDirectory: build
+        baseDirectory: dist
         files:
           - '**/*'
       cache:

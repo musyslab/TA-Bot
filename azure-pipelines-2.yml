@@ -32,7 +32,7 @@ steps:
   displayName: 'Build website'
 
 - script: |
-    mv ui/build/ $(Build.ArtifactStagingDirectory)
+    mv ui/dist/ $(Build.ArtifactStagingDirectory)
   displayName: 'Upload website'
 
 - task: PublishBuildArtifacts@1

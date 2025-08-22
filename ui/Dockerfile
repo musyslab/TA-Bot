@@ -1,24 +1,22 @@
-# Use official Node.js image
+# ui/Dockerfile.dev
 FROM node:20.11.1
 
-# Enable polling for file changes in Docker
-ENV CHOKIDAR_USEPOLLING=true
+# if you still need legacy OpenSSL…
 ENV NODE_OPTIONS=--openssl-legacy-provider
+# file‐watch polling in Docker
+ENV CHOKIDAR_USEPOLLING=true
 
-# Set working directory
 WORKDIR /app
 
-# Copy package.json and yarn.lock first (to leverage caching)
+# leverage cache
 COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
 
-# Install dependencies inside the container
-RUN yarn install --check-files
-
-# Copy the rest of the application files
+# copy all your source
 COPY . .
 
-# Expose the port the app runs on
+# expose the port you configured in vite.config.js
 EXPOSE 3000
 
-# Start the React app
-CMD ["yarn", "start"]
+# run Vite in host mode so it's accessible outside Docker
+CMD ["yarn", "dev", "--host", "0.0.0.0"]

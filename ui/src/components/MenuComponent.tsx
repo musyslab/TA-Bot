@@ -1,177 +1,115 @@
 import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css';
-import { Menu, Container } from 'semantic-ui-react';
+import { Menu, Container, Icon, Button, Popup } from 'semantic-ui-react';
 import { StyledIcon } from '../styled-components/StyledIcon';
-import { Button, Popup, Dropdown } from 'semantic-ui-react';
 import axios from 'axios';
-import React from 'react';
 
 interface MenuComponentProps {
-    showUpload: boolean,
-    showHelp: boolean,
-    showCreate: boolean,
-    showLast: boolean,
-    showAdminUpload: boolean,
+    showUpload: boolean;
+    showAdminUpload: boolean;
+    showHelp: boolean;
+    showCreate: boolean;
     showReviewButton: boolean;
+    showLast: boolean;
 }
 
-
-class MenuComponent extends Component<MenuComponentProps, {}> {
-
+class MenuComponent extends Component<MenuComponentProps> {
     style = {
-        height: 'auto'
-    }
+        maxWidth: '300px',
+        padding: '1em',
+        lineHeight: '1.5',
+    };
 
-    handleLogout() {
-        localStorage.removeItem("AUTOTA_AUTH_TOKEN");
-        window.location.replace("/login");
-    }
+    // Logout and redirect
+    handleLogout = () => {
+        localStorage.removeItem('AUTOTA_AUTH_TOKEN');
+        window.location.replace('/login');
+    };
 
-    handleHome() {
-        axios.get(process.env.REACT_APP_BASE_API_URL + `/auth/get-role`, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-            }
-        })
-            .then(res => {
-                var role = parseInt(res.data);
-                if (role === 0) {
-                    window.location.replace("/class/classes");
-                }
-                if (role === 1) {
-                    window.location.replace("/admin/classes");
-                }
+    // Home routing based on role
+    handleHome = () => {
+        axios
+            .get(`${import.meta.env.VITE_API_URL}/auth/get-role`, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                },
             })
+            .then((res) => {
+                const role = parseInt(res.data, 10);
+                const path = role === 1 ? '/admin/classes' : '/class/classes';
+                window.location.replace(path);
+            });
+    };
+
+    // Compute dynamic class upload ID (more general: any /class/:id/... path)
+    getClassIdFromUrl(): string | null {
+        const match = window.location.href.match(/\/class\/(\d+)/);
+        return match ? match[1] : null;
     }
 
     render() {
+        const classId = this.getClassIdFromUrl();
+        const recentPath = classId ? `/class/${classId}/code` : '/class/classes';
+        const officeHoursPath = classId ? `/class/OfficeHours/${classId}` : '/class/classes';
+
         return (
-            <Menu fixed='top' inverted>
-                <Container>
-                    <Menu.Item as='a' header onClick={this.handleHome}>
+            <Menu
+                fixed="top"
+                inverted
+                borderless
+                size="huge"
+                style={{
+                    borderRadius: 0,
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                    padding: '0rem 0',
+                    fontSize: '1.125rem',
+                }}
+            >
+                <Container style={{ width: '90%', margin: '0 auto' }}>
+                    <Menu.Item header onClick={this.handleHome} style={{ fontSize: '2rem', fontWeight: 'bold' }}>
                         TA-Bot
                     </Menu.Item>
-                    <div>
-                        {(() => {
-                            if (!this.props.showUpload) {
-                                return (<></>);
-                            } else {
-                                return (
-                                    <Menu.Item><a href="/class/classes">Upload</a></Menu.Item>
-                                );
-                            }
-                        })()}
-                    </div>
-                    <div>
-                        {(() => {
-                            if (!this.props.showAdminUpload) {
-                                return (<></>);
-                            } else {
-                                return (
-                                    <Menu.Item><a href="/admin/upload">Admin Upload</a></Menu.Item>
-                                );
-                            }
-                        })()}
-                    </div>
-                    <div>
-                        {(() => {
-                            if (!this.props.showAdminUpload) {
-                                return (<></>);
-                            } else {
-                                return (
-                                    <Menu.Item><a href="/admin/TaLanding">Office Hours</a></Menu.Item>
-                                );
-                            }
-                        })()}
-                    </div>
-                    <div>
-                        {(() => {
-                            if (!this.props.showLast) {
-                                return (<></>);
-                            } else {
-                                const args = window.location.href;
-                                const regex = /\/class\/(\d+)\/upload/;
-                                const match = args.match(regex);
-                                const extractedValue = match ? match[1] : null;
-                                const path = "/class/" + extractedValue + "/code";
-                                return (
-                                    <Menu.Item><a href={path}>Most Recent Submission</a></Menu.Item>
-                                );
-                            }
-                        })()}
-                    </div>
-                    <div>
-                        {(() => {
-                            if (!this.props.showLast) {
-                                return (<></>);
-                            } else {
-                                return (
-                                    <Menu.Item><a href="/submissions">Previous Submissions</a></Menu.Item>
-                                );
-                            }
-                        })()}
-                    </div>
-                    <div>
-                        {(() => {
-                            if (!this.props.showReviewButton) {
-                                return (<></>);
-                            } else {
-                                return (
-                                    <Menu.Item><a href="/class/1/codeHelp">Code Help</a></Menu.Item>
-                                );
-                            }
-                        })()}
-                    </div>
-                    <Menu.Menu position='right'>
-                        <div>
-                            {(() => {
-                                if (!this.props.showHelp) {
-                                    return (<></>);
-                                } else {
-                                    return (
-                                        <Menu.Item>
-                                            <Popup wide="very" size="tiny" mouseLeaveDelay={1000} trigger={<Button color="black" icon='question circle outline icon' />} style={this.style} >
-                                                <div>
-                                                    <StyledIcon color="orange" name='minus circle' />
-                                                    : This icon represents: Likely code bugs<br />
-                                                    <StyledIcon color="black" name='pencil' />
-                                                    : This icon represents: Programming standard violation<br />
-                                                    <StyledIcon color="blue" name='cogs' />
-                                                    : This icon represents: code refactoring<br />
-                                                    <StyledIcon color="red" name='stop' />
-                                                    : This icon represents: Fatal Code Error<br />
-                                                    <StyledIcon color="yellow" name='exclamation triangle' />
-                                                    : This icon represents: Check syntax<br />
-                                                    <strong>Understanding test case output:<a href="https://unix.stackexchange.com/questions/81998/understanding-of-diff-output" target="_blank" rel="noopener noreferrer">(see more)</a></strong><br />
-                                                    <strong>a: </strong> This stands for adding<br />
-                                                    <strong>c: </strong> This stands for changing<br />
-                                                    <strong>d: </strong> This stands for deletion<br />
-                                                    <strong>&lt;</strong> This is the expected output <br />
-                                                    <strong>&gt;</strong>This is the submitted code output<br />
-                                                </div>
-                                            </Popup>
-                                        </Menu.Item>
-                                    );
-                                }
-                            })()}
-                        </div>
-                        <div>
-                            {(() => {
-                                if (!this.props.showCreate) {
-                                    return (<></>);
-                                } else {
-                                    return (
-                                        //TODO: Move out of menu, add to projects page to allow multi-class
-                                        <Menu.Item><a href="/admin/project/edit/0">Create New Assignment</a></Menu.Item>
-                                    );
-                                }
-                            })()}
-                        </div>
-                        <Dropdown item icon="bars">
-                            <Dropdown.Menu>
-                                <Dropdown.Item icon='sign-out' text='Log out' onClick={this.handleLogout} />
-                            </Dropdown.Menu>
-                        </Dropdown>
+
+                    {this.props.showAdminUpload && (
+                        <>
+                            <Menu.Item as="a" href="/admin/upload">
+                                <Icon name="upload" size="large" /> Admin Upload
+                            </Menu.Item>
+                            <Menu.Item as="a" href="/admin/TaLanding">
+                                <Icon name="graduation cap" size="large" /> Office Hours
+                            </Menu.Item>
+                        </>
+                    )}
+
+                    {this.props.showLast && (
+                        <>
+                            <Menu.Item as="a" href={officeHoursPath}>
+                                <Icon name="graduation cap" size="large" /> Office Hours
+                            </Menu.Item>
+                            <Menu.Item as="a" href="/submissions">
+                                <Icon name="list alternate" size="large" /> Submissions
+                            </Menu.Item>
+                        </>
+                    )}
+
+                    {this.props.showReviewButton && (
+                        <Menu.Item as="a" href="/class/1/codeHelp">
+                            <Icon name="help circle" size="large" /> Code Help
+                        </Menu.Item>
+                    )}
+
+                    {/* Right aligned menu */}
+                    <Menu.Menu position="right">
+                        {this.props.showCreate && (
+                            <Menu.Item as="a" href="/admin/project/edit/0">
+                                <Icon name="plus circle" /> Create Assignment
+                            </Menu.Item>
+                        )}
+
+                        <Menu.Item link onClick={this.handleLogout} title="Log Out">
+                            <Icon name="sign-out" size="large" />
+                            Log Out
+                        </Menu.Item>
                     </Menu.Menu>
                 </Container>
             </Menu>

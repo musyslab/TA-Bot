@@ -285,58 +285,6 @@ def extraday(submission_repo: SubmissionRepository = Provide[Container.submissio
             return make_response("", HTTPStatus.OK)
     return make_response("", HTTPStatus.NOT_ACCEPTABLE)
 
-
-@submission_api.route('/gptData', methods=['GET'])
-@jwt_required()
-@inject
-def gptData(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    question_description = str(request.args.get("description"))
-    output = str(request.args.get("output"))
-    code_data = str(request.args.get("code"))
-    submissionid = int(request.args.get("submissionId"))
-    return make_response(submission_repo.chatGPT_caller(submissionid,question_description, output, code_data), HTTPStatus.OK)
-
-@submission_api.route('/gptexplainer', methods=['GET'])
-@jwt_required()
-@inject
-def gptexplainer(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    question_description = str(request.args.get("description"))
-    output = str(request.args.get("output"))
-    submissionid = int(request.args.get("submissionId"))
-    if submissionid == -1 and current_user.Role != ADMIN_ROLE:
-        submissionid = submission_repo.get_submission_by_user_id(current_user.Id).Id
-    return make_response(submission_repo.chatGPT_explainer(submissionid,question_description, output), HTTPStatus.OK)
-
-@submission_api.route('/gptDescription', methods=['GET'])
-@jwt_required()
-@inject
-def gptDescription(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
-    input = str(request.args.get("input"))
-    project_id = int(request.args.get("projectId"))
-    project = project_repo.get_selected_project(project_id)
-    return make_response(json.dumps({ "description": submission_repo.descriptionGPT_caller(project.solutionpath,input, project_id)}), HTTPStatus.OK)
-
-
-@submission_api.route('/ResearchGroup', methods=['GET'])
-@jwt_required()
-@inject
-def Researchgroup(user_repo: UserRepository = Provide[Container.user_repo]):
-    return make_response(user_repo.get_user_researchgroup(current_user.Id), HTTPStatus.OK)
-
-@submission_api.route('/updateGPTStudentFeedback', methods=['GET'])
-@jwt_required()
-@inject
-def update_GPT_Student_feedback(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    qid = str(request.args.get("questionId"))
-    student_feedback = str(request.args.get("student_feedback"))
-    return make_response(submission_repo.Update_GPT_Student_Feedback(qid,student_feedback), HTTPStatus.OK)
-
-
 @submission_api.route('/submitOHquestion', methods=['GET'])
 @jwt_required()
 @inject
@@ -394,12 +342,16 @@ def get_active_Question(submission_repo: SubmissionRepository = Provide[Containe
 @jwt_required()
 @inject
 def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    classId = str(request.args.get("class_id"))
+    class_id = int(request.args.get("class_id"))
     submission_details = []
-    try:
-        projectId = project_repo.get_current_project_by_class(classId).Id
-    except Exception as e:
-        return make_response({"error": str(e)}, 500)
+    project = project_repo.get_current_project_by_class(class_id)
+    if project is None:
+        # no active project → return all "None"/zero defaults
+        return make_response(
+            ["None", "0", "None", "", ""],
+            HTTPStatus.OK
+        )
+    projectId = project.Id
     submission_details.append(str(submission_repo.get_remaining_OH_Time(current_user.Id, projectId)))
     project = project_repo.get_project(projectId)
     start_time = project.get(projectId)[1]
@@ -417,6 +369,9 @@ def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Contai
         submission_details.append(time_until_next_submission_str)
     else:
         submission_details.append("None")
+    submission_details.append(project.get(projectId)[0])
+    end_time_str = project.get(projectId)[2]  
+    submission_details.append(end_time_str)    
     return make_response(submission_details, HTTPStatus.OK)
 
 @submission_api.route('/submitgrades', methods=['POST'])
@@ -476,7 +431,8 @@ def run_code_snippet(submission_repo: SubmissionRepository = Provide[Container.s
     language = str(request.args.get("language"))
 
 
-    BASE_URL ="https://piston.tabot.sh/api/v2/execute"
+    BASE_URL ="https://emkc.org/api/v2/piston/execute"
+    # BASE_URL ="https://piston.tabot.sh/api/v2/execute"
 
     results = {}
     files = []
@@ -515,7 +471,12 @@ def run_code_snippet(submission_repo: SubmissionRepository = Provide[Container.s
 @inject
 def GetCharges(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
     class_id = int(request.args.get("class_id"))
-    projectId = project_repo.get_current_project_by_class(class_id).Id
+    project = project_repo.get_current_project_by_class(class_id)
+    if project is None:
+        return make_response(json.dumps({
+            "error": f"No current project found for class_id {class_id}"
+        }), HTTPStatus.NOT_FOUND)
+    projectId = project.Id
     base_charge, reward_charge = submission_repo.get_charges(current_user.Id, class_id, projectId)
     
     hours_until_recharge = 0
@@ -527,8 +488,13 @@ def GetCharges(submission_repo: SubmissionRepository = Provide[Container.submiss
         hours_until_recharge, remainder = divmod(time_until_recharge.total_seconds(), 3600)
         minutes_until_recharge, seconds_until_recharge = divmod(remainder, 60)
 
-    return make_response(json.dumps({"baseCharge": base_charge, "rewardCharge": reward_charge, "HoursUntilRecharge": str(hours_until_recharge), "MinutesUntilRecharge": str(minutes_until_recharge), "SecondsUntilRecharge": str(seconds_until_recharge)}) , HTTPStatus.OK)
-    
+    return make_response(json.dumps({
+        "baseCharge": base_charge,
+        "rewardCharge": reward_charge,
+        "HoursUntilRecharge": str(hours_until_recharge),
+        "MinutesUntilRecharge": str(minutes_until_recharge),
+        "SecondsUntilRecharge": str(seconds_until_recharge)
+    }), HTTPStatus.OK)
 
 @submission_api.route('/ConsumeCharge', methods=['GET'])
 @jwt_required()

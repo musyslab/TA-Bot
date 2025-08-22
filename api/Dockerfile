@@ -11,7 +11,7 @@ COPY ./requirements.txt /app/requirements.txt
 
 # Upgrade pip to the latest version and install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install -r requirements.txt requests pylint openai aiopyston
+    pip install -r requirements.txt
 
 # Copy the entire content from the local directory to the image
 COPY . /app

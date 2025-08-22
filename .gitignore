@@ -261,3 +261,9 @@ cython_debug/
 
 # database
 database/
+
+ta-bot/project-files
+ui/package-lock.json
+ui/yarn.lock
+.env.production
+ta-bot/grading-scripts/id_rsa

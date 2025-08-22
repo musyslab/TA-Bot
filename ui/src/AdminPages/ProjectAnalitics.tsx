@@ -1,4 +1,3 @@
-import React from 'react';
 import 'semantic-ui-css/semantic.min.css'
 import { Grid } from 'semantic-ui-react'
 import MenuComponent from '../components/MenuComponent';
@@ -7,13 +6,13 @@ import { Helmet } from 'react-helmet';
 import AdminAnalyticsComponent from '../components/AdminAnalyticsComponent';
 import { useParams } from 'react-router-dom';
 
-interface AdminAnalyticsProps {
-    id: string
-}
+function ProjectAnalytics() {
+    let { id } = useParams<{ id: string }>();
 
-const ProjectAnalytics: React.FC<AdminAnalyticsProps> = () => {
-    let { id } = useParams<AdminAnalyticsProps>();
-    var project_id = id;
+    if (!id) {
+        console.log("Project ID missing");
+        return null;
+    }
 
     return (
         <div>
@@ -22,7 +21,7 @@ const ProjectAnalytics: React.FC<AdminAnalyticsProps> = () => {
             </Helmet>
             <MenuComponent showUpload={false} showAdminUpload={false} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} ></MenuComponent>
             <Grid className="main-grid">
-                <AdminAnalyticsComponent id={project_id} ></AdminAnalyticsComponent>
+                <AdminAnalyticsComponent id={id} ></AdminAnalyticsComponent>
             </Grid>
         </div>
     );

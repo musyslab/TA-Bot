@@ -1,76 +1,78 @@
 import { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css';
 import axios from 'axios';
-import { Card, Image } from 'semantic-ui-react';
 import { Link } from 'react-router-dom';
-import codeimg from '../codeex.png'
-import React from 'react';
+import codeimg from '../codeex.png';
+import styles from '../css/AdminLandingComponent.module.scss';
 
 interface ClassObject {
-    Id: number,
-    Name: string,
+    Id: number;
+    Name: string;
 }
 
 interface ClassState {
-    classes: Array<ClassObject>
+    classes: Array<ClassObject>;
 }
 
-
 class AdminComponent extends Component<{}, ClassState> {
-
     constructor(props: {}) {
         super(props);
         this.state = {
             classes: []
-        }
+        };
     }
-    componentDidMount() {
-        axios.get(process.env.REACT_APP_BASE_API_URL + `/class/all?filter=true`, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` 
-            }
-        })
-        .then(res => {
-            const classes = res.data.map((obj : {id: number, name: string}) => {
-                return { Id: obj.id, Name: obj.name };
-            });
 
-            classes.sort(function(a : ClassObject, b : ClassObject) { 
-                return a.Name > b.Name;
+    componentDidMount() {
+        axios
+            .get(import.meta.env.VITE_API_URL + `/class/all?filter=true`, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
+                }
+            })
+            .then(res => {
+                const classes: ClassObject[] = res.data.map(
+                    (obj: { id: number; name: string }) => ({
+                        Id: obj.id,
+                        Name: obj.name
+                    })
+                );
+
+                classes.sort((a: ClassObject, b: ClassObject) =>
+                    a.Name.localeCompare(b.Name)
+                );
+
+                this.setState({ classes });
+            })
+            .catch(err => {
+                console.error(err);
             });
-            
-            this.setState({classes: classes});
-        })
-        .catch(err => {
-            console.log(err);
-        });
     }
 
     render() {
+        const { classes } = this.state;
+
         return (
-            <div>
-                <h1>Your Classes</h1>
-                <div style={{ textAlign: "center" }}>
-                  {this.state.classes.map((classObj: ClassObject) => (
-                    
-                    <Link key={classObj.Id} to={`/admin/projects/${classObj.Id}` as string} style={{ textDecoration: "none", color: "inherit" }}>
-                    <Card style={{ margin: "3px", width: "200px", display: "inline-block" }}>
-                        <Card.Content style={{padding: "5px", textAlign: "center" }}>
-                            <Image src={codeimg} />
-                        </Card.Content>
-                        <Card.Content>
-                            <Card.Header>
-                                {classObj.Name}
-                            </Card.Header>
-                        </Card.Content>
-                    </Card>
-                </Link>
-                  ))}
+            <div className={styles.adminContainer}>
+                <div className={styles.sectionTitle}>Teacher Classes</div>
+
+                <div className={styles.classList}>
+                    {classes.map((classObj: ClassObject) => (
+                        <Link
+                            key={classObj.Id}
+                            to={`/admin/projects/${classObj.Id}`}
+                            className={styles.clickableRow}
+                        >
+                            <div>
+                                <img src={codeimg} alt="Code" />
+                            </div>
+                            <div>
+                                <h1 className={styles.title}>{classObj.Name}</h1>
+                            </div>
+                        </Link>
+                    ))}
                 </div>
             </div>
         );
     }
-    
 }
 
 export default AdminComponent;

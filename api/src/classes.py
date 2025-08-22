@@ -27,7 +27,7 @@ def get_class_labs(class_repository: ClassRepository = Provide[Container.class_r
     classes = class_repository.get_classes()
     labs = class_repository.get_labs()
     lecture_sections = class_repository.get_lecture_sections()
-    holder=[]
+    holder = []
     for cls in classes:
         class_lab = []
         class_lectures = []
@@ -48,3 +48,11 @@ def get_class_labs(class_repository: ClassRepository = Provide[Container.class_r
         })
 
     return jsonify(holder)
+
+@class_api.route('/id/<class_id>', methods = ['GET'])
+@inject
+def get_class_name_from_id(class_id, class_repository: ClassRepository = Provide[Container.class_repo]):
+    class_name = [{
+        "name": class_repository.get_class_name_withId(class_id)
+    }]
+    return jsonify(class_name)
