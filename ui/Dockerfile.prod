@@ -1,0 +1,28 @@
+FROM node:20.11.1 AS build
+
+# If you still need legacy OpenSSL for some deps
+ENV NODE_OPTIONS=--openssl-legacy-provider
+
+WORKDIR /app
+
+# Use cache efficiently
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
+
+# Client-visible env vars for Vite must be prefixed with VITE_
+# Pass this at build time: --build-arg VITE_BASE_API_URL=https://tabot.sh/api
+ARG VITE_BASE_API_URL
+ENV VITE_BASE_API_URL=$VITE_BASE_API_URL
+
+# Copy source and build
+COPY . .
+RUN yarn build   # outputs to /app/dist
+
+# ---------- Runtime stage ----------
+FROM nginx:stable-alpine
+
+# Copy built assets to nginx html root
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

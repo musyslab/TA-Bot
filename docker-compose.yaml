@@ -1,0 +1,57 @@
+services:
+  db:
+    image: mysql:9.3
+    restart: always
+    environment:
+      MYSQL_DATABASE: 'autota'
+      MYSQL_USER: 'user'
+      MYSQL_PASSWORD: 'password'
+      MYSQL_ROOT_PASSWORD: 'password'
+    ports:
+      - '3306:3306'     
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uuser", "-ppassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  backend:
+    container_name: backend
+    restart: unless-stopped
+    build:
+      context: api
+    environment:
+      DB_USER: "user"
+      DB_PASSWORD: "password"
+      DB_HOST: "db"
+      DB_NAME: "autota"
+      DB_PORT: "3306"
+      FLASK_DEBUG: "True"
+      TABOT_DIR: "/ta-bot"
+    ports:
+      - "5001:5001"
+    volumes:
+      - "./api:/app"
+      - "./ta-bot:/ta-bot"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    container_name: frontend
+    restart: unless-stopped
+    build:
+      context: ui
+    environment:
+      REACT_APP_BASE_API_URL: http://127.0.0.1:5001/api
+      BROWSER: "none"   
+    volumes:
+      - "./ui:/app"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    command: ["yarn", "dev", "--host", "0.0.0.0"]

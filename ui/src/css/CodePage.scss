@@ -1,0 +1,58 @@
+#code-page {
+    height: 100%;
+}
+
+.grid {
+    height: 100%;
+}
+
+.full-height {
+    height: 100%;
+}
+
+.top-row {
+    max-height: 75vh;
+}
+
+.bottom {
+    height: 22vh;
+    border-top: 1px solid;
+}
+
+.split {
+    display: flex;
+    flex-direction: row;
+    overflow-y: auto;
+    height: 100%;
+}
+
+.split2 {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    height: 100%;
+}
+
+#lint-output {
+    padding-top: 3.5em;
+}
+
+#test-info {
+    margin: 0.5em;
+}
+
+.gutter {
+    background-color: darkgray;
+    background-repeat: no-repeat;
+    background-position: 50%;
+}
+
+.gutter.gutter-horizontal {
+    background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAeCAYAAADkftS9AAAAIklEQVQoU2M4c+bMfxAGAgYYmwGrIIiDjrELjpo5aiZeMwF+yNnOs5KSvgAAAABJRU5ErkJggg==');
+    cursor: col-resize;
+}
+
+.gutter.gutter-vertical {
+    background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAAFAQMAAABo7865AAAABlBMVEVHcEzMzMzyAv2sAAAAAXRSTlMAQObYZgAAABBJREFUeF5jOAMEEAIEEFwAn3kMwcB6I2AAAAAASUVORK5CYII=');
+    cursor: row-resize;
+}

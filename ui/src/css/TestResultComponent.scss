@@ -1,0 +1,42 @@
+.testcase {
+    border: 1px solid lightgray;
+    border-radius: 5px;
+    padding: 5px;
+    cursor: pointer;
+}
+
+.PASSED {
+    color: green;
+}
+
+.LOCKED{
+    color: black;
+}
+
+.FAILED {
+    color: red;
+}
+
+.SKIPPED {
+    color: goldenrod;
+}
+
+.center {
+    text-align: center;
+}
+
+#blank-testcase-message {
+    text-align: center;
+    margin-top:40px;
+}
+.IOresult {
+    display: block;
+    word-break: break-word;
+}
+
+#testresults-container {
+    margin-top: 5px;
+    margin-left: 5px;
+    display: flex;
+    justify-content: space-evenly;
+}
