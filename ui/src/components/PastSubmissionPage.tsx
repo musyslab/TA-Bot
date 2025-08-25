@@ -1,123 +1,125 @@
 import { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css';
 import axios from 'axios';
-import { Table, Label } from 'semantic-ui-react';
 import { Link } from 'react-router-dom';
-import '../css/AdminComponent.scss';
-import { Grid } from 'semantic-ui-react';
-import MenuComponent from '../components/MenuComponent';
-import { Helmet } from 'react-helmet-async';  // Updated import
-import React from 'react';
+import MenuComponent from './MenuComponent';
+import { Helmet } from 'react-helmet';
+import '../css/PastSubmissionPage.scss';
 
 class Row {
-  constructor() {
-    this.id = 0;
-    this.project_name = '';
-    this.score = 0;
-    this.date = '';
-    this.classname = '';
-    this.classid = '';
-  }
+    constructor() {
+        this.id = 0;
+        this.project_name = "";
+        this.score = 0;
+        this.date = "";
+        this.classname = "";
+        this.classid = "";
+    }
 
-  id: number;
-  project_name: string;
-  score: number;
-  date: string;
-  classname: string;
-  classid: string;
+    id: number;
+    project_name: string;
+    score: number;
+    date: string;
+    classname: string;
+    classid: string;
 }
 
 interface ProjectsState {
-  rows: Array<Row>;
+    rows: Array<Row>;
 }
 
 class PastSubmissionPage extends Component<{}, ProjectsState> {
-  constructor(props: {}) {
-    super(props);
-    this.state = {
-      rows: []
-    };
-  }
+    constructor(props: {}) {
+        super(props);
+        this.state = { rows: [] };
+    }
 
-  componentDidMount() {
-    axios
-      .get(process.env.REACT_APP_BASE_API_URL + `/projects/projects-by-user`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
-        }
-      })
-      .then((res) => {
-        var data = res.data;
-        var rows: Array<Row> = [];
-        Object.entries(data).map(([key, value]) => {
-          var row = new Row();
-          var test = value as Array<string>;
-          row.project_name = key;
-          row.id = parseInt(test[0]);
-          row.score = parseInt(test[1]);
-          row.date = test[2];
-          row.classname = test[3];
-          row.classid = test[4];
-          rows.push(row);
+    componentDidMount() {
+        axios
+            .get(import.meta.env.VITE_API_URL + `/projects/projects-by-user`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+            })
+            .then((res) => {
+                const data = res.data;
+                const rows: Array<Row> = [];
 
-          return row;
-        });
+                Object.entries(data).map(([key, value]) => {
+                    const row = new Row();
+                    const test = value as Array<string>;
+                    row.project_name = key;
+                    row.id = parseInt(test[0]);
+                    row.score = parseInt(test[1]);
+                    row.date = test[2];
+                    row.classname = test[3];
+                    row.classid = test[4];
+                    rows.push(row);
+                    return row;
+                });
 
-        this.setState({ rows: rows });
-      })
-      .catch((err) => {
-        console.log(err);
-      });
-  }
+                this.setState({ rows });
+            })
+            .catch((err) => console.log(err));
+    }
 
-  render() {
-    return (
-      <div>
-        <Helmet>
-          <title>Past Submissions | TA-Bot</title>
-        </Helmet>
-        <MenuComponent
-          showUpload={false}
-          showAdminUpload={false}
-          showHelp={false}
-          showCreate={false}
-          showLast={false}
-          showReviewButton={false}
-        ></MenuComponent>
-        <Grid className="main-grid">
-          <Table celled>
-            <Table.Header>
-              <Table.Row>
-                <Table.HeaderCell>Project Name</Table.HeaderCell>
-                <Table.HeaderCell>Submission Date</Table.HeaderCell>
-                <Table.HeaderCell>Class Name</Table.HeaderCell>
-                <Table.HeaderCell>Link</Table.HeaderCell>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {this.state.rows.map((row) => {
-                return (
-                  <Table.Row key={row.id}> {/* Add a unique key here */}
-                    <Table.Cell>{row.project_name}</Table.Cell>
-                    <Table.Cell>{row.date}</Table.Cell>
-                    <Table.Cell>{row.classname}</Table.Cell>
-                    <Table.Cell button>
-                      <Link
-                        target="_blank"
-                        to={`/class/${row.classid}/code/${row.id}`}
-                      >
-                        <Label button>View</Label>
-                      </Link>
-                    </Table.Cell>
-                  </Table.Row>
-                );
-              })}
-            </Table.Body>
-          </Table>
-        </Grid>
-      </div>
-    );
-  }
+    render() {
+        return (
+            <div className="past-submissions">
+                <Helmet>
+                    <title>Past Submissions | TA-Bot</title>
+                </Helmet>
+
+                <MenuComponent
+                    showUpload={false}
+                    showAdminUpload={false}
+                    showHelp={false}
+                    showCreate={false}
+                    showLast={false}
+                    showReviewButton={false}
+                />
+
+                <div className="content">
+                    <div className="content-card">
+                        <h1 className="page-title">Past Submissions</h1>
+
+                        <div className="table-wrap">
+                            <table className="submissions-table" role="table">
+                                <thead className="table-head">
+                                    <tr className="header-row">
+                                        <th className="col col-project" scope="col">Project Name</th>
+                                        <th className="col col-date" scope="col">Submission Date</th>
+                                        <th className="col col-class" scope="col">Class Name</th>
+                                        <th className="col col-link" scope="col">Link</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="table-body">
+                                    {this.state.rows.map((row) => (
+                                        <tr className="data-row" key={row.id}>
+                                            <td className="cell cell-project">{row.project_name}</td>
+                                            <td className="cell cell-date">{row.date}</td>
+                                            <td className="cell cell-class">{row.classname}</td>
+                                            <td className="cell cell-link">
+                                                <Link
+                                                    className="view-link"
+                                                    target="_blank"
+                                                    to={`/class/${row.classid}/code/${row.id}`}
+                                                >
+                                                    View
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {this.state.rows.length === 0 && (
+                                        <tr className="empty-row">
+                                            <td className="cell cell-empty" colSpan={4}>No submissions found.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 }
 
 export default PastSubmissionPage;

@@ -1,27 +1,23 @@
-import { Helmet } from "react-helmet";
+import { Helmet } from 'react-helmet';
 import { useParams } from 'react-router-dom';
-import 'semantic-ui-css/semantic.min.css';
-import { Grid } from 'semantic-ui-react';
 import MenuComponent from '../components/MenuComponent';
 import StudentList from '../components/StudentList';
 import '../css/AdminComponent.scss';
-import React from 'react';
-// Cast Helmet to `any` to avoid TypeScript issue
-const SafeHelmet: any = Helmet;
-
-interface ProjectBreakdownProps extends Record<string, string | undefined> {
-    id: string;
-}
 
 const ProjectBreakdown = () => {
-    let { id } = useParams<ProjectBreakdownProps>();
-    var project_id = id ? parseInt(id) : 0;
+    const { id } = useParams<{ id: string }>();
+
+    if (!id) {
+        return <div>Error: project id missing or invalid</div>;
+    }
+
+    const project_id = parseInt(id, 10);
 
     return (
         <div>
-            <SafeHelmet>
+            <Helmet>
                 <title>[Admin] Students | TA-Bot</title>
-            </SafeHelmet>
+            </Helmet>
             <MenuComponent 
                 showUpload={false} 
                 showAdminUpload={true} 
@@ -30,9 +26,9 @@ const ProjectBreakdown = () => {
                 showLast={false} 
                 showReviewButton={false} 
             />
-            <Grid className="main-grid">
+            <div className="main-grid">
                 <StudentList project_id={project_id} />
-            </Grid>
+            </div>
         </div>
     );
 };

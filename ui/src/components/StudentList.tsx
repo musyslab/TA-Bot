@@ -1,34 +1,26 @@
 import React, { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css'
-import '../css/TestResultComponent.scss';
-import 'semantic-ui-css/semantic.min.css';
 import axios from 'axios';
-import { Table, Label, Loader, Dropdown, DropdownItemProps, DropdownItem, DropdownProps, Input, Button, Icon, Modal, Accordion, Tab } from 'semantic-ui-react';
 import { Link } from 'react-router-dom';
-import { parse } from 'path';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-// If you're using highlight.js, import from 'react-syntax-highlighter/dist/esm/styles/hljs'
-import { vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
-
-
+import '../css/StudentList.scss';
+import '../css/CodeViews.scss';
 
 interface StudentListProps {
-    project_id: number
+    project_id: number;
 }
 
 class Row {
     constructor() {
         this.id = 0;
-        this.Lname = "";
-        this.Fname = "";
+        this.Lname = '';
+        this.Fname = '';
         this.numberOfSubmissions = 0;
-        this.date = "";
+        this.date = '';
         this.numberOfPylintErrors = 0;
-        this.isPassing = "";
+        this.isPassing = false;
         this.subid = 0;
         this.lecture_number = 0;
         this.hidden = false;
-        this.classId = "";
+        this.classId = '';
         this.grade = 0;
         this.StudentNumber = 0;
         this.IsLocked = false;
@@ -40,7 +32,7 @@ class Row {
     numberOfSubmissions: number;
     date: string;
     numberOfPylintErrors: number;
-    isPassing: string;
+    isPassing: boolean;
     subid: number;
     lecture_number: number;
     hidden: boolean;
@@ -50,10 +42,16 @@ class Row {
     IsLocked: boolean;
 }
 
+interface Option {
+    key: number;
+    text: string;
+    value: number;
+}
+
 interface StudentListState {
-    rows: Array<Row>
+    rows: Array<Row>;
     isLoading: boolean;
-    lecture_numbers: Array<DropdownItemProps>;
+    lecture_numbers: Array<Option>;
     selectedStudent: number;
     modalIsLoading: boolean;
     modalIsOpen: boolean;
@@ -65,30 +63,36 @@ interface StudentListState {
     exportModalIsOpen: boolean;
     selectedLecture: number;
     projectLanguage: string;
+
+    // Added for modal "CodePage-like" UI
+    activeView: 'table' | 'diff';
+    selectedDiffId: string | null;
 }
 
 class StudentList extends Component<StudentListProps, StudentListState> {
-
     constructor(props: StudentListProps) {
         super(props);
 
         this.state = {
             rows: [],
-            lecture_numbers: [{ key: 1, text: "All", value: 1 }],
+            lecture_numbers: [{ key: 1, text: 'All', value: 1 }],
             isLoading: false,
             selectedStudent: -1,
             modalIsLoading: false,
             modalIsOpen: false,
             selectedStudentData: [],
-            selectedStudentCode: "",
+            selectedStudentCode: '',
             selectedStudentTestResults: [],
-            selectedStudentName: "",
+            selectedStudentName: '',
             selectedStudentGrade: 0,
             exportModalIsOpen: false,
             selectedLecture: -1,
-            projectLanguage: ""
+            projectLanguage: '',
 
-        }
+            activeView: 'table',
+            selectedDiffId: null,
+        };
+
         this.handleClick = this.handleClick.bind(this);
         this.handleFilterChange = this.handleFilterChange.bind(this);
         this.handleUnlockClick = this.handleUnlockClick.bind(this);
@@ -97,29 +101,46 @@ class StudentList extends Component<StudentListProps, StudentListState> {
     }
 
     componentDidMount() {
-        axios.post(process.env.REACT_APP_BASE_API_URL + `/submissions/recentsubproject`, { project_id: this.props.project_id }, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-            }
-        })
-            .then(res => {
-                var data = res.data
-                // Read it
+        axios
+            .post(
+                import.meta.env.VITE_API_URL + `/submissions/recentsubproject`,
+                { project_id: this.props.project_id },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            .then((res) => {
+                var data = res.data;
                 var rows: Array<Row> = [];
 
                 Object.entries(data).map(([key, value]) => {
                     var row = new Row();
-                    var student_output_data = (value as Array<string>);
+                    var student_output_data = value as Array<string>;
                     row.id = parseInt(key);
                     row.Lname = student_output_data[0];
                     row.Fname = student_output_data[1];
                     row.lecture_number = parseInt(student_output_data[2]);
-                    if (!(this.state.lecture_numbers.some(x => x.value === row.lecture_number))) {
-                        this.state.lecture_numbers.push({ key: row.lecture_number, text: row.lecture_number.toString(), value: row.lecture_number })
+                    if (!this.state.lecture_numbers.some((x) => x.value === row.lecture_number)) {
+                        this.state.lecture_numbers.push({
+                            key: row.lecture_number,
+                            text: row.lecture_number.toString(),
+                            value: row.lecture_number,
+                        });
                     }
                     row.numberOfSubmissions = parseInt(student_output_data[3]);
                     row.date = student_output_data[4];
-                    row.isPassing = student_output_data[5];
+
+                    const passRaw = String(student_output_data[5] ?? '').toLowerCase().trim();
+                    row.isPassing =
+                        passRaw === 'true' ||
+                        passRaw === '1' ||
+                        passRaw === 'pass' ||
+                        passRaw === 'passed' ||
+                        passRaw === 'ok' ||
+                        passRaw === 'success';
+
                     row.numberOfPylintErrors = parseInt(student_output_data[6]);
                     row.subid = parseInt(student_output_data[7]);
                     row.hidden = false;
@@ -131,124 +152,144 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                     return row;
                 });
 
-                // 
-                rows = rows.sort((a, b) => a.Lname.localeCompare(b.Lname))
+                rows = rows.sort((a, b) => a.Lname.localeCompare(b.Lname));
                 this.setState({ rows: rows });
-            })
+            });
     }
 
-    // This function submits 
+    // Run MOSS
     handleClick() {
         this.setState({ isLoading: true });
-        axios.post(process.env.REACT_APP_BASE_API_URL + `/projects/run-moss`, { project_id: this.props.project_id }, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-            }
-        })
-            .then(res => {
+        axios
+            .post(
+                import.meta.env.VITE_API_URL + `/projects/run-moss`,
+                { project_id: this.props.project_id },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            .then((res) => {
                 window.alert(res.data);
                 this.setState({ isLoading: false });
-            }).catch(exc => {
-                window.alert("Error running MOSS.  Please try again");
-                this.setState({ isLoading: false });
             })
+            .catch((exc) => {
+                window.alert('Error running MOSS.  Please try again');
+                this.setState({ isLoading: false });
+            });
     }
 
-    handleFilterChange(ev: React.SyntheticEvent<HTMLElement>, data: DropdownProps) {
-        var new_rows = this.state.rows.map(row => {
-            if (data.value != 1) {
-                if (row.lecture_number == data.value) {
+    handleFilterChange(ev: React.ChangeEvent<HTMLSelectElement>) {
+        const value = parseInt(ev.target.value, 10);
+        var new_rows = this.state.rows.map((row) => {
+            if (value !== 1) {
+                if (row.lecture_number === value) {
                     row.hidden = false;
-                }
-                else {
+                } else {
                     row.hidden = true;
                 }
-            }
-            else {
+            } else {
                 row.hidden = false;
             }
-
             return row;
         });
-        this.setState({ rows: new_rows });
+        this.setState({ rows: new_rows, selectedLecture: value === 1 ? -1 : value });
     }
 
     handleGradeChange = (e: React.ChangeEvent<HTMLInputElement>, row: Row) => {
         const newValue = parseFloat(e.target.value);
         if (!isNaN(newValue)) {
-            const updatedRows = this.state.rows.map((r) =>
-                r.id === row.id ? { ...r, grade: newValue } : r
-            );
-
+            const updatedRows = this.state.rows.map((r) => (r.id === row.id ? { ...r, grade: newValue } : r));
             this.setState({
                 rows: updatedRows,
             });
         }
     };
 
-    // This function unlocks a student account when they have entered their password incorrectly too many times
+    // Unlock a student account
     handleUnlockClick = (UserId: number) => {
-        console.log(UserId);
-        axios.post(process.env.REACT_APP_BASE_API_URL + `/projects/unlockStudentAccount`, { UserId: UserId }, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-            }
-        })
-            .then(res => {
-                window.location.reload();
-            })
-    };
-    submitGrades(UserId: number, grade: string) {
-        //loop through rows
-        let intGrade = parseInt(grade);
-        this.setState({ isLoading: false });
-        axios.post(process.env.REACT_APP_BASE_API_URL + `/submissions/submitgrades`,
-            { userId: UserId, grade: intGrade, projectID: this.props.project_id },
-            {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+        axios
+            .post(
+                import.meta.env.VITE_API_URL + `/projects/unlockStudentAccount`,
+                { UserId: UserId },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
                 }
+            )
+            .then((res) => {
+                window.location.reload();
+            });
+    };
+
+    submitGrades(UserId: number, grade: string) {
+        const intGrade = Number.isFinite(Number(grade)) ? parseInt(grade, 10) : 0;
+
+        this.setState({ isLoading: true });
+
+        axios
+            .post(
+                import.meta.env.VITE_API_URL + `/submissions/submitgrades`,
+                { userId: UserId, grade: intGrade, projectID: this.props.project_id },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            .then((_res) => {
+
+                this.setState((prev) => ({
+                    rows: prev.rows.map((r) =>
+                        r.id === UserId ? { ...r, grade: intGrade } : r
+                    ),
+
+                    modalIsOpen: false,
+                    modalIsLoading: false,
+                    isLoading: false,
+                    selectedStudent: -1,
+                    selectedStudentName: '',
+                    selectedStudentGrade: 0,
+                    activeView: 'table',
+                    selectedDiffId: null,
+                }));
             })
-            .then(res => {
-                this.openGradingModule(UserId + 1);
-            }).catch(exc => {
-                window.alert("Error submitting grades, please fillout bug report form");
+            .catch((_exc) => {
                 this.setState({ isLoading: false });
-            })
+                window.alert('Failed to submit grade. Please try again.');
+            });
     }
 
-    exportGrades() {
-        axios.get(process.env.REACT_APP_BASE_API_URL + `/submissions/getprojectscores?projectID=${this.props.project_id}`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-                }
-            }).then(res => {
-                console.log(res.data.studentData);
-                console.log(this.state.selectedLecture);
 
+    exportGrades() {
+        axios
+            .get(import.meta.env.VITE_API_URL + `/submissions/getprojectscores?projectID=${this.props.project_id}`, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                },
+            })
+            .then((res) => {
                 let projectname = res.data.projectName;
                 let csvContent = [] as String[][];
                 let selectedRow: any;
 
-                csvContent.push(["OrgDefinedId", projectname + " Points Grade", "End-of-Line Indicator"]);
+                csvContent.push(['OrgDefinedId', projectname + ' Points Grade', 'End-of-Line Indicator']);
 
                 for (const value of res.data.studentData) {
-                    selectedRow = this.state.rows.find(row => row.id === value[2]);
-                    console.log("Selected lecture: ", this.state.selectedLecture)
-                    console.log("Selected row", selectedRow?.lecture_number);
-                    if (this.state.selectedLecture == -1) {
-                        csvContent.push([value[0].toString(), value[1].toString(), "#"]);
-                    }
-                    else {
-                        if (selectedRow.lecture_number == this.state.selectedLecture) {
-                            csvContent.push([value[0].toString(), value[1].toString(), "#"]);
+                    selectedRow = this.state.rows.find((row) => row.id === value[2]);
+                    if (this.state.selectedLecture === -1) {
+                        csvContent.push([value[0].toString(), value[1].toString(), '#']);
+                    } else {
+                        if (selectedRow && selectedRow.lecture_number === this.state.selectedLecture) {
+                            csvContent.push([value[0].toString(), value[1].toString(), '#']);
                         }
                     }
                 }
 
-                const csvRows = csvContent.map(row => row.join(',')); // Convert each row to a string
-                const csvString = csvRows.join('\n'); // Join rows with newline character
+                const csvRows = csvContent.map((row) => row.join(','));
+                const csvString = csvRows.join('\n');
                 const blob = new Blob([csvString], { type: 'text/csv' });
                 const url = URL.createObjectURL(blob);
 
@@ -261,358 +302,650 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 this.setState({ exportModalIsOpen: false });
-            }).catch(exc => {
-                window.alert("Error exporting project grades, please fillout bug report form");
             })
+            .catch((exc) => {
+            });
     }
 
     openGradingModule(UserId: number) {
-        this.setState({ modalIsLoading: true });
-        if (UserId == -1) {
+        this.setState({ modalIsLoading: true, activeView: 'table', selectedDiffId: null });
+        if (UserId === -1) {
             UserId = this.state.rows[0].id;
-            this.setState({ selectedStudentName: this.state.rows[0].Fname + " " + this.state.rows[0].Lname });
+            this.setState({ selectedStudentName: this.state.rows[0].Fname + ' ' + this.state.rows[0].Lname });
             this.setState({ selectedStudent: UserId });
-            this.setState({ selectedStudentGrade: this.state.rows[0].grade })
-        }
-        else {
-            const selectedRow = this.state.rows.find(row => row.id === UserId);
-            if (selectedRow == undefined) {
-                this.setState({ modalIsOpen: false });
-                window.alert("No more Students to grade!");
+            this.setState({ selectedStudentGrade: this.state.rows[0].grade });
+        } else {
+            const selectedRow = this.state.rows.find((row) => row.id === UserId);
+            if (selectedRow === undefined) {
+                this.setState({ modalIsOpen: false, modalIsLoading: false });
                 return;
             }
-            this.setState({ selectedStudentName: selectedRow.Fname + " " + selectedRow.Lname });
-            this.setState({ selectedStudent: UserId })
-            this.setState({ selectedStudentGrade: selectedRow.grade })
+            this.setState({ selectedStudentName: selectedRow.Fname + ' ' + selectedRow.Lname });
+            this.setState({ selectedStudent: UserId });
+            this.setState({ selectedStudentGrade: selectedRow.grade });
         }
-        console.log(UserId);
-        axios.post(process.env.REACT_APP_BASE_API_URL + `/projects/ProjectGrading`, { userID: UserId, ProjectId: this.props.project_id }, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-            }
-        })
-            .then(res => {
-                this.setState({ selectedStudentData: res.data.GradingData, modalIsLoading: false, modalIsOpen: true });
-                this.setState({ selectedStudentCode: res.data.Code });
-                this.setState({ selectedStudentTestResults: res.data.TestResults });
-                this.setState({ projectLanguage: res.data.Language });
-            }).catch(exc => {
-                window.alert("Error opening grading module, please fillout bug report form");
-                this.setState({ modalIsLoading: false });
-            }
+        axios
+            .post(
+                import.meta.env.VITE_API_URL + `/projects/ProjectGrading`,
+                { userID: UserId, ProjectId: this.props.project_id },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
             )
+            .then((res) => {
+                this.setState({
+                    selectedStudentData: res.data.GradingData,
+                    modalIsLoading: false,
+                    modalIsOpen: true,
+                    selectedStudentCode: res.data.Code,
+                    selectedStudentTestResults: res.data.TestResults,
+                    projectLanguage: res.data.Language
+                });
+            })
+            .catch((exc) => {
+                this.setState({ modalIsLoading: false });
+            });
     }
 
     render() {
-        const levels = ['Level 1', 'Level 2', 'Level 3'];
-        const customStyle = {
-            ...vs, // Spread the vs style
-            borderRadius: '5px',
-            padding: '10px',
-            color: '#ff0000', // Custom color
-        };
-        const panels = levels.map(level => ({
-            menuItem: level,
-            render: () => (
-                <Tab.Pane>
-                    <Table celled>
-                        <Table.Header>
-                            <Table.Row>
-                                <Table.HeaderCell>TestCase Name</Table.HeaderCell>
-                                <Table.HeaderCell>Output</Table.HeaderCell>
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                            {this.state.selectedStudentTestResults.map((testCase, index) => {
-                                if (testCase.level === level) {
-                                    return (
-                                        <Table.Row key={index}>
-                                            <Table.Cell positive={testCase.State} negative={!testCase.State}>{testCase.name}</Table.Cell>
-                                            <Table.Cell positive={testCase.output === "      - ''"}>
-                                                <div style={{ maxHeight: '100px', overflowY: 'auto' }}>
-                                                    {testCase.output === "      - ''" ? 'Passed' : testCase.output}
-                                                </div>
-                                            </Table.Cell>
-                                        </Table.Row>
-                                    );
-                                }
-                            })}
-                        </Table.Body>
-                    </Table>
-                </Tab.Pane>
-            ),
-        }));
-        return (
+        const levels = ['Level 1', 'Level 2', 'Level 3']; // not strictly needed, kept in case of future use
 
+        // ===== Helpers for modal "CodePage-like" UI =====
+        const code = this.state.selectedStudentCode || '';
+
+        const results = (this.state.selectedStudentTestResults || []).map((t: any) => {
+            const outputStr =
+                typeof t.output === 'string'
+                    ? t.output
+                    : Array.isArray(t.output)
+                        ? t.output.join('\n')
+                        : '';
+            const s = outputStr.replace(/\r\n/g, '\n');
+            const { expected, actual, hadDiff } = parseOutputs(s);
+            const norm = (x: string) => (x ?? '').replace(/\r\n/g, '\n').trimEnd();
+            const passedExplicit =
+                typeof t.passed === 'boolean' ? t.passed
+                    : typeof t.Pass === 'boolean' ? t.Pass
+                        : undefined;
+            const passedHeuristic = hadDiff
+                ? norm(expected) === norm(actual)
+                : (/^no differences\.?$/i.test(s.trim()) || s.trim() === '~~~diff~~~' || s.trim() === '');
+            const passed = (passedExplicit !== undefined) ? passedExplicit : passedHeuristic;
+            return {
+                skipped: false,
+                passed,
+                test: {
+                    output: s.split('\n'),
+                    type: 0,
+                    name: t.name || t.test || t.testCaseName || '',
+                    suite: t.level || t.suite || '',
+                    hidden: t.hidden ? 'True' : 'False',
+                }
+            };
+        });
+
+        const suites = Array.from(new Set(results.map((r: any) => r.test.suite)));
+        const suiteGroups = suites.map(s => {
+            const suiteItems = results.filter((r: any) => r.test.suite === s);
+            const visible = suiteItems.filter((r: any) => r.test.hidden !== 'True');
+            const hiddenCount = suiteItems.length - visible.length;
+            return { suite: s, visible, hiddenCount };
+        });
+
+        const labelFor = (r: any) => (r.skipped ? 'Skipped' : r.passed ? 'Passed' : 'Failed');
+
+        function parseOutputs(raw: string): { expected: string; actual: string; hadDiff: boolean } {
+            if (raw.includes('~~~diff~~~')) {
+                const [userPart, expectedPart = ''] = raw.split('~~~diff~~~');
+                return { expected: expectedPart, actual: userPart, hadDiff: true };
+            }
+            const lines = raw.replace(/\r\n/g, '\n').split('\n');
+            const expectedLines: string[] = [];
+            const actualLines: string[] = [];
+            let sawDiffMarker = false;
+
+            for (const l of lines) {
+                const t = l.trimStart();
+                if (t.startsWith('---')) { sawDiffMarker = true; continue; }
+                if (t.startsWith('< ')) { expectedLines.push(t.slice(2)); sawDiffMarker = true; continue; }
+                if (t.startsWith('> ')) { actualLines.push(t.slice(2)); sawDiffMarker = true; continue; }
+            }
+
+            if (sawDiffMarker) {
+                return { expected: expectedLines.join('\n'), actual: actualLines.join('\n'), hadDiff: true };
+            }
+            return { expected: '', actual: raw, hadDiff: false };
+        }
+
+        function truncateLines(text: string, maxLines = 30) {
+            const arr = text ? text.replace(/\r\n/g, '\n').split('\n') : [];
+            const total = arr.length;
+            const truncated = total > maxLines;
+            const shown = truncated ? arr.slice(0, maxLines) : arr;
+            return {
+                text: shown.join('\n'),
+                total,
+                truncated,
+                omitted: truncated ? total - maxLines : 0,
+            };
+        }
+
+        function friendlySkipMessage(): string[] {
+            return [
+                'This test did not run due to a configuration issue.',
+                'If this keeps happening, contact your TA or instructor.',
+            ];
+        }
+
+        function buildUnifiedDiff(expected: string, actual: string, title: string): string {
+            const e = (expected ?? '').replace(/\r\n/g, '\n').split('\n');
+            const a = (actual ?? '').replace(/\r\n/g, '\n').split('\n');
+            const lines: string[] = [];
+            lines.push(`--- actual:${title}`);
+            lines.push(`+++ expected:${title}`);
+            const max = Math.max(e.length, a.length);
+            for (let i = 0; i < max; i++) {
+                const el = e[i] ?? '';
+                const al = a[i] ?? '';
+                if (el === al) {
+                    lines.push(` ${el}`);
+                } else {
+                    if (al !== '') lines.push(`-${al}`);
+                    if (el !== '') lines.push(`+${el}`);
+                    if (el === '' && al === '') lines.push(' ');
+                }
+            }
+            return lines.join('\n');
+        }
+
+        type DiffEntry = {
+            id: string;
+            suite: string;
+            test: string;
+            status: string;
+            passed: boolean;
+            skipped: boolean;
+            expected: string;
+            actual: string;
+            unified: string;
+        };
+
+        const diffFilesAll: DiffEntry[] = (() => {
+            const entries: DiffEntry[] = [];
+            suiteGroups.forEach(g => {
+                g.visible.forEach((r: any) => {
+                    const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
+                    const { expected, actual } = parseOutputs(rawOut);
+                    const title = `${r.test.suite}/${r.test.name}`;
+                    const unified = buildUnifiedDiff(expected, actual, title);
+                    entries.push({
+                        id: `${r.test.suite}__${r.test.name}`,
+                        suite: r.test.suite,
+                        test: r.test.name,
+                        status: labelFor(r),
+                        passed: r.passed,
+                        skipped: r.skipped,
+                        expected,
+                        actual,
+                        unified,
+                    });
+                });
+            });
+            return entries.sort(
+                (a, b) =>
+                    Number(a.passed) - Number(b.passed) ||
+                    a.suite.localeCompare(b.suite) ||
+                    a.test.localeCompare(b.test)
+            );
+        })();
+
+        const derivedSelectedDiffId = this.state.selectedDiffId ?? (diffFilesAll[0]?.id ?? null);
+        const selectedFile = diffFilesAll.find(f => f.id === derivedSelectedDiffId) || null;
+
+        const codeLines = (code ? code.replace(/\r\n/g, '\n').split('\n') : []);
+
+        type TestRow =
+            | { kind: 'info'; suite: string; note?: string }
+            | {
+                kind: 'result';
+                suite: string;
+                test: string;
+                status: string;
+                passed: boolean;
+                expectedExcerpt: string;
+                outputExcerpt: string;
+                note?: string;
+            };
+
+        const testRows: TestRow[] = [];
+        suiteGroups.forEach(g => {
+            if (g.hiddenCount > 0) {
+                testRows.push({ kind: 'info', suite: g.suite, note: `Hidden tests not shown: ${g.hiddenCount}` });
+            }
+            g.visible.forEach((r: any) => {
+                const status = labelFor(r);
+                const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
+                const { expected, actual, hadDiff } = parseOutputs(rawOut);
+                const expTrunc = truncateLines(r.passed ? actual : expected);
+                const actTrunc = truncateLines(actual);
+                testRows.push({
+                    kind: 'result',
+                    suite: r.test.suite,
+                    test: r.test.name,
+                    status,
+                    passed: r.passed,
+                    expectedExcerpt: r.passed ? expTrunc.text : (expTrunc.text || '—'),
+                    outputExcerpt: actTrunc.text || '—',
+                    note: !r.passed && !hadDiff ? 'Grader did not provide a separate expected block.' : undefined,
+                });
+            });
+        });
+
+        const testsLoaded = !this.state.modalIsLoading;
+
+        return (
             <>
-                <Modal
-                    open={this.state.exportModalIsOpen}
-                    onClose={() => this.setState({ exportModalIsOpen: false })}
-                    onOpen={() => this.setState({ exportModalIsOpen: true })}
-                    size="mini"
+                {/* Everything that should blur goes inside page-bg itself */}
+                <div
+                    className={`admin-project-config-container${this.state.modalIsOpen ? ' blurred' : ''
+                        }`}
                 >
-                    <Modal.Header>Data Exporter</Modal.Header>
-                    <Modal.Content>
-                        <p>Select a lecture section to export data:</p>
-                        <Dropdown
-                            placeholder='Lecture Section'
-                            selection
-                            options={this.state.lecture_numbers}
-                            onChange={(event, data) => {
-                                if (typeof data.value === 'number') {
-                                    this.setState({ selectedLecture: data.value });
-                                }
-                            }}
-                        />
-                        <p>After selecting, click the export button to download the data.</p>
-                    </Modal.Content>
-                    <Modal.Actions>
-                        <Button color='green' onClick={this.exportGrades}>Export</Button>
-                    </Modal.Actions>
-                </Modal>
-                <Modal
-                    open={this.state.modalIsOpen}
-                    onClose={() => this.setState({ modalIsOpen: false })}
-                    onOpen={() => this.setState({ modalIsOpen: true })}
-                    size="fullscreen"
-                >
-                    <Modal.Header>Student Name: {this.state.selectedStudentName}</Modal.Header>
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                        <div id="code-container" style={{
-                            borderRadius: '5px',
-                            boxShadow: '0 2px 5px rgba(0, 0, 0, 0.2)',
-                            backgroundColor: '#f5f5f5', // Lighter gray
-                            padding: '20px',
-                            fontFamily: 'Courier New, monospace',
-                            fontSize: '16px',
-                            lineHeight: '1.6',
-                            color: '#333',
-                            overflow: 'auto',
-                            marginTop: '20px',
-                            border: 'none', // Remove border
-                            maxHeight: '600px', // Set max height to fit ~30 lines
-                            flex: 1, // Take up half the space
-                        }}>
-                            <SyntaxHighlighter
-                                language={this.state.projectLanguage}
-                                style={customStyle}
-                                showLineNumbers={true}
-                            >
-                                {this.state.selectedStudentCode}
-                            </SyntaxHighlighter>
-                        </div>
-                        <div style={{ flex: 1, overflow: 'auto', marginTop: '20px' }}>
-                            <Tab panes={panels} styled />
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px', }}>
-                            <div style={{ marginRight: '10px', marginTop: '20px' }}>
-                                <input
-                                    id="gradeInput"
-                                    type="text"
-                                    placeholder="0"
-                                    defaultValue="0"
-                                    style={{
-                                        padding: '10px',
-                                        fontSize: '16px',
-                                        borderRadius: '5px',
-                                        border: '1px solid #ccc',
-                                        boxShadow: '0 2px 5px rgba(0, 0, 0, 0.1)',
-                                        backgroundColor: '#f5f5f5', // Lighter gray to match the model
-                                        fontFamily: 'Courier New, monospace', // Match the font of the model
-                                        color: '#333', // Match the color of the model
-                                    }}
-                                />
-                            </div>
-                            <Button
-                                primary
-                                style={{
-                                    backgroundColor: '#28a745',
-                                    color: '#fff',
-                                    border: 'none',
-                                    borderRadius: '5px',
-                                    padding: '10px 20px',
-                                    boxShadow: '0 2px 5px rgba(0, 0, 0, 0.1)',
-                                    fontFamily: 'Courier New, monospace'
-                                }}
-                                onClick={() => {
-                                    const gradeInput = document.getElementById('gradeInput') as HTMLInputElement;
-                                    if (gradeInput) {
-                                        this.submitGrades(this.state.selectedStudent, gradeInput.value);
-                                    }
-                                }}
-                            >
-                                Submit
-                            </Button>
-                        </div>
+                    {/* Back link (blue, top-left, outside table) */}
+                    <div className="page-header">
+                        <Link to="/admin/classes" className="back-link">
+                            Return to Class Selection
+                        </Link>
                     </div>
 
-                </Modal >
-                <Dropdown placeholder='Lecture Section' selection options={this.state.lecture_numbers} onChange={this.handleFilterChange} />
-                <Table celled style={{
-                    borderRadius: '10px',
-                    boxShadow: '0 10px 20px rgba(0, 0, 0, 0.4)' // Kept only the darkest shadow
-                }}>
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.HeaderCell>Student Name</Table.HeaderCell>
-                            <Table.HeaderCell>Lecture Number</Table.HeaderCell>
-                            <Table.HeaderCell>Number of Total Submissions</Table.HeaderCell>
-                            <Table.HeaderCell>Date of most recent submission</Table.HeaderCell>
-                            <Table.HeaderCell>Number of pylint errors on most recent submission</Table.HeaderCell>
-                            <Table.HeaderCell>State of Last Submission</Table.HeaderCell>
-                            <Table.HeaderCell>
-                                <Button
-                                    onClick={() => { this.handleClick() }}
-                                    style={{
-                                        backgroundColor: 'red',
-                                        color: 'white',
-                                        borderRadius: '5px',
-                                        padding: '10px',
-                                        margin: '5px'
-                                    }}
-                                >
-                                    Plagiarism Checker
-                                </Button>
+                    {/* Big grey title bar separated from the table */}
+                    <div className="title-row">
+                        <h1 className="page-title">Grade or Review Student Submissions</h1>
+                    </div>
 
-                            </Table.HeaderCell>
-                            <Table.HeaderCell>
-                                <Button
-                                    onClick={() => this.setState({ exportModalIsOpen: true })}
-                                    style={{
-                                        backgroundColor: 'blue',
-                                        color: 'white',
-                                        borderRadius: '5px',
-                                        padding: '10px',
-                                        margin: '5px'
-                                    }}
-                                >
-                                    Export Grades
-                                </Button>
-                                <Button
-                                    onClick={() => { this.openGradingModule(-1) }}
-                                    style={{
-                                        backgroundColor: 'blue',
-                                        color: 'white',
-                                        borderRadius: '5px',
-                                        padding: '10px',
-                                        margin: '5px'
-                                    }}
-                                >
-                                    Start Grading
-                                </Button>
-                            </Table.HeaderCell>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                        {this.state.rows.map(row => {
-                            if (row.hidden == true) {
-                                return (<></>);
-                            }
+                    {/* Connected white container (Lecture Section + buttons + table) */}
+                    <div className="student-sub-panel">
+                        {/* Filter */}
+                        <div className="filter-bar">
+                            <label className="filter-label" htmlFor="lectureFilter">
+                                Lecture Section:&nbsp;
+                            </label>
+                            <select
+                                id="lectureFilter"
+                                className="filter-select lecture-filter"
+                                onChange={this.handleFilterChange}
+                                defaultValue={this.state.lecture_numbers[0]?.value}
+                            >
+                                {this.state.lecture_numbers.map((opt) => (
+                                    <option className="lecture-option" key={opt.key} value={opt.value}>
+                                        {opt.text}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
-                            if (row.subid === -1 && row.hidden == false) {
-                                return (
-                                    <Table.Row>
-                                        <Table.Cell>
-                                            {row.Fname + " " + row.Lname}
-                                            {row.IsLocked === true && (
-                                                <Button color='blue' icon size='mini' style={{ marginLeft: '10px' }} onClick={() => this.handleUnlockClick(row.id)}>
-                                                    <Icon name='unlock' />
-                                                </Button>
-                                            )}
-                                        </Table.Cell>
-                                        <Table.Cell className="table-width">{row.lecture_number}</Table.Cell>
-                                        <Table.Cell>N/A</Table.Cell>
-                                        <Table.Cell>N/A</Table.Cell>
-                                        <Table.Cell>N/A</Table.Cell>
-                                        <Table.Cell>N/A</Table.Cell>
-                                        <Table.Cell>N/A</Table.Cell>
-                                        <Table.Cell>
-                                            <Input
-                                                type="text"
-                                                placeholder="optional"
-                                                value={row.grade} // Set the initial value of the input to row.grade
-                                                onChange={(e) => this.handleGradeChange(e, row)} // Pass the row object to the function so we can update the state of the row
-                                                disabled
-                                            />
-                                            <Button
-                                                onClick={() => { this.openGradingModule(row.id) }}
-                                                style={{
-                                                    backgroundColor: 'blue',
-                                                    color: 'white',
-                                                    borderRadius: '5px',
-                                                    padding: '10px',
-                                                    margin: '5px'
-                                                }}
+                        {/*  
+                        <div className="actions-bar">
+                            <button
+                                className="btn start-grading-btn"
+                                onClick={() => this.openGradingModule(-1)}
+                            >
+                                Start Grading
+                            </button>
+                        </div>
+                        */}
+
+                        {/* Table */}
+                        <table className="students-table">
+                            <thead className="table-head">
+                                <tr className="table-row">
+                                    <th className="col-student-name">Student</th>
+                                    <th className="col-lecture-number">Lecture</th>
+                                    <th className="col-submissions">Submissions</th>
+                                    <th className="col-date">Last Submitted</th>
+                                    <th className="col-pylint-errors">Pylint Errors</th>
+                                    <th className="col-status">Status</th>
+                                    <th className="col-view">View</th>
+                                    <th className="col-grade">Grade</th>
+                                </tr>
+                            </thead>
+                            <tbody className="table-body">
+                                {this.state.rows.map((row) => {
+                                    if (row.hidden) return null;
+
+                                    if (row.subid === -1) {
+                                        return (
+                                            <tr
+                                                className="student-row student-row--no-submission"
+                                                key={`row-${row.id}-na`}
                                             >
-                                                Grade
-                                            </Button>
-                                        </Table.Cell>
-                                    </Table.Row>
-                                )
-                            }
-                            return (
-                                <Table.Row>
-                                    <Table.Cell>
-                                        {row.Fname + " " + row.Lname}
-                                        {row.IsLocked === true && (
-                                            <Button color='blue' icon size='mini' style={{ marginLeft: '10px' }} onClick={() => this.handleUnlockClick(row.id)}>
-                                                <Icon name='unlock' />
-                                            </Button>
+                                                <td className="student-name-cell">
+                                                    {row.Fname + ' ' + row.Lname}{' '}
+                                                    {row.IsLocked === true && (
+                                                        <button
+                                                            className="btn unlock-btn"
+                                                            onClick={() => this.handleUnlockClick(row.id)}
+                                                        >
+                                                            Unlock
+                                                        </button>
+                                                    )}
+                                                </td>
+                                                <td className="lecture-number-cell">{row.lecture_number}</td>
+                                                <td className="submissions-cell">N/A</td>
+                                                <td className="date-cell">N/A</td>
+                                                <td className="pylint-errors-cell">N/A</td>
+                                                <td className="status-cell">N/A</td>
+                                                <td className="view-cell">N/A</td>
+                                                <td className="grade-cell">
+                                                    <input
+                                                        className="grade-input"
+                                                        type="text"
+                                                        placeholder="optional"
+                                                        value={row.grade}
+                                                        onChange={(e) => this.handleGradeChange(e, row)}
+                                                        disabled
+                                                    />
+                                                    <button
+                                                        className="btn grade-btn"
+                                                        onClick={() => this.openGradingModule(row.id)}
+                                                    >
+                                                        Grade
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    }
+
+                                    return (
+                                        <tr className="student-row" key={`row-${row.id}`}>
+                                            <td className="student-name-cell">
+                                                {row.Fname + ' ' + row.Lname}{' '}
+                                                {row.IsLocked === true && (
+                                                    <button
+                                                        className="btn unlock-btn"
+                                                        onClick={() => this.handleUnlockClick(row.id)}
+                                                    >
+                                                        Unlock
+                                                    </button>
+                                                )}
+                                            </td>
+                                            <td className="lecture-number-cell">{row.lecture_number}</td>
+                                            <td className="submissions-cell">{row.numberOfSubmissions}</td>
+                                            <td className="date-cell">{row.date}</td>
+                                            <td className="pylint-errors-cell">{row.numberOfPylintErrors}</td>
+                                            <td
+                                                className={
+                                                    row.isPassing ? 'status-cell status passed' : 'status-cell status failed'
+                                                }
+                                            >
+                                                {row.isPassing ? 'PASSED' : 'FAILED'}
+                                            </td>
+                                            <td className="view-cell">
+                                                <Link
+                                                    className="view-link"
+                                                    to={`/class/${row.classId}/code/${row.subid}`}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                >
+                                                    View
+                                                </Link>
+                                            </td>
+                                            <td className="grade-cell">
+                                                <input
+                                                    className="grade-input"
+                                                    type="text"
+                                                    placeholder="optional"
+                                                    value={row.grade}
+                                                    onChange={(e) => this.handleGradeChange(e, row)}
+                                                    disabled
+                                                />
+                                                <button
+                                                    className="btn grade-btn"
+                                                    onClick={() => this.openGradingModule(row.id)}
+                                                >
+                                                    Grade
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div >
+
+                {/* Real modal & overlay, rendered at the root so it floats above and locks body via :has() */}
+                {
+                    this.state.modalIsOpen && (
+                        <>
+                            <div
+                                className="modal-overlay"
+                                onClick={() => this.setState({ modalIsOpen: false })}
+                                aria-hidden="true"
+                            />
+                            <div
+                                className="testcase-modal"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-labelledby="grading-modal-title"
+                            >
+                                {/* Leave the close button as a sibling so it can sit “outside” the modal */}
+                                <button
+                                    type="button"
+                                    className="modal-close-button"
+                                    aria-label="Close"
+                                    onClick={() => this.setState({ modalIsOpen: false })}
+                                >
+                                    ✕
+                                </button>
+
+                                {/* NEW: make this the scroll container */}
+                                <div className="modal-body">
+                                    <div className="modal-header">
+                                        <div className="modal-title" id="grading-modal-title">
+                                            Student Name: {this.state.selectedStudentName}
+                                        </div>
+                                    </div>
+
+                                    <div className="tab-menu view-switch">
+                                        <button
+                                            className={this.state.activeView === 'table' ? 'active menu-item-table' : 'menu-item-table'}
+                                            onClick={() => this.setState({ activeView: 'table' })}
+                                            type="button"
+                                        >
+                                            Table View
+                                        </button>
+                                        <button
+                                            className={`menu-item-diff ${this.state.activeView === 'diff' ? 'active' : ''}`}
+                                            onClick={() => this.setState({ activeView: 'diff' })}
+                                            type="button"
+                                        >
+                                            File View
+                                        </button>
+                                    </div>
+
+                                    <div className="tab-content">
+                                        {this.state.activeView === 'table' && (
+                                            <>
+                                                <section className="tests-section">
+                                                    <table className="results-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Difficulty Level</th>
+                                                                <th>Test Name</th>
+                                                                <th>Status</th>
+                                                                <th>Your Program's Output</th>
+                                                                <th>Expected Output</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {!testsLoaded && (
+                                                                <tr>
+                                                                    <td className="no-data-message" colSpan={5}>Fetching tests…</td>
+                                                                </tr>
+                                                            )}
+                                                            {testsLoaded && testRows.length === 0 && (
+                                                                <tr>
+                                                                    <td className="no-data-message" colSpan={5}>No tests were returned for this submission.</td>
+                                                                </tr>
+                                                            )}
+                                                            {testsLoaded && testRows.map((row, i) => {
+                                                                if (row.kind === 'info') {
+                                                                    return (
+                                                                        <tr className="info-row" key={`info-${row.suite}-${i}`}>
+                                                                            <td>{row.suite}</td>
+                                                                            <td colSpan={4}>—</td>
+                                                                        </tr>
+                                                                    );
+                                                                }
+                                                                const isPass = row.passed;
+                                                                return (
+                                                                    <tr key={`res-${row.suite}-${row.test}-${i}`}>
+                                                                        <td>{row.suite}</td>
+                                                                        <td>{row.test}</td>
+                                                                        <td
+                                                                            className={`status-cell status ${/^(pass|passed|ok|success)$/i.test(row.status) ? 'passed' : 'failed'}`}
+                                                                        >
+                                                                            {row.status}
+                                                                        </td>
+                                                                        <td className={isPass ? 'status-cell passed' : undefined}>
+                                                                            {isPass ? row.status : <pre className="cell-pre">{row.outputExcerpt}</pre>}
+                                                                        </td>
+                                                                        <td className={isPass ? 'status-cell passed' : undefined}>
+                                                                            {isPass ? row.status : <pre className="cell-pre">{row.expectedExcerpt}</pre>}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </section>
+                                            </>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell>{row.lecture_number}</Table.Cell>
-                                    <Table.Cell>{row.numberOfSubmissions}</Table.Cell>
-                                    <Table.Cell>{row.date}</Table.Cell>
-                                    <Table.Cell>{row.numberOfPylintErrors}</Table.Cell>
-                                    <Table.Cell style={{ color: row.isPassing ? 'green' : 'red' }}>
-                                        {row.isPassing ? "PASSED" : "FAILED"}
-                                    </Table.Cell>
-                                    <Table.Cell style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                                        <Button
-                                            as={Link}
-                                            target="_blank"
-                                            to={"/class/" + row.classId + "/code/" + row.subid}
-                                            style={{
-                                                backgroundColor: 'orange',
-                                                color: 'white',
-                                                borderRadius: '5px',
-                                                padding: '10px',
-                                                margin: '5px',
-                                                width: '150px' // Added width
+
+                                        {this.state.activeView === 'diff' && (
+                                            <section className="diff-view">
+                                                <aside className="diff-sidebar">
+                                                    <ul className="diff-file-list">
+                                                        {!testsLoaded && <li className="muted">Loading…</li>}
+                                                        {testsLoaded && diffFilesAll.length === 0 && <li className="muted">No tests.</li>}
+                                                        {diffFilesAll.map((f) => (
+                                                            <li
+                                                                key={f.id}
+                                                                className={
+                                                                    'file-item ' +
+                                                                    (f.id === derivedSelectedDiffId ? 'selected ' : '') +
+                                                                    (f.passed ? 'passed' : 'failed')
+                                                                }
+                                                                onClick={() => this.setState({ selectedDiffId: f.id })}
+                                                                title={`${f.suite} / ${f.test}`}
+                                                            >
+                                                                <div className="file-name">{f.test}</div>
+                                                                <div className="file-sub">
+                                                                    <span className={'status-dot ' + (f.passed ? 'is-pass' : 'is-fail')} />
+                                                                    {f.suite} • {f.status}
+                                                                </div>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </aside>
+
+                                                <div className="diff-pane">
+                                                    <div className="diff-toolbar">
+                                                        <div className="diff-title">
+                                                            {selectedFile
+                                                                ? `Difficulty: ${selectedFile.suite} Testcase Name: ${selectedFile.test}`
+                                                                : 'No selection'}
+                                                        </div>
+                                                        <div className="spacer" />
+                                                    </div>
+
+                                                    <div className="diff-code">
+                                                        {!selectedFile && <div className="muted">Select a test on the left to view its diff.</div>}
+                                                        {selectedFile && (
+                                                            selectedFile.passed
+                                                                ? <div className="diff-line ctx">No differences.</div>
+                                                                : selectedFile.unified.split('\n').map((line, i) => {
+                                                                    const cls =
+                                                                        line.startsWith('+') ? 'add'
+                                                                            : line.startsWith('-') ? 'del'
+                                                                                : (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) ? 'meta'
+                                                                                    : 'ctx';
+                                                                    return (
+                                                                        <div key={i} className={`diff-line ${cls}`}>
+                                                                            {line || ' '}
+                                                                        </div>
+                                                                    );
+                                                                })
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </section>
+                                        )}
+                                    </div>
+
+                                    {/* ==================== CODE SECTION (BELOW TABLES) ==================== */}
+                                    <section className="code-section">
+                                        <h2 className="section-title">Submitted Code</h2>
+                                        {!code && <div className="no-data-message">Fetching submitted code…</div>}
+                                        {!!code && (
+                                            <div className="code-block code-viewer" role="region" aria-label="Submitted source code">
+                                                <ol className="code-list">
+                                                    {codeLines.map((text, idx) => {
+                                                        const lineNo = idx + 1;
+                                                        return (
+                                                            <li key={lineNo} className="code-line">
+                                                                <span className="gutter">
+                                                                    <span className="line-number">{lineNo}</span>
+                                                                </span>
+                                                                <span className="code-text">{text || '\u00A0'}</span>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ol>
+                                            </div>
+                                        )}
+                                    </section>
+
+                                    <div className="modal-footer" role="group" aria-label="Submit grade">
+                                        <label className="footer-instruction" htmlFor="gradeInput">Enter grade here:</label>
+                                        <input
+                                            id="gradeInput"
+                                            className="grade-input"
+                                            type="number"
+                                            placeholder="0"
+                                            value={this.state.selectedStudentGrade ?? ''}
+                                            onChange={(e) => {
+                                                const v = e.target.value;
+                                                this.setState({
+                                                    selectedStudentGrade: v === '' ? undefined : Number(v),
+                                                });
                                             }}
-                                        >
-                                            View
-                                        </Button>
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Input
-                                            type="text"
-                                            placeholder="optional"
-                                            value={row.grade} // Set the initial value of the input to row.grade
-                                            onChange={(e) => this.handleGradeChange(e, row)} // Pass the row object to the function so we can update the state of the row
-                                            disabled
+                                            onWheel={(e) => e.currentTarget.blur()} // 👈 stop mouse wheel from changing value
                                         />
-                                        <Button
-                                            onClick={() => { this.openGradingModule(row.id) }}
-                                            style={{
-                                                backgroundColor: 'blue',
-                                                color: 'white',
-                                                borderRadius: '5px',
-                                                padding: '10px',
-                                                margin: '5px'
-                                            }}
+
+                                        <button
+                                            className="btn submit-grade-btn"
+                                            onClick={() =>
+                                                this.submitGrades(
+                                                    this.state.selectedStudent,
+                                                    String(this.state.selectedStudentGrade ?? 0)
+                                                )
+                                            }
+                                            type="button"
                                         >
-                                            Grade
-                                        </Button>
-                                    </Table.Cell>
-                                </Table.Row>
-                            )
-                        })}
-                    </Table.Body>
-                </Table >
+                                            Submit
+                                        </button>
 
+                                    </div>
+
+                                </div>
+                            </div>
+                        </>
+                    )
+                }
             </>
-
         );
     }
 }

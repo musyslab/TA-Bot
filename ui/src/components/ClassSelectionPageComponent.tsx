@@ -1,43 +1,46 @@
 import { useEffect, useState } from 'react';
-import { Image,Grid, Button, Form, } from 'semantic-ui-react'
-import React from 'react';
-
-import 'semantic-ui-css/semantic.min.css';
-
-import codeimg from '../codeex.png'
+import codeimg from '../codeex.png';
 import axios from 'axios';
+import styles from '../css/ClassSelectionPageComponent.module.scss';
+
+interface DropDownOption {
+  key: number;
+  value: number;
+  text: string;
+}
+
+var Coptions = Array<DropDownOption>();
+var LectureOptions = Array<DropDownOption>();
+var Loptions = Array<DropDownOption>();
 
 const ClassSelectionPageComponent = () => {
+  const [studentClassNames, setstudentClassNames] = useState<Array<string>>([]);
+  const [studentClassNumbers, setstudentClassNumbers] = useState<Array<string>>([]);
+  const [addClass, setaddClass] = useState<boolean>(false);
+  const [ClassId, setClassId] = useState<String>('');
+  const [LectureId, setLectureId] = useState<String>('');
+  const [LabId, setLabId] = useState<String>('');
 
-    const [studentClassNames,setstudentClassNames] = useState<Array<string>>([]);
-    const [studentClassNumbers,setstudentClassNumbers] = useState<Array<string>>([]);
-    const [addClass,setaddClass] = useState<boolean>(false);
-    const [ClassId, setClassId] = useState<String>("");
-    const [LectureId, setLectureId] = useState<String>("");
-    const [LabId, setLabId] = useState<String>("");
-
-
-  const handleAddClassClick = () => {
-    setaddClass(true);
-  };
   const handleClassSubmit = () => {
     const formData = new FormData();
-    formData.append("class_name", ClassId.toString());
-    formData.append("lecture_name", LectureId.toString());
-    formData.append("lab_name", LabId.toString());
-    axios.post(process.env.REACT_APP_BASE_API_URL + `/class/add_class_student`, formData, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-      }
-    })
-      .then(res => {
-        window.location.href = "code"
+    formData.append('class_name', ClassId.toString());
+    formData.append('lecture_name', LectureId.toString());
+    formData.append('lab_name', LabId.toString());
+    axios
+      .post(import.meta.env.VITE_API_URL + `/class/add_class_student`, formData, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+        },
       })
-      .catch(err => {
+      .then(() => {
+        window.location.href = 'code';
+      })
+      .catch(() => {
         window.alert('Invalid entry');
-        window.location.href = "/class/classes";
-      })
+        window.location.href = '/class/classes';
+      });
   };
+
   const handleClassIdChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     setClassId(value);
@@ -52,69 +55,83 @@ const ClassSelectionPageComponent = () => {
   };
 
   useEffect(() => {
-    axios.get(process.env.REACT_APP_BASE_API_URL + `/class/all?filter=true`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-      }
-    }).then(res => {
-      setstudentClassNames([]);
-      setstudentClassNumbers([]);
-      res.data.map((obj: { id: number, name: string }) => {
-        setstudentClassNumbers(oldArray => [...oldArray, obj.id + ""]);
-        setstudentClassNames(oldArray => [...oldArray, obj.name]);
+    axios
+      .get(import.meta.env.VITE_API_URL + `/class/all?filter=true`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+        },
+      })
+      .then((res) => {
+        setstudentClassNames([]);
+        setstudentClassNumbers([]);
+        res.data.map((obj: { id: number; name: string }) => {
+          setstudentClassNumbers((oldArray) => [...oldArray, obj.id + '']);
+          setstudentClassNames((oldArray) => [...oldArray, obj.name]);
+        });
       });
-    });
   }, []);
 
-
   return (
-    <div style={{ margin: "5%" }}>
-      <Grid celled>
-        {studentClassNames.map((name, index) => {
-          return (
-            <Grid.Row>
-              <Grid.Column width={3}>
-                <Image src={codeimg} href={"/class/" + studentClassNumbers[index] + "/upload"}></Image>
-              </Grid.Column>
-              <Grid.Column width={7}>
-                <h1 style={{ margin: "8.5%" }}>{name}</h1>
-              </Grid.Column>
-            </Grid.Row>
-          );
-        })}
-      </Grid>
+    <div className={styles.container}>
+      <div className={styles.sectionTitle}>Student Classes</div>
+
+      <div className={styles.classList}>
+        {studentClassNames.map((name, index) => (
+          <a
+            key={index}
+            href={`/class/${studentClassNumbers[index]}/upload`}
+            className={styles.clickableRow}
+          >
+            <div>
+              <img src={codeimg} alt="Code" />
+            </div>
+            <div>
+              <h1 className={styles.title}>{name}</h1>
+            </div>
+          </a>
+        ))}
+      </div>
+
       {addClass && (
-        <Form>
-          <Form.Input
-            fluid
-            label='Class Name'
-            placeholder='COSC 1020'
-            value={ClassId}
-            onChange={handleClassIdChange}
-          />
-          <Form.Input
-            fluid
-            label='Lecture Number'
-            placeholder='102'
-            value={LectureId}
-            onChange={handleLectureIdChange}
-          />
-          <Form.Input
-            fluid
-            label='Lab Number'
-            placeholder='405'
-            value={LabId}
-            onChange={handleLabIdChange}
-          />
-          <Button content="Submit" type="submit" onClick={handleClassSubmit} ></Button>
-        </Form>
+        <form>
+          <div>
+            <label htmlFor="className">Class Name</label>
+            <input
+              id="className"
+              placeholder="COSC 1020"
+              value={ClassId as string}
+              onChange={handleClassIdChange}
+            />
+          </div>
 
-      )
+          <div>
+            <label htmlFor="lectureNumber">Lecture Number</label>
+            <input
+              id="lectureNumber"
+              placeholder="102"
+              value={LectureId as string}
+              onChange={handleLectureIdChange}
+            />
+          </div>
 
-      }
+          <div>
+            <label htmlFor="labNumber">Lab Number</label>
+            <input
+              id="labNumber"
+              placeholder="405"
+              value={LabId as string}
+              onChange={handleLabIdChange}
+            />
+          </div>
+
+          <button type="submit" onClick={handleClassSubmit}>
+            Submit
+          </button>
+        </form>
+      )}
     </div>
   );
 
-}
+};
 
-export default ClassSelectionPageComponent
+export default ClassSelectionPageComponent;

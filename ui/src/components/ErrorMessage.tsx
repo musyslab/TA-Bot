@@ -1,19 +1,18 @@
 import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css'
 import { Message } from 'semantic-ui-react'
-import React from 'react';
 
 interface ErrorMessageProps {
-    message: string
-    isHidden: boolean
+  message: string
+  isHidden: boolean
 }
 
 class ErrorMessage extends Component<ErrorMessageProps, {}> {
   render() {
     return (
-    <Message error hidden={this.props.isHidden}>
+      <Message error hidden={this.props.isHidden}>
         {this.props.message}
-    </Message>
+      </Message>
     );
   }
 }

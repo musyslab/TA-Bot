@@ -1,347 +1,534 @@
 import { useEffect, useState } from 'react';
-import 'semantic-ui-css/semantic.min.css';
-import { Button, Form, Grid, Segment, Dimmer, Header, Icon, Table } from 'semantic-ui-react';
+import 'semantic-ui-css/semantic.min.css'
+import { Button, Form, Grid, Segment, Dimmer, Header, Icon, Table } from 'semantic-ui-react'
 import axios from 'axios';
 import MenuComponent from '../components/MenuComponent';
-import React from 'react';
-import { SemanticCOLORS } from 'semantic-ui-react';
+import React from 'react'
+import { SemanticCOLORS } from 'semantic-ui-react'
 import ErrorMessage from '../components/ErrorMessage';
 import Countdown from 'react-countdown';
-import { Helmet } from "react-helmet";
+import { Helmet } from 'react-helmet';
 import { useParams } from 'react-router-dom';
+import '../css/UploadPage.scss';
 
-interface UploadProps extends Record<string, string | undefined> {
-  class_id?: string;
+interface UploadProps {
+    class_id?: string
 }
 
 interface UploadPageState {
-  file?: File;
-  color: SemanticCOLORS;
-  isLoading: boolean;
-  error_message: string;
-  isErrorMessageHidden: boolean;
-  project_name: string;
-  project_id: number;
-  end: string;
-  canRedeem: boolean;
-  points: number;
-  time_until_next_submission: string;
-  is_allowed_to_submit: boolean;
-  hasScoreEnabled: boolean;
-  hasUnlockEnabled: boolean;
+    file?: File,
+    color: SemanticCOLORS,
+    isLoading: boolean
+    error_message: string,
+    isErrorMessageHidden: boolean,
+    project_name: string,
+    project_id: number,
+    canRedeem: boolean,
+    points: number
+    time_until_next_submission: string,
+    is_allowed_to_submit: boolean,
+    hasScoreEnabled: boolean,
+    hasUnlockEnabled: boolean,
+
 }
 
 const UploadPage = () => {
-  let { class_id } = useParams<UploadProps>();
-  var cid = class_id ? parseInt(class_id) : -1;
-  const [file, setFile] = useState<File | null>(null);
-  const [color, setColor] = useState<string>('gray');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error_message, setError_Message] = useState<string>('');
-  const [isErrorMessageHidden, setIsErrorMessageHidden] = useState<boolean>(true);
-  const [project_name, setProject_Name] = useState<string>('');
-  const [project_id, setProject_id] = useState<number>(0);
-  const [end, setEnd] = useState<string>('');
-  const [canRedeem, setCanRedeem] = useState<boolean>(false);
-  const [points, setPoints] = useState<number>(0);
-  const [time_until_next_submission, setTime_Until_Next_Submission] = useState<string>('');
-  const [is_allowed_to_submit, setIs_Allowed_To_Submit] = useState<boolean>(true);
-  const [hasScoreEnabled, setHasScoreEnabled] = useState<boolean>(false);
-  const [hasUnlockEnabled, setHasUnlockEnabled] = useState<boolean>(false);
-  const [hasTbsEnabled, setHasTbsEnabled] = useState<boolean>(false);
-  const [tbstime, setTbsTime] = useState<string>('');
-  const [DaysSinceProjectStarted, setDaysSinceProjectStarted] = useState<number>(0);
-  const [TimeUntilNextSubmission, setTimeUntilNextSubmission] = useState<string>('');
+    const { class_id } = useParams();
+    let cid = -1;
+    if (class_id !== undefined) {
+        cid = parseInt(class_id, 10);
+    }
+    const [files, setFiles] = useState<File[]>([]);
+    const [isLoading, setIsLoading] = useState<boolean>(false);
+    const [error_message, setError_Message] = useState<string>("");
+    const [isErrorMessageHidden, setIsErrorMessageHidden] = useState<boolean>(true);
+    const [project_id, setProject_id] = useState<number>(0);
+    const [time_until_next_submission, setTime_Until_Next_Submission] = useState<string>("");
+    const [is_allowed_to_submit, setIs_Allowed_To_Submit] = useState<boolean>(true);
+    const [hasTbsEnabled, setHasTbsEnabled] = useState<boolean>(false);
+    const [tbstime, setTbsTime] = useState<string>("");
+    const [DaysSinceProjectStarted, setDaysSinceProjectStarted] = useState<number>(0);
+    const [TimeUntilNextSubmission, setTimeUntilNextSubmission] = useState<string>("");
+    const [suggestions, setSuggestions] = useState<string>("");
+    const [baseCharge, setBaseCharge] = useState<number>(0);
+    const [RewardCharge, setRewardCharge] = useState<number>(0);
+    const [HoursUntilRecharge, setHoursUntilRecharge] = useState<number>(0);
+    const [MinutesUntilRecharge, setMinutesUntilRecharge] = useState<number>(0);
+    const [SecondsUntilRecharge, setSecondsUntilRecharge] = useState<number>(0);
+    const [RewardState, setRewardState] = useState<boolean>(false);
+    const [displayClock, setDisplayClock] = useState<boolean>(false);
 
-  useEffect(() => {
-    axios
-      .get(process.env.REACT_APP_BASE_API_URL + `/submissions/submissioncounter`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-        },
-      })
-      .then((res) => {
-        setProject_Name(res.data.name);
-        setEnd(res.data.end);
-        setProject_id(res.data.Id);
-        setCanRedeem(res.data.can_redeem);
-        setPoints(res.data.points);
-        setTime_Until_Next_Submission(res.data.time_until_next_submission);
-        setIs_Allowed_To_Submit(!hasTbsEnabled || new Date() > new Date(res.data.time_until_next_submission));
-      })
-      .catch((err) => {
-        setError_Message(err.response.data.message);
-        setIsErrorMessageHidden(false);
-        setIsLoading(false);
-      });
-    getSubmissionDetails();
-  }, []);
+    const [project_name, setProject_name] = useState<string>("");
+    const [dueDate, setDueDate] = useState<string>("");
 
-  function handleFileChange(event: React.FormEvent) {
-    const target = event.target as HTMLInputElement;
-    const files = target.files;
-
-    if (files != null && files.length === 1) {
-      setFile(files[0]);
+    let activeDay: number;
+    if (project_name !== "") {
+        activeDay = Math.min(Math.max(DaysSinceProjectStarted, 1), 6);
     } else {
-      setFile(null);
+        activeDay = 0;
     }
-  }
 
-  function handleRedeem() {
-    axios
-      .get(process.env.REACT_APP_BASE_API_URL + `/submissions/extraday`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-        },
-      })
-      .then((res) => {
-        alert(
-          'You have now received an extra day of unlimited submissions!  Instead of the regular 45 minutes cooldown this Wednesday, you\'ll only have a 5-minute cooldown between submissions!'
-        );
+
+    useEffect(() => {
+        // First: load submission details (including project_name)
+        getSubmissionDetails();
+    }, []);
+
+    // Once project_name has been set, *then* fetch charges
+    useEffect(() => {
+        if (project_name) {
+            getCharges();
+        }
+    }, [project_name]);
+
+
+    function handleFileChange(event: React.FormEvent) {
+        const target = event.target as HTMLInputElement;
+        const selected = target.files;
+        // accept multiple files
+        setFiles(selected ? Array.from(selected) : []);
+    };
+
+    function getCharges() {
+        axios.get(import.meta.env.VITE_API_URL + `/submissions/GetCharges?class_id=${class_id}`, {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+            }
+        })
+            .then(res => {
+                setBaseCharge(res.data.baseCharge);
+                setRewardCharge(res.data.rewardCharge);
+                setHoursUntilRecharge(+res.data.HoursUntilRecharge);
+                setMinutesUntilRecharge(+res.data.MinutesUntilRecharge);
+                setSecondsUntilRecharge(+res.data.SecondsUntilRecharge);
+                setDisplayClock(
+                    !(+res.data.HoursUntilRecharge === 0 &&
+                        +res.data.MinutesUntilRecharge === 0 &&
+                        +res.data.SecondsUntilRecharge === 0)
+                );
+            })
+            .catch(err => {
+                if (err.response?.status === 404) {
+                    // no active project → zero everything out
+                    setBaseCharge(0);
+                    setRewardCharge(0);
+                    setHoursUntilRecharge(0);
+                    setMinutesUntilRecharge(0);
+                    setSecondsUntilRecharge(0);
+                    setDisplayClock(false);
+                } else {
+                    console.error("Error fetching charges:", err);
+                }
+            });
+    }
+
+    function getSubmissionDetails() {
+        axios.get(import.meta.env.VITE_API_URL + `/submissions/GetSubmissionDetails?class_id=${class_id}`, {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+            }
+        }).then(res => {
+            setTbsTime(res.data[0]);
+            setDaysSinceProjectStarted(parseInt(res.data[1], 10) + 1);
+            setTimeUntilNextSubmission(res.data[2]);
+            setProject_name(res.data[3]);
+            setDueDate(res.data[4]);
+        })
+    }
+    function submitSuggestions() {
+        axios.post(import.meta.env.VITE_API_URL + `/submissions/submit_suggestion`,
+            {
+                "suggestion": suggestions
+            },
+            {
+                headers:
+                {
+                    'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+                }
+            }
+        ).then(res => {
+            alert("Thank you for your constructive feedback, if you have any other suggestions please feel free to submit them.");
+        }, (error) => {
+            alert("There was an error submitting your feedback. Please try again later.");
+        })
+    }
+
+    function onTimerFinish() {
         window.location.reload();
-      });
-  }
-
-  function getSubmissionDetails() {
-    axios
-      .get(process.env.REACT_APP_BASE_API_URL + `/submissions/GetSubmissionDetails?class_id=${class_id}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-        },
-      })
-      .then((res) => {
-        setDaysSinceProjectStarted(parseInt(res.data[1]) + 1);
-        setTbsTime(res.data[0]);
-        setTimeUntilNextSubmission(res.data[2]);
-        console.log(res.data);
-      });
-  }
-
-  function onTimerFinish() {
-    window.location.reload();
-  }
-
-  function handleSubmit() {
-    if (file !== null) {
-      setIsErrorMessageHidden(true);
-      setIsLoading(true);
-      const formData = new FormData();
-      formData.append('file', file, file.name);
-      formData.append('class_id', cid.toString());
-
-      axios
-        .post(process.env.REACT_APP_BASE_API_URL + `/upload/`, formData, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-          },
-        })
-        .then((res) => {
-          window.location.href = 'code';
-        })
-        .catch((err) => {
-          setError_Message(err.response.data.message);
-          setIsErrorMessageHidden(false);
-          setIsLoading(false);
-        });
     }
+
+    function officeHoursPage() {
+        window.location.href = "/class/OfficeHours/" + class_id;
+    }
+
+    function handleSubmit() {
+        // Make sure at least one file is selected
+        if (files.length === 0) {
+            setError_Message("Please select a file to upload.");
+            setIsErrorMessageHidden(false);
+            return;
+        }
+
+        // Grab the first file from your files state
+        const fileToUpload = files[0];
+
+        setIsErrorMessageHidden(true);
+        setIsLoading(true);
+
+        const formData = new FormData();
+        formData.append("file", fileToUpload, fileToUpload.name);
+        formData.append("class_id", cid.toString());
+
+        axios.post(
+            `${import.meta.env.VITE_API_URL}/upload/`,
+            formData,
+            {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+                }
+            }
+        )
+            .then(res => {
+                window.location.href = "code";
+            })
+            .catch(err => {
+                setError_Message(err.response?.data?.message || "Upload failed.");
+                setIsErrorMessageHidden(false);
+                setIsLoading(false);
+            });
+    }
+    function consumeRewardCharge() {
+        if (RewardCharge == 0) {
+            alert("You don't have any reward charges to use");
+            return;
+        }
+        axios.get(import.meta.env.VITE_API_URL + `/submissions/ConsumeCharge?class_id=${class_id}`, {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+            }
+        })
+            .then(res => {
+                setRewardState(true);
+            })
+            .catch(err => {
+
+            })
+    }
+
+    const getFileIcon = (filename: string) => {
+        const ext = filename.split('.').pop()?.toLowerCase();
+        switch (ext) {
+            // Documents
+            case 'pdf':
+                return 'file pdf';
+            case 'doc':
+            case 'docx':
+                return 'file word';
+            case 'xls':
+            case 'xlsx':
+                return 'file excel';
+
+            // Images
+            case 'png':
+            case 'jpg':
+            case 'jpeg':
+            case 'gif':
+                return 'file image';
+
+            // Archives
+            case 'zip':
+            case 'rar':
+                return 'file archive';
+
+            // Programming languages 
+            case 'py':
+                return 'python';
+            case 'c':
+                return 'copyright'
+
+            default:
+                return 'code';
+        }
+    };
+
+    const pulseAnimation = `
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
   }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+`;
 
-  // Wrap Helmet to bypass missing refs error
-  const SafeHelmet: React.FC = Helmet as any;
 
-  return (
-    <div>
-      <SafeHelmet>
-        <title>Upload | TA-Bot</title>
-      </SafeHelmet>
-      <MenuComponent
-        showAdminUpload={false}
-        showUpload={false}
-        showHelp={false}
-        showCreate={false}
-        showLast={true}
-        showReviewButton={false}
-      />
-      <Grid textAlign="center" style={{ height: '100vh' }} verticalAlign="middle">
-        <Grid.Column width={4}>
-          <Form loading={isLoading} size="large" onSubmit={handleSubmit} disabled={true}>
-            <Dimmer.Dimmable dimmed={true}>
-              <Segment stacked>
-                <h1>Upload Assignment Here</h1>
-                <Form.Input type="file" fluid required onChange={handleFileChange} />
-                <Button disabled={!is_allowed_to_submit} type="submit" color="blue" fluid size="large">
-                  Upload
-                </Button>
-                <br />
-              </Segment>
-              {tbstime !== 'Expired' || TimeUntilNextSubmission !== 'None' ? (
-                <Segment stacked>
-                  <Table definition>
-                    {tbstime !== 'Expired' && (
-                      <Table.Row>
-                        <Table.Cell>Reduced TBS:</Table.Cell>
-                        <Table.Cell textAlign="center">
-                          <Icon name="clock outline" />
-                          <Countdown
-                            date={
-                              new Date(
-                                new Date().getTime() +
-                                  parseInt(tbstime.split(' ')[0]) * 3600000 +
-                                  parseInt(tbstime.split(' ')[2]) * 60000
-                              )
-                            }
-                            intervalDelay={1000}
-                            precision={2}
-                            renderer={({ hours, minutes }) => `${hours} hours, ${minutes} minutes`}
-                            onComplete={() => {}}
-                          />
-                          &nbsp; remaining
-                        </Table.Cell>
-                      </Table.Row>
-                    )}
-                    {TimeUntilNextSubmission !== 'None' && (
-                      <Table.Row>
-                        <Table.Cell>Time Until next visible submission:</Table.Cell>
-                        <Table.Cell textAlign="center">
-                          <Icon name="clock outline" />
-                          <Countdown
-                            date={
-                              new Date(
-                                new Date().getTime() +
-                                  parseInt(TimeUntilNextSubmission.split(' ')[0]) * 3600000 +
-                                  parseInt(TimeUntilNextSubmission.split(' ')[2]) * 60000 +
-                                  parseInt(TimeUntilNextSubmission.split(' ')[4]) * 1000
-                              )
-                            }
-                            intervalDelay={1000}
-                            precision={2}
-                            renderer={({ hours, minutes, seconds }) => `${hours} hours, ${minutes} minutes, ${seconds} seconds`}
-                            onComplete={() => {}}
-                          />
-                          &nbsp; remaining
-                        </Table.Cell>
-                      </Table.Row>
-                    )}
-                  </Table>
-                </Segment>
-              ) : (
-                <div></div>
-              )}
-              <Dimmer active={project_id === -1}>
-                <Header as="h2" icon inverted>
-                  <Icon name="ban" />
-                  No active project
-                </Header>
-              </Dimmer>
-            </Dimmer.Dimmable>
-          </Form>
-          <div>
-            <Table definition>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell />
-                  <Table.HeaderCell
-                    style={{ backgroundColor: DaysSinceProjectStarted === 1 ? '#51f542' : 'white' }}
-                  >
-                    Day 1
-                  </Table.HeaderCell>
-                  <Table.HeaderCell
-                    style={{ backgroundColor: DaysSinceProjectStarted === 2 ? '#66bb6a' : 'white' }}
-                  >
-                    Day 2
-                  </Table.HeaderCell>
-                  <Table.HeaderCell
-                    style={{ backgroundColor: DaysSinceProjectStarted === 3 ? '#f5ce42' : 'white' }}
-                  >
-                    Day 3
-                  </Table.HeaderCell>
-                  <Table.HeaderCell
-                    style={{ backgroundColor: DaysSinceProjectStarted === 4 ? '#f59e42' : 'white' }}
-                  >
-                    Day 4
-                  </Table.HeaderCell>
-                  <Table.HeaderCell
-                    style={{ backgroundColor: DaysSinceProjectStarted === 5 ? '#f57842' : 'white' }}
-                  >
-                    Day 5
-                  </Table.HeaderCell>
-                  <Table.HeaderCell
-                    style={{ backgroundColor: DaysSinceProjectStarted >= 6 ? '#f55442' : 'white' }}
-                  >
-                    Day 6+
-                  </Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                <Table.Row>
-                  <Table.Cell>normal TBS</Table.Cell>
-                  <Table.Cell>5</Table.Cell>
-                  <Table.Cell>15</Table.Cell>
-                  <Table.Cell>45</Table.Cell>
-                  <Table.Cell>60</Table.Cell>
-                  <Table.Cell>90</Table.Cell>
-                  <Table.Cell>120</Table.Cell>
-                </Table.Row>
-                <Table.Row>
-                  <Table.Cell>office hours TBS</Table.Cell>
-                  <Table.Cell>1.7</Table.Cell>
-                  <Table.Cell>5</Table.Cell>
-                  <Table.Cell>15</Table.Cell>
-                  <Table.Cell>20</Table.Cell>
-                  <Table.Cell>30</Table.Cell>
-                  <Table.Cell>40</Table.Cell>
-                </Table.Row>
-              </Table.Body>
-            </Table>
-            <p>
-              You get instant test case feedback while in office hours! <br />
-              After you leave office hours, you will have the reduced TBS for 3 hours!
-            </p>
-          </div>
-
-          {hasTbsEnabled && project_id !== -1 && !is_allowed_to_submit && (
-            <>
-              <Icon name="clock outline" />
-              <Countdown date={new Date(time_until_next_submission)} onComplete={onTimerFinish} />
-            </>
-          )}
-
-          <ErrorMessage message={error_message} isHidden={isErrorMessageHidden} />
-
-          {hasScoreEnabled && (
-            <Button
-              basic
-              color="blue"
-              content="Score on last assignment"
-              icon="gem"
-              label={{ as: 'a', basic: true, color: 'blue', pointing: 'left', content: points }}
+    return (
+        <div className="upload-page">
+            <Helmet>
+                <title>Upload | TA-Bot</title>
+            </Helmet>
+            <MenuComponent
+                showAdminUpload={false}
+                showUpload={false}
+                showHelp={false}
+                showCreate={false}
+                showLast={true}
+                showReviewButton={false}
+                showForum={true}
             />
-          )}
 
-          {hasUnlockEnabled && (
-            <Button
-              disabled={!canRedeem}
-              type="submit"
-              color="yellow"
-              fluid
-              size="small"
-              onClick={handleRedeem}
-            >
-              Use Extra Day (Score must be above 75)
-            </Button>
-          )}
-          <div>&nbsp;</div>
-          <div>
-            <Icon name="paper plane" color="red" />
-            <a href="https://docs.google.com/document/d/1Ig15zUygy85cNyPTg7_VYjW7WcgasvijmXGiNDjZssA/edit?usp=sharing" target="_blank">
-              TA-Bot Patch Notes!
-            </a>
-          </div>
-        </Grid.Column>
-      </Grid>
-    </div>
-  );
+            <Grid textAlign="center" verticalAlign="middle" className="upload-grid">
+                <Grid.Column computer={8} tablet={12} mobile={16}>
+                    <Form loading={isLoading} size="large" onSubmit={handleSubmit} disabled={!is_allowed_to_submit}>
+                        <div className="project-header">
+                            {project_name ? (
+                                <>
+                                    <h2>Current Project</h2>
+                                    <h1>{project_name.replace(/_/g, " ")}</h1>
+                                    {dueDate && (
+                                        <p className="due-date">
+                                            Due: {new Date(dueDate).toLocaleString(undefined, {
+                                                year: 'numeric',
+                                                month: '2-digit',
+                                                day: '2-digit',
+                                                hour: '2-digit',
+                                                minute: '2-digit'
+                                            })}
+                                        </p>
+                                    )}
+                                </>
+                            ) : (
+                                <h1>No Active Project</h1>
+                            )}
+                        </div>
+                        <Dimmer.Dimmable dimmed={true}>
+                            <Segment stacked className="upload-segment">
+                                <div className="base-charge">
+                                    {[1, 2, 3].map(level => (
+                                        <div
+                                            key={level}
+                                            className={
+                                                `base-charge-dot ${baseCharge >= level ? 'filled' : ''} ${baseCharge === level - 1 ? 'breathing' : ''
+                                                }`
+                                            }
+                                        />
+                                    ))}
+                                </div>
+
+                                <Segment stacked className="info-segment">
+                                    <h1 className="info-title">Upload Assignment</h1>
+                                    <Form.Field>
+                                        <div
+                                            className="file-drop-area"
+                                            onDragOver={e => e.preventDefault()}
+                                            onDrop={e => {
+                                                e.preventDefault();
+                                                const files = e.dataTransfer.files;
+                                                if (files && files.length === 1) setFile(files[0]);
+                                            }}
+                                        >
+                                            {!files.length ? (
+                                                <>
+                                                    <input
+                                                        type="file"
+                                                        className="file-input"
+                                                        multiple
+                                                        onChange={handleFileChange}
+                                                    />
+                                                    <div className="file-drop-message">
+                                                        <Icon name="cloud upload" size="huge" />
+                                                        <p>
+                                                            Drag &amp; drop your file(s) here or&nbsp;
+                                                            <span className="browse-text">browse</span>
+                                                        </p>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                files.map((f, idx) => (
+                                                    <div key={idx} className="file-preview">
+                                                        <Icon
+                                                            name="close"
+                                                            className="remove-icon"
+                                                            circular
+                                                            onClick={() => {
+                                                                const copy = [...files];
+                                                                copy.splice(idx, 1);
+                                                                setFiles(copy);
+                                                            }}
+                                                        />
+                                                        <div className="file-icon-wrapper">
+                                                            <Icon name="file outline" className="file-outline-icon" />
+                                                            <Icon name={getFileIcon(f.name)} className="file-language-icon" />
+                                                        </div>
+                                                        <span className="file-name">{f.name}</span>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </Form.Field>
+
+                                    <Button
+                                        type="submit"
+                                        disabled={!is_allowed_to_submit}
+                                        fluid
+                                        size="large"
+                                        className={
+                                            `upload-button ${!is_allowed_to_submit ? 'disabled' : ''} ${RewardState ? 'reward' : ''
+                                            }`
+                                        }
+                                    >
+                                        Upload
+                                    </Button>
+
+                                    <button
+                                        type="button"
+                                        onClick={consumeRewardCharge}
+                                        disabled={RewardCharge <= 0}
+                                        className="fastpass-button"
+                                    >
+                                        Use FastPass Charge
+                                    </button>
+                                </Segment>
+
+                                <div className="upload-segment__spacer" />
+
+                                <div className="reward-charge">
+                                    {[1, 2, 3, 4, 5].map(level => (
+                                        <div
+                                            key={level}
+                                            className={`dot ${RewardCharge >= level ? 'filled' : ''}`}
+                                        />
+                                    ))}
+                                </div>
+                            </Segment>
+
+                            <Dimmer active={project_id === -1}>
+                                <Header as='h2' icon inverted>
+                                    <Icon name='ban' />
+                                    No active project
+                                </Header>
+                            </Dimmer>
+                        </Dimmer.Dimmable>
+                    </Form>
+
+                    <div className="countdown-wrapper">
+                        {displayClock && (
+                            <Countdown
+                                date={
+                                    new Date(
+                                        new Date().getTime() +
+                                        HoursUntilRecharge * 3600000 +
+                                        MinutesUntilRecharge * 60000 +
+                                        SecondsUntilRecharge * 1000
+                                    )
+                                }
+                                intervalDelay={1000}
+                                precision={2}
+                                renderer={({ hours, minutes, seconds, completed }) => (
+                                    <div className={`countdown-display ${completed ? 'completed' : ''}`}>
+                                        {`${hours} hours, ${minutes} minutes, ${seconds} seconds`} {' until '}
+                                        <span className="dot" /> next charge
+                                    </div>
+                                )}
+                            />
+                        )}
+
+                        <ErrorMessage message={error_message} isHidden={isErrorMessageHidden} />
+
+                        {/* 1) TABLE now appears where the Office Hours button used to be */}
+                        <Table definition unstackable className="status-table">
+                            <Table.Header>
+                                <Table.Row>
+                                    <Table.Cell>
+                                        <div className="flex-center">
+                                            <div className="ml-10">Days Since Project Start</div>
+                                        </div>
+                                    </Table.Cell>
+                                    {[1, 2, 3, 4, 5, 6].map((day) => (
+                                        <Table.HeaderCell
+                                            key={day}
+                                            className={`header-cell day-${day}` + (day === activeDay ? ' active-day' : '')}
+                                        >
+                                            {`Day ${day}${day === 6 ? '+' : ''}`}
+                                        </Table.HeaderCell>
+                                    ))}
+                                </Table.Row>
+                            </Table.Header>
+
+                            <Table.Body>
+                                <Table.Row>
+                                    <Table.Cell>
+                                        <div className="flex-center">
+                                            <div className="ml-10">Recharge Time</div>
+                                        </div>
+                                    </Table.Cell>
+                                    {['15 mins', '45 mins', '2.25 hrs', '3 hrs', '4.5 hrs', '6 hrs'].map((time, idx) => {
+                                        const day = idx + 1;
+                                        return (
+                                            <Table.Cell
+                                                key={time}
+                                                className={'recharge-cell' + (day === activeDay ? ' active-day' : '')}
+                                            >
+                                                {time}
+                                            </Table.Cell>
+                                        );
+                                    })}
+                                </Table.Row>
+                            </Table.Body>
+                        </Table>
+
+                        {/* Info text stays above the button */}
+                        <div className="info-text">
+                            <span>
+                                Each submission uses an energy charge<span className="info-dot" />, these will regenerate
+                                over time, as shown in the table above.
+                            </span>
+                            <span>
+                                <span className="highlight-red">Attending office hours</span> will award you{' '}
+                                <span className="highlight-red">two</span>
+                                <span className="info-dot purple" />"FastPass" charges which can be redeemed at any time to
+                                unlock test-case results.
+                            </span>
+                        </div>
+                    </div>
+
+                    <Form>
+                        <p className="feedback-paragraph">
+                            TA-Bot is an assessment system developed by Marquette students. We welcome constructive feedback throughout the semester. The TA-Bot team will strive to implement your suggestions. For more information, please see our{' '}
+                            <a href="https://docs.google.com/document/d/1af1NU6K24drPaiJXFFo4gLD4dqNVivKQ9ZijDMAWyd4/edit?usp=sharing" className="faq-link"> FAQ’s. </a>
+                        </p>
+                        <Form.TextArea
+                            placeholder="example: TA-Bot struggles when dealing with small issues in Test cases"
+                            value={suggestions}
+                            onChange={(e, { value }) => setSuggestions(value as string)}
+                            className="feedback-textarea"
+                        />
+                        <Button
+                            onClick={submitSuggestions}
+                            type='submit'
+                            className="feedback-button"
+                        >
+                            Submit Feedback
+                        </Button>
+                    </Form>
+
+                    {hasTbsEnabled && project_id !== -1 && !is_allowed_to_submit && (
+                        <>
+                            <Icon name="clock outline" />
+                            <Countdown date={new Date(time_until_next_submission)} onComplete={onTimerFinish} />
+                        </>
+                    )}
+                </Grid.Column>
+            </Grid>
+        </div>
+    );
 };
 
 export default UploadPage;

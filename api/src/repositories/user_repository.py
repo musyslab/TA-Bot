@@ -5,7 +5,7 @@ from typing import Dict, List
 from sqlalchemy import asc, desc
 
 from src.repositories.database import db
-from .models import ClassAssignments, LectureSections, Users, LoginAttempts,  ChatGPTkeys
+from .models import ClassAssignments, LectureSections, Users, LoginAttempts
 from flask_jwt_extended import current_user
 
 

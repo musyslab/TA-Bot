@@ -130,19 +130,6 @@ class Testcases(db.Model):
     Output = Column(String)
     IsHidden = Column(Boolean)
     additionalfilepath = Column(String)
-class GPTLogs(db.Model):
-    __tablename__ = "GPTLogs"
-    Qid = Column(Integer, primary_key=True, autoincrement=True)
-    SubmissionId = Column(Integer, ForeignKey('Submissions.Id'))
-    GPTResponse = Column(String)
-    StudentFeedback = Column(Integer)
-    Type = Column(Integer)
-
-class ChatGPTkeys(db.Model):
-    __tablename__ = "ChatGPTkeys"
-    idChatGPTkeys = Column(Integer, primary_key=True, autoincrement=True)
-    ChatGPTkeyscol = Column(String)
-    LastUsed = Column(DateTime)
 
 class StudentQuestions(db.Model):
     __tablename__ = "StudentQuestions"

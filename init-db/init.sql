@@ -16,66 +16,6 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
--- Table structure for table `ChatGPTFormSubmits`
---
-
-DROP TABLE IF EXISTS `ChatGPTFormSubmits`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `ChatGPTFormSubmits` (
-  `Id` int NOT NULL AUTO_INCREMENT,
-  `Uid` int NOT NULL,
-  `Qid` int DEFAULT NULL,
-  `q1` varchar(45) DEFAULT NULL,
-  `q2` varchar(45) DEFAULT NULL,
-  `q3` varchar(100) DEFAULT NULL,
-  `SubmitDate` datetime DEFAULT NULL,
-  PRIMARY KEY (`Id`)
-) ENGINE=InnoDB AUTO_INCREMENT=40 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `ChatGPTkeys`
---
-
-DROP TABLE IF EXISTS `ChatGPTkeys`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `ChatGPTkeys` (
-  `idChatGPTkeys` int NOT NULL,
-  `ChatGPTkeyscol` varchar(100) DEFAULT NULL,
-  `LastUsed` datetime DEFAULT NULL,
-  PRIMARY KEY (`idChatGPTkeys`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `ChatLogs`
---
-
-DROP TABLE IF EXISTS `ChatLogs`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `ChatLogs` (
-  `idChatLogs` int NOT NULL AUTO_INCREMENT,
-  `UserId` int DEFAULT NULL,
-  `ClassId` int DEFAULT NULL,
-  `ProjectId` int DEFAULT NULL,
-  `ResponseTo` int DEFAULT NULL,
-  `UserPseudonym` varchar(100) DEFAULT NULL,
-  `UserImage` varchar(1000) DEFAULT NULL,
-  `Response` text,
-  `Code` varchar(1000) DEFAULT NULL,
-  `Language` varchar(45) DEFAULT NULL,
-  `TimeSubmitted` datetime DEFAULT NULL,
-  `MessageFlag` int DEFAULT NULL,
-  `AcceptedFlag` int DEFAULT NULL,
-  `Likes` int DEFAULT NULL,
-  PRIMARY KEY (`idChatLogs`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
 -- Table structure for table `ClassAssignments`
 --
 
@@ -126,23 +66,6 @@ CREATE TABLE `Config` (
   `Value` varchar(256) NOT NULL,
   PRIMARY KEY (`Name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `GPTLogs`
---
-
-DROP TABLE IF EXISTS `GPTLogs`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `GPTLogs` (
-  `Qid` int NOT NULL AUTO_INCREMENT,
-  `submissionId` int DEFAULT NULL,
-  `GPTResponse` varchar(10000) DEFAULT NULL,
-  `StudentFeedback` int DEFAULT NULL,
-  `Type` int DEFAULT NULL,
-  PRIMARY KEY (`Qid`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -464,24 +387,6 @@ CREATE TABLE `Testcases` (
   CONSTRAINT `tc_fk` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`),
   CONSTRAINT `tc_fk2` FOREIGN KEY (`LevelId`) REFERENCES `Levels` (`Id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=192 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `Threads`
---
-
-DROP TABLE IF EXISTS `Threads`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Threads` (
-  `Tid` int NOT NULL AUTO_INCREMENT,
-  `ClassId` int DEFAULT NULL,
-  `UserId` int DEFAULT NULL,
-  `Created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `Questions` varchar(255) DEFAULT NULL,
-  `AcceptedFlag` tinyint(1) DEFAULT '0',
-  PRIMARY KEY (`Tid`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

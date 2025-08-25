@@ -1,7 +1,6 @@
-version: "3.8"
 services:
   db:
-    image: mysql
+    image: mysql:9.3
     restart: always
     environment:
       MYSQL_DATABASE: 'autota'
@@ -9,45 +8,50 @@ services:
       MYSQL_PASSWORD: 'password'
       MYSQL_ROOT_PASSWORD: 'password'
     ports:
-      - '3306:3306'
-    expose:
-      - '3306'
+      - '3306:3306'     
     volumes:
-      # - ./database:/var/lib/mysql  Remove this line to use persistent mysql database between builds
       - ./init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uuser", "-ppassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
   backend:
     container_name: backend
     restart: unless-stopped
+    build:
+      context: api
     environment:
       DB_USER: "user"
       DB_PASSWORD: "password"
       DB_HOST: "db"
       DB_NAME: "autota"
+      DB_PORT: "3306"
       FLASK_DEBUG: "True"
       TABOT_DIR: "/ta-bot"
-    build:
-      context: api
     ports:
       - "5001:5001"
     volumes:
       - "./api:/app"
       - "./ta-bot:/ta-bot"
-    links: 
-      - db
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+
   frontend:
     container_name: frontend
     restart: unless-stopped
-    environment:
-      REACT_APP_BASE_API_URL: http://localhost:5000/api
-      CHOKIDAR_USEPOLLING: true
     build:
       context: ui
+    environment:
+      REACT_APP_BASE_API_URL: http://127.0.0.1:5001/api
+      BROWSER: "none"   
     volumes:
       - "./ui:/app"
-      - "/app/node_modules"
     ports:
       - "3000:3000"
     depends_on:
       - backend
+    command: ["yarn", "dev", "--host", "0.0.0.0"]

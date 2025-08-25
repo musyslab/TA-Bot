@@ -149,33 +149,82 @@ class ProjectRepository():
             testcase_info[test.Id] = testcase_data
         return testcase_info
     
-    def add_or_update_testcase(self, project_id:int, testcase_id:int, level_name:str, name:str, description:str, input_data:str, output:str, is_hidden:bool, additional_file_path:str):
+    def add_or_update_testcase(self, project_id: int, testcase_id: int, level_name: str, name: str,
+                              description: str, input_data: str, output: str, is_hidden: bool,
+                              additional_file_path: str, class_id: int):
+        from flask import current_app
+        # Fetch project and determine teacher directory base
         project = Projects.query.filter(Projects.Id == project_id).first()
-        filepath = project.solutionpath
-        #TODO: see if we can get away from stdout
-        result = subprocess.run(["python","../ta-bot/tabot.py", "ADMIN", str(-1), project.Language, input_data, filepath, additional_file_path], stdout=subprocess.PIPE, text=True)
-        if output == "":
-            output = result.stdout.strip()        
+        teacher_base = current_app.config['TEACHER_FILES_DIR']
+        # Ensure solutionpath points to the teacher project folder
+        project_base = project.solutionpath  # e.g., /ta-bot/project-files/teacher-files/Project_XYZ
+
+        # Run grading-script to compute default output if none provided
+        grading_script = os.path.join(current_app.root_path, '..', 'ta-bot', 'grading-scripts', 'tabot.py')
+
+        result = subprocess.run(
+            [
+                "python",
+                grading_script,
+                "ADMIN",
+                str(-1),
+                project.Language,
+                input_data,
+                project_base,
+                additional_file_path,
+                str(project_id),
+                str(class_id)
+            ],
+            stdout=subprocess.PIPE,
+            text=True
+        )
+
+        # If recompute came from API and provided an empty/whitespace output, still fall back.
+        if (not output) or (isinstance(output, str) and not output.strip()):
+            output = result.stdout.strip()
+
+        # Handle creation or update of the testcase record
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
+        level = Levels.query.filter(
+            and_(Levels.ProjectId == project_id, Levels.Name == level_name)
+        ).first()
+        level_id = level.Id if level else None
+
+        # Ensure any uploaded additional file is saved under teacher project folder
+        if additional_file_path:
+            # Generate unique filename
+            filename = os.path.basename(additional_file_path)
+            save_path = os.path.join(project_base, filename)
+            counter = 1
+            while os.path.exists(save_path):
+                name, ext = os.path.splitext(filename)
+                save_path = os.path.join(project_base, f"{name}({counter}){ext}")
+                counter += 1
+            additional_file_path = save_path
+
         if testcase is None:
-            level = Levels.query.filter(and_(Levels.ProjectId==project_id, Levels.Name==level_name)).first()
-            level_id = level.Id 
-            testcase = Testcases(ProjectId = project_id, LevelId = level_id, Name = name, Description = description, input = input_data, Output = output, IsHidden = is_hidden, additionalfilepath = additional_file_path)
+            testcase = Testcases(
+                ProjectId=project_id,
+                LevelId=level_id,
+                Name=name,
+                Description=description,
+                input=input_data,
+                Output=output,
+                IsHidden=is_hidden,
+                additionalfilepath=additional_file_path
+            )
             db.session.add(testcase)
-            db.session.commit()
         else:
-            level = Levels.query.filter(and_(Levels.ProjectId==project_id, Levels.Name==level_name)).first()
-            level_id = level.Id 
-            testcase.projectid=project_id
             testcase.LevelId = level_id
             testcase.Name = name
             testcase.Description = description
             testcase.input = input_data
             testcase.Output = output
             testcase.IsHidden = is_hidden
-            if additional_file_path != "":
+            if additional_file_path:
                 testcase.additionalfilepath = additional_file_path
-            db.session.commit()
+
+        db.session.commit()
 
     def remove_testcase(self, testcase_id:int):
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
@@ -222,11 +271,21 @@ class ProjectRepository():
         for submission in submissions:
             db.session.delete(submission)
         db.session.commit()
+
     def delete_project(self, project_id:int):
         project = Projects.query.filter(Projects.Id == project_id).first()
         testcases =Testcases.query.filter(Testcases.ProjectId==project_id).all()
-        path = "../../ta-bot/" + project.Name +"-out"
-        shutil.rmtree(path)
+
+        teacher_base = '/ta-bot/project-files/teacher-files'
+        teacher_folder = os.path.basename(project.solutionpath)
+        teacher_path = os.path.join(teacher_base, teacher_folder)
+        if os.path.isdir(teacher_path):
+            shutil.rmtree(teacher_path)
+        student_base = '/ta-bot/project-files/student-files'
+        student_folder = f"{teacher_folder}-out"
+        student_path = os.path.join(student_base, student_folder)
+        if os.path.isdir(student_path):
+            shutil.rmtree(student_path)
 
         for test in testcases:
             db.session.delete(test)
@@ -304,12 +363,3 @@ class ProjectRepository():
         db.session.add(chat)
         db.session.commit()
         return "ok"
-
-
-        
-
-
-
-        
-
-    

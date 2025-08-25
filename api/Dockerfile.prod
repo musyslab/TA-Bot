@@ -1,27 +1,27 @@
 FROM python:3.10-slim-bookworm
 
-# set working directory
+# Set working directory
 WORKDIR /app
 
-# set timezone
+# Set timezone
 ENV TZ=America/Chicago
 
-# copy the requirements file into the image
+# Copy the requirements file into the image
 COPY ./requirements.txt /app/requirements.txt
 
-RUN pip install -r requirements.txt
-RUN pip install requests
-RUN pip install pylint
-RUN pip install --upgrade openai
-RUN pip install aiopyston
-RUN pip install gunicorn
+# Upgrade pip to the latest version and install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install -r requirements.txt
 
-# copy every content from the local file to the image
+# Copy the entire content from the local directory to the image
 COPY . /app
 
+# Set Flask environment variables
 ENV FLASK_APP=app.py
 ENV FLASK_DEBUG=False
 
-EXPOSE 5000
+# Expose port 5001 to match dev
+EXPOSE 5001
 
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:create_app()"]
+# Start the app with Gunicorn in production
+CMD ["gunicorn", "-b", "0.0.0.0:5001", "app:create_app()"]

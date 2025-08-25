@@ -1,0 +1,197 @@
+/* ClassSelectionPageComponent.module.scss */
+
+.container {
+  padding: 50px 50px;
+  padding-top: 150px;
+
+  min-height: 100vh;
+  box-sizing: border-box;
+  
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+
+  /* "Student Classes" title */
+  .sectionTitle {
+    align-self: stretch;
+    display: block;
+    width: 100%;
+    padding: 15px 32px;
+    background: #d1d5db; 
+    border: 1px solid #9ca3af; 
+    border-radius: 16px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 1.8rem;
+    line-height: 1.15;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  /* List of classes */
+  .classList {
+    display: grid;
+    grid-template-columns: 1fr;
+    /* mobile: single column */
+    gap: 16px;
+  }
+
+  .clickableRow {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 24px;
+    margin-top: 20px;
+    width: 100%;
+    min-height: 140px;
+    border: 5px solid #e5e7eb;
+    border-radius: 16px;
+    background: #ffffff;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+      border-color: #d1d5db;
+      text-decoration: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #2563eb;
+      outline-offset: 2px;
+    }
+
+    >div:first-child {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      img {
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        border-radius: 10px;
+        display: block;
+      }
+    }
+
+    >div:last-child {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+  }
+
+  .title {
+    margin: 0;
+    font-size: 1.5rem;
+    line-height: 1.25;
+    font-weight: 800;
+    letter-spacing: 0.1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  form {
+    margin-top: 12px;
+    max-width: 520px;
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #f9fafb;
+
+    >div {
+      display: grid;
+      gap: 6px;
+
+      label {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #374151;
+      }
+
+      input {
+        height: 44px;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        background: #ffffff;
+        font-size: 0.95rem;
+        transition: border-color 120ms ease, box-shadow 120ms ease;
+
+        &::placeholder {
+          color: #9ca3af;
+        }
+
+        &:focus {
+          outline: none;
+          border-color: #2563eb;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+      }
+    }
+
+    button[type='submit'] {
+      margin-top: 6px;
+      height: 46px;
+      padding: 0 16px;
+      border: none;
+      border-radius: 10px;
+      background: #2563eb;
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background-color 120ms ease, transform 80ms ease, box-shadow 120ms ease;
+
+      &:hover {
+        background: #1e50c2;
+      }
+
+      &:active {
+        transform: translateY(1px);
+      }
+
+      &:focus-visible {
+        outline: 2px solid #1e40af;
+        outline-offset: 2px;
+      }
+    }
+  }
+
+  /* Two-per-row layout on >= 640px */
+  @media (min-width: 1150px) {
+    .classList {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }
+  }
+
+  @media (min-width: 768px) {
+    .clickableRow {
+      padding: 28px;
+      min-height: 160px;
+
+      >div:first-child img {
+        width: 96px;
+        height: 96px;
+      }
+    }
+
+    .title {
+      font-size: 1.75rem;
+    }
+
+    form {
+      padding: 20px;
+
+      button[type='submit'] {
+        width: fit-content;
+      }
+    }
+  }
+}

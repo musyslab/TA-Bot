@@ -1,17 +1,10 @@
 import { Component, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import 'semantic-ui-css/semantic.min.css';
-import { Button, Card, Grid, GridColumn, GridRow, Icon, List, Loader, Modal, Progress, Tab, Table } from 'semantic-ui-react';
-import MenuComponent from './MenuComponent';
-import { withRouter, RouteComponentProps } from 'react-router-dom';
+import { Button, Card, Grid, GridColumn, Icon, Modal, Tab, Table } from 'semantic-ui-react';
 import axios from 'axios';
 import '../css/AdminAnalyticsComponent.scss';
-import Chart from "react-apexcharts";
 import ReactApexChart from 'react-apexcharts';
-import moment from 'moment';
-
-
-
 
 interface AdminAnalyticsProps {
   id: string,
@@ -34,8 +27,6 @@ interface AdminAnalyticsState {
 
 }
 
-
-
 class AdminAnalyticsComponent extends Component<AdminAnalyticsProps, AdminAnalyticsState> {
   state = {
     totalNumber: null,
@@ -53,12 +44,11 @@ class AdminAnalyticsComponent extends Component<AdminAnalyticsProps, AdminAnalyt
     selectedStudent: null,
   };
 
-
   componentDidMount() {
     let project_id = this.props.id;
     console.log("this is project id", project_id);
 
-    axios.get(`${process.env.REACT_APP_BASE_API_URL}/projects/getSubmissionSummary?id=${project_id}`, {
+    axios.get(`${import.meta.env.VITE_API_URL}/projects/getSubmissionSummary?id=${project_id}`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
       }
@@ -79,7 +69,7 @@ class AdminAnalyticsComponent extends Component<AdminAnalyticsProps, AdminAnalyt
       .catch((err) => {
         console.log(err);
       });
-    axios.get(`${process.env.REACT_APP_BASE_API_URL}/projects/AtRiskStudents?id=${project_id}`, {
+    axios.get(`${import.meta.env.VITE_API_URL}/projects/AtRiskStudents?id=${project_id}`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
       }
@@ -173,7 +163,7 @@ class AdminAnalyticsComponent extends Component<AdminAnalyticsProps, AdminAnalyt
 
                       const handleOpen = () => {
                         setOpen(true);
-                        axios.get(`${process.env.REACT_APP_BASE_API_URL}/projects/AtRiskStudentDetail?project_id=${project_id}&id=${key}`, {
+                        axios.get(`${import.meta.env.VITE_API_URL}/projects/AtRiskStudentDetail?project_id=${project_id}&id=${key}`, {
                           headers: {
                             'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
                           }

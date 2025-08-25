@@ -35,6 +35,9 @@ upload_api = Blueprint('upload_api', __name__)
 
 ext={"python": [".py","py"],"java": [".java","java"],"c": [".c", "c"],"zip":[".zip","zip"]}
 
+def _sanitize_fs(s: str) -> str:
+    """Make a string safe for filesystem paths: keep alnum, dash, underscore."""
+    return "".join(c if (c.isalnum() or c in "-_") else "_" for c in (s or "").strip())
 
 def allowed_file(filename):
     """[function for checking to see if the file is an allowed file type]
@@ -331,26 +334,39 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
         return make_response(message, HTTPStatus.BAD_REQUEST)
     filedata=file.read()
     classname = class_repo.get_class_name_withId(class_id)
-    submission_path = "/ta-bot/" + project.solutionpath.split("/")[3].split(".")[0] + "-out"
-    print(project.solutionpath.split("/")[3], flush=True)
-    print(submission_path, flush=True)
+    
+    student_base = current_app.config['STUDENT_FILES_DIR']
+    # Use the SAME folder name as teacher-files (<base_proj>__<YYYYMMDD_HHMMSS>), no "-out"
+    teacher_proj_dir = os.path.dirname(project.solutionpath)
+    teacher_folder_name = os.path.basename(teacher_proj_dir)
+    submission_path = os.path.join(student_base, teacher_folder_name)
+    os.makedirs(submission_path, exist_ok=True)
 
 
     if file and allowed_file(file.filename):
-        zipfile_bool = False  #Horrible, redesign this TODO
-        language = file.filename.rsplit('.', 1)[1].lower()
+        zipfile_bool = False  # track zip uploads
+        language = (project.Language or "").lower()
+        # Per-submission timestamp for filenames
+        ts_now = datetime.now()
+        ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
+        dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
+
+        orig_base = os.path.basename(file.filename)
+        orig_name_no_ext, orig_ext = os.path.splitext(orig_base)
+        safe_project = _sanitize_fs(getattr(project, "Name", str(project.Id)))
+        safe_username = _sanitize_fs(username)
+        display_base = f"{ts_stamp}__{safe_username}__{safe_project}"
 
         # Step 1: Run TA-Bot to generate grading folder
         
         #check to see if file is a zip file, if so extract the files
-        if file.filename.endswith(".zip"):
+        if file.filename.lower().endswith(".zip"):
             with zipfile.ZipFile(file, 'r') as zip_ref:
                 zipfile_bool = True
-                outputpath = os.path.join(submission_path)
-                path = os.path.join(submission_path, f"{username}") 
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
-                os.mkdir(path)
+                outputpath = submission_path
+
+                path = os.path.join(submission_path, display_base)
+                os.makedirs(path, exist_ok=True)
                 if project.Language.lower() == "python":
                     message = {
                         'message': 'Python projects do not support zip files!'
@@ -366,19 +382,32 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
                                 f.write(file_content)           
         else:
             file.seek(0)
-            path = os.path.join(submission_path)
-            outputpath = path
-            language = project.Language.lower()
-            path = os.path.join(path, f"{username}{ext[language][0]}") 
-            print(path, flush=True)
+            outputpath = submission_path
+
+            save_name = f"{display_base}{orig_ext.lower()}"
+            path = os.path.join(outputpath, save_name)
             file.save(path)
 
         # Step 2: Run grade.sh
         research_group = user_repository.get_user_researchgroup(user_id)
-       
-        testcase_info_json =project_repo.testcases_to_json(project.Id)
-        result = subprocess.run(["python","../tabot.py", username, str(research_group), project.Language, str(testcase_info_json), path, ""], cwd=outputpath) 
+        testcase_info_json = project_repo.testcases_to_json(project.Id)
 
+        grading_script = "/ta-bot/grading-scripts/tabot.py"
+        project_id_arg = str(project.Id)
+        class_id_arg   = str(class_id)
+
+        cmd = [
+            "python", grading_script,
+            username,
+            str(research_group),
+            project.Language,
+            str(testcase_info_json),
+            path,
+            "",               
+            project_id_arg,   
+            class_id_arg     
+        ]
+        result = subprocess.run(cmd, cwd=outputpath)
 
         if result.returncode != 0:
             message = {
@@ -386,17 +415,27 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
             }
             return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
         
-        # Step 3: Save submission in submission table
-        now = datetime.now()
-        if zipfile_bool:
-            outputpath = path = os.path.join(submission_path, f"{username}") 
-
-        tap_path = outputpath+"/"+username+".out"
-        dt_string = now.strftime("%Y/%m/%d %H:%M:%S")
+        # Step 3: Rename grader outputs to our new scheme:
+        # Grader writes username.out / username.out.lint in outputpath — rename to display_base.*
+        out_src = os.path.join(outputpath, f"{username}.out")
+        lint_src = os.path.join(outputpath, f"{username}.out.lint")
+        out_base = os.path.join(outputpath, display_base)
+        tap_path = out_base + ".out"
+        lint_path = out_base + ".out.lint"
+        try:
+            if os.path.exists(out_src):
+                os.replace(out_src, tap_path)
+        except Exception:
+            pass
+        try:
+            if os.path.exists(lint_src):
+                os.replace(lint_src, lint_path)
+        except Exception:
+            pass
         status=output_pass_or_fail(tap_path)
         TestCaseResults=test_case_result_finder(tap_path)
         if project.Language == "python":
-            error_count=python_error_count(outputpath+"/"+username)
+            error_count = python_error_count(out_base)
         else:
             error_count=0    
         levels = project_repo.get_levels_by_project(project.Id)
@@ -406,16 +445,33 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
         passed_levels, total_tests = level_counter(tap_path)
         student_submission_score=score_finder(project_repo, passed_levels, total_tests, project.Id)
         if project.Language == "python":
-            pylint_score=python_error_count(outputpath+"/"+username)
+            pylint_score = python_error_count(out_base)
         else:
             pylint_score = 40
         total_submission_score = student_submission_score+pylint_score
 
-        Linting_results=LintErrorLogger(outputpath+"/"+username, project.Language)
+        Linting_results = LintErrorLogger(out_base, project.Language)
 
-        submissionId = submission_repo.create_submission(user_id, tap_path, path, outputpath+"/"+username+".out.lint", dt_string, project.Id,status, error_count, submission_level,total_submission_score, 0, TestCaseResults, Linting_results)
+        submissionId = submission_repo.create_submission(
+            user_id,
+            tap_path,
+            path,
+            lint_path,
+            dt_string,
+            project.Id,
+            status,
+            error_count,
+            submission_level,
+            total_submission_score,
+            0,
+            TestCaseResults,
+            Linting_results
+        )
         
-        submission_repo.consume_charge(user_id, class_id,  project.Id, submissionId)
+        if current_user.Role == ADMIN_ROLE:
+            submission_repo.set_submission_visibility(submissionId, 1)
+        else:
+            submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
 
         # Step 4 assign point totals for the submission 
         current_level = submission_repo.get_current_level(project.Id,user_id)
@@ -436,14 +492,3 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
         'message': 'Unsupported file type'
     }
     return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
-
-
-
-
-
-
-
-
-
-
-    
