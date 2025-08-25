@@ -1,8 +1,8 @@
-import React, { Component } from 'react';
-import axios from 'axios';
-import { useNavigate, NavigateFunction } from 'react-router-dom';
+import React, { Component } from 'react'
+import axios from 'axios'
+import { useNavigate, NavigateFunction } from 'react-router-dom'
 
-import '../css/AdminUploadPage.scss';
+import '../css/AdminUploadPage.scss'
 
 interface Student {
     name: string;

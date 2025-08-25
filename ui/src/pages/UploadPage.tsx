@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react'
 import 'semantic-ui-css/semantic.min.css'
 import { Button, Form, Grid, Segment, Dimmer, Header, Icon, Table } from 'semantic-ui-react'
-import axios from 'axios';
-import MenuComponent from '../components/MenuComponent';
+import axios from 'axios'
+import MenuComponent from '../components/MenuComponent'
 import React from 'react'
 import { SemanticCOLORS } from 'semantic-ui-react'
-import ErrorMessage from '../components/ErrorMessage';
-import Countdown from 'react-countdown';
-import { Helmet } from 'react-helmet';
-import { useParams } from 'react-router-dom';
-import '../css/UploadPage.scss';
+import ErrorMessage from '../components/ErrorMessage'
+import Countdown from 'react-countdown'
+import { Helmet } from 'react-helmet'
+import { useParams } from 'react-router-dom'
+import '../css/UploadPage.scss'
 
 interface UploadProps {
     class_id?: string
@@ -61,6 +61,13 @@ const UploadPage = () => {
     const [project_name, setProject_name] = useState<string>("");
     const [dueDate, setDueDate] = useState<string>("");
 
+    // Allowed upload file extensions (frontend gate)
+    const ALLOWED_EXTS = ['.py', '.java', '.c', '.rkt'];
+    const isAllowedFileName = (name: string) => {
+        const ext = '.' + (name.split('.').pop() || '').toLowerCase();
+        return ALLOWED_EXTS.includes(ext);
+    };
+
     let activeDay: number;
     if (project_name !== "") {
         activeDay = Math.min(Math.max(DaysSinceProjectStarted, 1), 6);
@@ -84,9 +91,13 @@ const UploadPage = () => {
 
     function handleFileChange(event: React.FormEvent) {
         const target = event.target as HTMLInputElement;
-        const selected = target.files;
-        // accept multiple files
-        setFiles(selected ? Array.from(selected) : []);
+        const selected = target.files ? Array.from(target.files) : [];
+        const valid = selected.filter(f => isAllowedFileName(f.name));
+        if (selected.length && valid.length === 0) {
+            setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
+            setIsErrorMessageHidden(false);
+        }
+        setFiles(valid);
     };
 
     function getCharges() {
@@ -171,6 +182,13 @@ const UploadPage = () => {
 
         // Grab the first file from your files state
         const fileToUpload = files[0];
+
+        // Validate extension again at submit time (belt & suspenders)
+        if (!isAllowedFileName(fileToUpload.name)) {
+            setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
+            setIsErrorMessageHidden(false);
+            return;
+        }
 
         setIsErrorMessageHidden(true);
         setIsLoading(true);
@@ -330,8 +348,14 @@ const UploadPage = () => {
                                             onDragOver={e => e.preventDefault()}
                                             onDrop={e => {
                                                 e.preventDefault();
-                                                const files = e.dataTransfer.files;
-                                                if (files && files.length === 1) setFile(files[0]);
+                                                const dropped = Array.from(e.dataTransfer.files || []);
+                                                const valid = dropped.filter(f => isAllowedFileName(f.name));
+                                                if (dropped.length && valid.length === 0) {
+                                                    setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
+                                                    setIsErrorMessageHidden(false);
+                                                    return;
+                                                }
+                                                setFiles(valid);
                                             }}
                                         >
                                             {!files.length ? (
@@ -339,6 +363,7 @@ const UploadPage = () => {
                                                     <input
                                                         type="file"
                                                         className="file-input"
+                                                        accept=".py,.java,.c,.rkt"
                                                         multiple
                                                         onChange={handleFileChange}
                                                     />

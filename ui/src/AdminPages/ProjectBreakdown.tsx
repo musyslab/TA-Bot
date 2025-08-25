@@ -1,8 +1,8 @@
-import { Helmet } from 'react-helmet';
-import { useParams } from 'react-router-dom';
-import MenuComponent from '../components/MenuComponent';
-import StudentList from '../components/StudentList';
-import '../css/AdminComponent.scss';
+import { Helmet } from 'react-helmet'
+import { useParams } from 'react-router-dom'
+import MenuComponent from '../components/MenuComponent'
+import StudentList from '../components/StudentList'
+import '../css/AdminComponent.scss'
 
 const ProjectBreakdown = () => {
     const { id } = useParams<{ id: string }>();

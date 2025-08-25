@@ -20,8 +20,8 @@ COPY . /app
 ENV FLASK_APP=app.py
 ENV FLASK_DEBUG=1
 
-# Expose port 5001
-EXPOSE 5001
+# Expose port 5000
+EXPOSE 5000
 
 # Start the Flask server
-CMD ["flask", "run", "-h", "0.0.0.0", "-p", "5001"]
+CMD ["flask", "run", "-h", "0.0.0.0", "-p", "5000"]

@@ -17,6 +17,7 @@ import CompilerRunner
 
 BASE_URL ="https://emkc.org/api/v2/piston/execute"
 # BASE_URL ="https://piston.tabot.sh/api/v2/execute"
+
 TEMP_PREFIX = "temp-"
 OUTPUT_PATH_NAME = "output"
 
@@ -190,8 +191,8 @@ def run_liter(myroot, output_dir, student_name, filename, language):
         file.close()
     elif language == "java":
         # Call Checkstyle on the file and save the output to a file
-        checkstyle_jar = "/ta-bot/checkstyle-10.9.2-all.jar"
-        config_file = "/ta-bot/google_checks.xml"
+        checkstyle_jar = "/ta-bot/grading-scripts/checkstyle-10.9.2-all.jar"
+        config_file = "/ta-bot/grading-scripts/google_checks.xml"
         # `filename` can be a directory (multi-file) or a single Java file
         if not os.path.isdir(filename):
             file = filename

@@ -1,12 +1,8 @@
 # TA-Bot
 
-This project would not be possible without the contributions from:
+This project was originally developed and maintained by Jack Forden and Alex Gebhard.
 
-Jack Forden
-and
-Alex Gebhard
-
-Thank you for building the foundation for this project.
+It is currently maintained by Sam Mazzone.
 
 # How to install TA-Bot
 
@@ -27,14 +23,6 @@ In Ubuntu:
 Update Packages:
 
 ```sudo apt update```
-
-Install nvm (Node Version Manager)
-
-```curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash```
-
-Reload shell
-
-```source ~/.bashrc```
 
 Install Node.js
 

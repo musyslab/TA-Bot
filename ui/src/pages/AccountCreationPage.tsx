@@ -1,6 +1,6 @@
-import { Component } from 'react';
+import { Component } from 'react'
 import 'semantic-ui-css/semantic.min.css'
-import AccountCreationPageComponent from '../components/AccountCreationPageComponent';
+import AccountCreationPageComponent from '../components/AccountCreationPageComponent'
 
 class AccountCreationPage extends Component {
     render() {

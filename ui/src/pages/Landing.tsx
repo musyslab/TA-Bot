@@ -1,6 +1,6 @@
-import { Component } from 'react';
+import { Component } from 'react'
 import 'semantic-ui-css/semantic.min.css'
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom'
 
 class LandingPage extends Component {
   render() {

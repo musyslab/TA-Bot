@@ -1,8 +1,8 @@
-import { Component } from 'react';
-import MenuComponent from '../components/MenuComponent';
-import '../css/AdminComponent.scss';
-import { Helmet } from 'react-helmet';
-import TaLandingComponent from '../components/TaLandingComponent';
+import { Component } from 'react'
+import MenuComponent from '../components/MenuComponent'
+import '../css/AdminComponent.scss'
+import { Helmet } from 'react-helmet'
+import TaLandingComponent from '../components/TaLandingComponent'
 
 class TaLanding extends Component<{}, {}> {
     render() {

@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { eachDayOfInterval } from 'date-fns';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
-import '../css/AdminProjectConfigComponent.scss';
+import { useEffect, useState } from 'react'
+import { eachDayOfInterval } from 'date-fns'
+import { useNavigate } from 'react-router-dom'
+import axios from 'axios'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
+import '../css/AdminProjectConfigComponent.scss'
 import 'semantic-ui-css/semantic.min.css'
 
 interface AdminProjectConfigProps {

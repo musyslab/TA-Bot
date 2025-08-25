@@ -1,6 +1,6 @@
-import { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css';
-import { Form, Grid, Header, Segment } from 'semantic-ui-react';
+import { Component } from 'react'
+import 'semantic-ui-css/semantic.min.css'
+import { Form, Grid, Header, Segment } from 'semantic-ui-react'
 
 class AdminComponent extends Component {
   state = { password: '', email: '', checkpassword: '', submittedName: '', submittedEmail: '' }

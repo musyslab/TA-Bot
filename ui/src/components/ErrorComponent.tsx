@@ -1,5 +1,5 @@
-import axios from 'axios';
-import React, { Component, PropsWithChildren } from 'react';
+import axios from 'axios'
+import React, { Component, PropsWithChildren } from 'react'
 import 'semantic-ui-css/semantic.min.css'
 import CriticalErrorPage from './CriticalErrorPage'
 
