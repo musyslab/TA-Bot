@@ -60,6 +60,7 @@ const UploadPage = () => {
 
     const [project_name, setProject_name] = useState<string>("");
     const [dueDate, setDueDate] = useState<string>("");
+    const canSubmit = (baseCharge > 0) || RewardState;
 
     // Allowed upload file extensions (frontend gate)
     const ALLOWED_EXTS = ['.py', '.java', '.c', '.rkt'];
@@ -173,6 +174,16 @@ const UploadPage = () => {
     }
 
     function handleSubmit() {
+        // Block submits when there are no usable charges
+        if (!canSubmit) {
+            alert(
+                "You’re out of charges.\n\n" +
+                "Please wait until your energy recharges (see countdown), " +
+                "or use a FastPass charge first to submit now."
+            );
+            return;
+        }
+
         // Make sure at least one file is selected
         if (files.length === 0) {
             setError_Message("Please select a file to upload.");
@@ -401,11 +412,11 @@ const UploadPage = () => {
 
                                     <Button
                                         type="submit"
-                                        disabled={!is_allowed_to_submit}
+                                        disabled={!is_allowed_to_submit || !canSubmit}
                                         fluid
                                         size="large"
                                         className={
-                                            `upload-button ${!is_allowed_to_submit ? 'disabled' : ''} ${RewardState ? 'reward' : ''
+                                            `upload-button ${(!is_allowed_to_submit || !canSubmit) ? 'disabled' : ''} ${RewardState ? 'reward' : ''
                                             }`
                                         }
                                     >
