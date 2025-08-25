@@ -1,8 +1,8 @@
-import { Component } from 'react';
-import axios from 'axios';
-import { Link } from 'react-router-dom';
-import codeimg from '../codeex.png';
-import styles from '../css/AdminLandingComponent.module.scss';
+import { Component } from 'react'
+import axios from 'axios'
+import { Link } from 'react-router-dom'
+import codeimg from '../codeex.png'
+import styles from '../css/AdminLandingComponent.module.scss'
 
 interface ClassObject {
     Id: number;

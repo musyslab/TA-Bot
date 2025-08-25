@@ -1,9 +1,9 @@
-import { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css';
-import '../css/CodePage.scss';
+import { Component } from 'react'
+import 'semantic-ui-css/semantic.min.css'
+import '../css/CodePage.scss'
 import { Form, Modal } from 'semantic-ui-react'
-import axios from 'axios';
-import ErrorMessage from './ErrorMessage';
+import axios from 'axios'
+import ErrorMessage from './ErrorMessage'
 
 interface NewUserModalProps {
     username: string,

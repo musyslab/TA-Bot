@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import codeimg from '../codeex.png';
-import axios from 'axios';
-import styles from '../css/ClassSelectionPageComponent.module.scss';
+import { useEffect, useState } from 'react'
+import codeimg from '../codeex.png'
+import axios from 'axios'
+import styles from '../css/ClassSelectionPageComponent.module.scss'
 
 interface DropDownOption {
   key: number;

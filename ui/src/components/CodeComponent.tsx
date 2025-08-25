@@ -1,10 +1,10 @@
-import { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css';
-import Split from 'react-split';
-import { Icon } from 'semantic-ui-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { Component } from 'react'
+import 'semantic-ui-css/semantic.min.css'
+import Split from 'react-split'
+import { Icon } from 'semantic-ui-react'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 // If you're using highlight.js, import from 'react-syntax-highlighter/dist/esm/styles/hljs'
-import { vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
 
 interface PylintObject {

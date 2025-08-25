@@ -1,8 +1,8 @@
-import { Component } from 'react';
+import { Component } from 'react'
 import 'semantic-ui-css/semantic.min.css'
 import { Tab, Table, Form } from 'semantic-ui-react'
-import SyntaxHighlighter from 'react-syntax-highlighter/dist/cjs/prism';
-import { vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import SyntaxHighlighter from 'react-syntax-highlighter/dist/cjs/prism'
+import { vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
 class AdminCodePageComponent extends Component<{}, {}> {
 

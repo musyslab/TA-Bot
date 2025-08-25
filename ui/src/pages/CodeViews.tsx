@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
-import { useParams } from 'react-router-dom';
-import { Helmet } from 'react-helmet';
-import MenuComponent from '../components/MenuComponent';
-import '../css/CodeViews.scss';
+import React, { useEffect, useMemo, useState } from 'react'
+import axios from 'axios'
+import { useParams } from 'react-router-dom'
+import { Helmet } from 'react-helmet'
+import MenuComponent from '../components/MenuComponent'
+import '../css/CodeViews.scss'
 
 const defaultpagenumber = -1;
 

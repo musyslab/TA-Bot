@@ -1,7 +1,7 @@
-import axios from 'axios';
-import { Component, FormEvent } from 'react';
-import 'semantic-ui-css/semantic.min.css';
-import { Button, Checkbox, CheckboxProps, DropdownItemProps, Form, Header, Segment } from 'semantic-ui-react';
+import axios from 'axios'
+import { Component, FormEvent } from 'react'
+import 'semantic-ui-css/semantic.min.css'
+import { Button, Checkbox, CheckboxProps, DropdownItemProps, Form, Header, Segment } from 'semantic-ui-react'
 
 interface AdminSettingsPageState {
     classes: Array<DropdownItemProps>,

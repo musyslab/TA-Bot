@@ -46,7 +46,6 @@ services:
     build:
       context: ui
     environment:
-      REACT_APP_BASE_API_URL: http://127.0.0.1:5001/api
       BROWSER: "none"   
     volumes:
       - "./ui:/app"

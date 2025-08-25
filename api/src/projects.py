@@ -39,6 +39,7 @@ import itertools
 from werkzeug.utils import secure_filename
 
 PISTON_URL = "https://emkc.org/api/v2/piston/execute"
+# PISTON_URL ="https://piston.tabot.sh/api/v2/execute"
 
 projects_api = Blueprint('projects_api', __name__)
 
@@ -52,9 +53,6 @@ def _teacher_root() -> str:
 
 def _student_root() -> str:
     return os.path.join(_project_root(), "student-files")
-
-def _tmp_root() -> str:
-    return os.path.join(_project_root(), "tmp")
 
 def _project_dir(base_proj: str, ts: str) -> str:
     # teacher-files/<YYYYMMDD_HHMMSS>__<projectname>
@@ -319,10 +317,6 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     if name == '' or start_date == '' or end_date == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
-    os.makedirs(_teacher_root(), exist_ok=True)
-    os.makedirs(_student_root(), exist_ok=True)
-    os.makedirs(_tmp_root(), exist_ok=True)
-
     up = request.files['file']
     base_prog = os.path.splitext(_safe(up.filename))[0]  
     base_proj = _safe(name)
@@ -361,12 +355,11 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     assignmentdesc_path = os.path.join(proj_dir, ad_name)
     ad.save(assignmentdesc_path)
 
-    # Always record the newest (by embedded timestamp) solution in the project folder
-    selected_path = _pick_latest_solution(proj_dir, base_proj) or path
-    project_repo.create_project(name, start_date, end_date, language, class_id, selected_path, assignmentdesc_path)
-    
-    new_project_id = project_repo.get_project_id_by_name(name)
+    # Use the just-uploaded path directly; avoid directory scan on create
+    selected_path = path
+    new_project_id = project_repo.create_project(name, start_date, end_date, language, class_id, selected_path, assignmentdesc_path)
     project_repo.levels_creator(new_project_id)
+
     return make_response(str(new_project_id), HTTPStatus.OK)
 
 @projects_api.route('/edit_project', methods=['POST'])
@@ -383,7 +376,11 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     if current_user.Role != ADMIN_ROLE:
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
-    pid = request.form.get("id", "")
+    pid_str = request.form.get("id", "").strip()
+    if not pid_str.isdigit():
+        return make_response({'message': 'Invalid or missing project id'}, HTTPStatus.BAD_REQUEST)
+    pid = int(pid_str)
+
     name = request.form.get('name', '')
     start_date = request.form.get('start_date', '')
     end_date = request.form.get('end_date', '')
@@ -407,7 +404,6 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     else:
         proj_dir = _project_dir(base_proj, ts)
     os.makedirs(proj_dir, exist_ok=True)
-    os.makedirs(_tmp_root(), exist_ok=True)
 
     # Default to existing paths if no new files are uploaded
     path = existing_path

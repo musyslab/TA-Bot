@@ -1,8 +1,7 @@
-import { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css';
-import { Menu, Container, Icon, Button, Popup } from 'semantic-ui-react';
-import { StyledIcon } from '../styled-components/StyledIcon';
-import axios from 'axios';
+import { Component } from 'react'
+import 'semantic-ui-css/semantic.min.css'
+import { Menu, Container, Icon, Button, Popup } from 'semantic-ui-react'
+import axios from 'axios'
 
 interface MenuComponentProps {
     showUpload: boolean;
@@ -90,12 +89,6 @@ class MenuComponent extends Component<MenuComponentProps> {
                                 <Icon name="list alternate" size="large" /> Submissions
                             </Menu.Item>
                         </>
-                    )}
-
-                    {this.props.showReviewButton && (
-                        <Menu.Item as="a" href="/class/1/codeHelp">
-                            <Icon name="help circle" size="large" /> Code Help
-                        </Menu.Item>
                     )}
 
                     {/* Right aligned menu */}
