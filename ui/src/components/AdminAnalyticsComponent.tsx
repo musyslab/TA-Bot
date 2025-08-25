@@ -1,10 +1,10 @@
-import { Component, useState } from 'react';
-import { Helmet } from 'react-helmet';
-import 'semantic-ui-css/semantic.min.css';
-import { Button, Card, Grid, GridColumn, Icon, Modal, Tab, Table } from 'semantic-ui-react';
-import axios from 'axios';
-import '../css/AdminAnalyticsComponent.scss';
-import ReactApexChart from 'react-apexcharts';
+import { Component, useState } from 'react'
+import { Helmet } from 'react-helmet'
+import 'semantic-ui-css/semantic.min.css'
+import { Button, Card, Grid, GridColumn, Icon, Modal, Tab, Table } from 'semantic-ui-react'
+import axios from 'axios'
+import '../css/AdminAnalyticsComponent.scss'
+import ReactApexChart from 'react-apexcharts'
 
 interface AdminAnalyticsProps {
   id: string,

@@ -1,9 +1,9 @@
-import { Component } from 'react';
-import axios from 'axios';
-import { Link } from 'react-router-dom';
-import MenuComponent from './MenuComponent';
-import { Helmet } from 'react-helmet';
-import '../css/PastSubmissionPage.scss';
+import { Component } from 'react'
+import axios from 'axios'
+import { Link } from 'react-router-dom'
+import MenuComponent from './MenuComponent'
+import { Helmet } from 'react-helmet'
+import '../css/PastSubmissionPage.scss'
 
 class Row {
     constructor() {

@@ -20,8 +20,8 @@ COPY . /app
 ENV FLASK_APP=app.py
 ENV FLASK_DEBUG=False
 
-# Expose port 5001 to match dev
-EXPOSE 5001
+# Expose port 5000 to match dev
+EXPOSE 5000
 
 # Start the app with Gunicorn in production
-CMD ["gunicorn", "-b", "0.0.0.0:5001", "app:create_app()"]
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:create_app()"]

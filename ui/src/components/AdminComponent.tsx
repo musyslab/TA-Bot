@@ -1,8 +1,8 @@
-import { Component } from 'react';
-import axios from 'axios';
-import { Icon } from 'semantic-ui-react';
-import { Link, useParams } from 'react-router-dom';
-import '../css/AdminComponent.scss';
+import { Component } from 'react'
+import axios from 'axios'
+import { Icon } from 'semantic-ui-react'
+import { Link, useParams } from 'react-router-dom'
+import '../css/AdminComponent.scss'
 
 interface ProjectObject {
   Id: number;

@@ -1,7 +1,7 @@
-import React, { Component } from 'react';
-import axios from 'axios';
-import { useParams } from 'react-router-dom';
-import '../css/OfficeHoursComponent.scss';
+import React, { Component } from 'react'
+import axios from 'axios'
+import { useParams } from 'react-router-dom'
+import '../css/OfficeHoursComponent.scss'
 
 interface OfficeHoursProps {
   class_id?: string;
@@ -136,7 +136,6 @@ class OfficeHoursComponent extends Component<OfficeHoursProps, OfficeHoursState>
       this.setState({ selectedProject: projects[0].value });
       return;
     }
-    console.warn('[OfficeHours] Could not resolve project id from project_name', { project_name, projects });
   }
 
   resolveProjectIdFromName(projectName: string, projects: DropDownOption[]): number | null {

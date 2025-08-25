@@ -17,6 +17,7 @@ import CompilerRunner
 
 BASE_URL ="https://emkc.org/api/v2/piston/execute"
 # BASE_URL ="https://piston.tabot.sh/api/v2/execute"
+
 TEMP_PREFIX = "temp-"
 OUTPUT_PATH_NAME = "output"
 
@@ -97,77 +98,82 @@ def end_tap_file(output_file, number_of_tests):
         file.write(f"1..{str(number_of_tests)}\n")
     return output_file
 
-
 def call_piston_api(student_file: str, testcase_in: str, language, additional_file_path: str):
-        student_code = ""
-        results = {}
         files = []
-
-        #print("THIS IS THE TESTCASE IN", testcase_in, flush=True)
-
+        # Build a deterministic file list
         if os.path.isdir(student_file):
-             for filename in os.listdir(student_file):
-                  if filename.endswith(".java") and language=="java":
-                    #print("Filename", filename, flush=True)
-                    with open(student_file+"/"+filename) as file:
-                        student_code = ""
-                        for line in file:
-                                if not line.startswith("package"):
-                                    student_code += line
-                    if "public static void main(" in student_code:
-                        files.insert(0,{"name": os.path.basename(filename), "content": student_code})
+            if language == "java":
+                java_files = [f for f in os.listdir(student_file) if f.endswith(".java")]
+                java_files.sort()  # stable order
+                mains = []
+                others = []
+                for fn in java_files:
+                    full = os.path.join(student_file, fn)
+                    with open(full, "r", errors="ignore") as fh:
+                        src = "".join(line for line in fh if not line.lstrip().startswith("package"))
+                    if "public static void main(" in src:
+                        mains.append((fn, src))
                     else:
-                        files.append({ "name": os.path.basename(filename), "content": student_code })
-        else:                  
-            with open(student_file) as file:
-                student_code = file.read()
-            files.append({ "name": os.path.basename(student_file), "content": student_code })
-        if additional_file_path != "":
-            file_name1 = additional_file_path.split("(", 1)[-1].split(")")[1]
-            #print("This is the file name", file_name1, flush=True)
-            file_content = ""
-            with open(additional_file_path) as file:
-                file_content = file.read()
-            files.append({ "name": file_name1, "content": file_content })
-        results["language"] = language
-        results["version"] = "*"
-        results["files"] = files
-        results["stdin"] = testcase_in
+                        others.append((fn, src))
+                # Put Main.java first if present, then other mains by filename, then the rest
+                mains.sort(key=lambda t: (t[0] != "Main.java", t[0]))
+                for fn, src in mains:
+                    files.append({"name": os.path.basename(fn), "content": src})
+                for fn, src in others:
+                    files.append({"name": os.path.basename(fn), "content": src})
+            else:
+                for fn in sorted(os.listdir(student_file)):
+                    full = os.path.join(student_file, fn)
+                    if os.path.isfile(full):
+                        with open(full, "r", errors="ignore") as fh:
+                            files.append({"name": os.path.basename(fn), "content": fh.read()})
+        else:
+            with open(student_file, "r", errors="ignore") as fh:
+                files.append({"name": os.path.basename(student_file), "content": fh.read()})
 
-        #print(results, flush=True)
-        #print("This is the results", results, flush=True)
-        #print("This is base URL", BASE_URL, flush=True)
-        #print(results, flush=True)
+        if additional_file_path:
+            ap = additional_file_path.strip()
+            if os.path.isfile(ap):
+                with open(ap, "r", errors="ignore") as fh:
+                    files.append({"name": os.path.basename(ap), "content": fh.read()})
 
-       
-        try:
-            response = requests.post(
-                BASE_URL,
-                data=json.dumps(results),
-                headers={"Content-Type": "application/json"},
-                timeout=30
-            )
-        except Exception:
-            # Network or transport error → signal caller to handle
-            return None
+        payload = {
+            "language": language,
+            "version": "*",
+            "files": files,
+            # Some student programs read a line; ensure a trailing newline in stdin.
+            "stdin": testcase_in if testcase_in.endswith("\n") else (testcase_in + "\n"),
+        }
 
-        if not response.ok:
-            # Non-200 from Piston → let caller handle gracefully
-            return None
-
-        try:
-            output_obj = response.json()
-        except ValueError:
-            # Invalid/missing JSON
-            return None
-
-        # Safely extract stdout; fall back to stderr/empty string if needed.
-        run_section = output_obj.get("run", {}) if isinstance(output_obj, dict) else {}
-        stdout = run_section.get("stdout")
-        if stdout is None:
-            stdout = run_section.get("stderr", "")
-        return stdout
-
+        # Retry briefly if the API returns empty output (transient)
+        for attempt in range(3):
+            try:
+                resp = requests.post(
+                    BASE_URL,
+                    data=json.dumps(payload),
+                    headers={"Content-Type": "application/json"},
+                    timeout=30
+                )
+            except Exception:
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            if not resp.ok:
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            try:
+                obj = resp.json()
+            except ValueError:
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            run_section = obj.get("run", {}) if isinstance(obj, dict) else {}
+            stdout = run_section.get("stdout") or ""
+            stderr = run_section.get("stderr") or ""
+            if stdout:
+                return stdout
+            if stderr:
+                return stderr
+            time.sleep(0.2 * (attempt + 1))
+        return ""
 
 def execute_test(filename, testcase_in, language, additional_file_path):
         response = call_piston_api(filename, testcase_in.replace('\r', ''), language, additional_file_path)
@@ -190,8 +196,8 @@ def run_liter(myroot, output_dir, student_name, filename, language):
         file.close()
     elif language == "java":
         # Call Checkstyle on the file and save the output to a file
-        checkstyle_jar = "/ta-bot/checkstyle-10.9.2-all.jar"
-        config_file = "/ta-bot/google_checks.xml"
+        checkstyle_jar = "/ta-bot/grading-scripts/checkstyle-10.9.2-all.jar"
+        config_file = "/ta-bot/grading-scripts/google_checks.xml"
         # `filename` can be a directory (multi-file) or a single Java file
         if not os.path.isdir(filename):
             file = filename

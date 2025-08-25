@@ -1,9 +1,9 @@
-import { Component } from 'react';
+import { Component } from 'react'
 import 'semantic-ui-css/semantic.min.css'
-import MenuComponent from '../components/MenuComponent';
+import MenuComponent from '../components/MenuComponent'
 import '../css/AdminComponent.scss'
-import { Helmet } from 'react-helmet';
-import AdminLandingComponent from '../components/AdminLandingComponent';
+import { Helmet } from 'react-helmet'
+import AdminLandingComponent from '../components/AdminLandingComponent'
 
 class AdminLanding extends Component<{}, {}> {
 
@@ -13,7 +13,14 @@ class AdminLanding extends Component<{}, {}> {
                 <Helmet>
                     <title>[Admin] Projects | TA-Bot</title>
                 </Helmet>
-                <MenuComponent showUpload={false} showAdminUpload={false} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} ></MenuComponent>
+                <MenuComponent
+                    showUpload={false}
+                    showAdminUpload={false}
+                    showHelp={false}
+                    showCreate={false}
+                    showLast={false}
+                    showReviewButton={false}
+                ></MenuComponent>
                 <AdminLandingComponent></AdminLandingComponent>
             </div>
         );

@@ -1,6 +1,6 @@
-import React from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
-import ErrorBoundary from './ErrorComponent';
+import React from 'react'
+import { Navigate, Outlet } from 'react-router-dom'
+import ErrorBoundary from './ErrorComponent'
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = localStorage.getItem("AUTOTA_AUTH_TOKEN") != null;

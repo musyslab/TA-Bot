@@ -1,8 +1,8 @@
 import { Component } from 'react';
 import 'semantic-ui-css/semantic.min.css'
-import { Helmet } from 'react-helmet';
-import MenuComponent from '../components/MenuComponent';
-import ClassSelectionPageComponent from '../components/ClassSelectionPageComponent';
+import { Helmet } from 'react-helmet'
+import MenuComponent from '../components/MenuComponent'
+import ClassSelectionPageComponent from '../components/ClassSelectionPageComponent'
 
 class ClassSelectionPage extends Component {
     render() {
@@ -11,7 +11,15 @@ class ClassSelectionPage extends Component {
                 <Helmet>
                     <title>Select A Class | TA-Bot</title>
                 </Helmet>
-                <MenuComponent showUpload={true} showAdminUpload={false} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} showForum={false}></MenuComponent>
+                <MenuComponent
+                    showUpload={true}
+                    showAdminUpload={false}
+                    showHelp={false}
+                    showCreate={false}
+                    showLast={false}
+                    showReviewButton={false}
+                    showForum={false}
+                />
                 <ClassSelectionPageComponent></ClassSelectionPageComponent>
             </div>
         );

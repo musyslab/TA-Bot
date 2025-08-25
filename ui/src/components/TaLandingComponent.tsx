@@ -1,7 +1,7 @@
-import { Component } from 'react';
-import axios from 'axios';
-import { Link } from 'react-router-dom';
-import '../css/TaLandingComponent.scss';
+import { Component } from 'react'
+import axios from 'axios'
+import { Link } from 'react-router-dom'
+import '../css/TaLandingComponent.scss'
 
 interface OfficeHoursState {
     question: string;
@@ -49,7 +49,6 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                     question_time: item[2],
                     Student_name: item[3],
                     ruled: item[4],
-                    // item[5] was project_id (removed)
                     class_id: item[6],
                     submission_id: item[7],
                 }));
@@ -61,18 +60,9 @@ class TaComponent extends Component<{}, OfficeHoursState> {
     };
 
     handleComplete = (id: number) => (e: any) => {
-        axios
-            .get(import.meta.env.VITE_API_URL + `/submissions/dismissOHQuestion?question_id=${id}`, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
-                },
-            })
-            .then((res) => {
-                this.fetchOHQuestions();
-            })
-            .catch((err) => {
-                console.log(err);
-            });
+        axios.get(`${import.meta.env.VITE_API_URL}/submissions/dismissOHQuestion?question_id=${id}`, { headers: { Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` } })
+            .then(() => this.fetchOHQuestions())
+            .catch((err) => console.log(err));
     };
 
     handleRuling(id: number, ruling: number) {

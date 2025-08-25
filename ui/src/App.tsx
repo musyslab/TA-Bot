@@ -20,7 +20,6 @@ import CreateAccountPage from './pages/AccountCreationPage';
 import TaLanding from './AdminPages/TaLanding';
 import OfficeHoursPage from './pages/OfficeHoursPage';
 import ProjectAnalytics from './AdminPages/ProjectAnalitics';
-import ForumPage from './pages/ForumPage';
 
 class App extends Component {
 
@@ -111,11 +110,6 @@ class App extends Component {
                     <Route path="/admin/AdminAnalytics/:id" element={
                         <ProtectedRoute>
                             <ProjectAnalytics />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/class/:class_id/forum" element={
-                        <ProtectedRoute>
-                            <ForumPage />
                         </ProtectedRoute>
                     } />
                     {/* Catch-all for 404 */}
