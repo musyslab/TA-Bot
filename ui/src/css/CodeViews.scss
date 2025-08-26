@@ -4,7 +4,7 @@
 
 /* ======== Top view switch (tabs) ======== */
 .tab-menu {
-    width: 94%;
+    width: 90vw;
     margin: 30px auto 0.5rem;
     /* push below fixed menu */
     display: flex;
@@ -62,7 +62,7 @@
 
 /* Keep code section readable */
 .code-section {
-    width: 94%;
+    width: 90vw;
     margin: 2rem auto 3rem;
 
     .section-title {
@@ -159,7 +159,7 @@
 
     /* Center the table and constrain width */
     .results-table {
-        width: 94%;
+        width: 90vw;
         margin: 1.25rem auto;
         border-collapse: collapse;
         border-spacing: 0;
@@ -257,7 +257,7 @@
 
     /* Optional: Section title width aligned with table */
     .section-title {
-        width: 94%;
+        width: 90vw;
         margin: 0 auto 0.6rem;
         color: #222e3a;
     }
@@ -272,7 +272,7 @@
 
 /* ===================== Diff File View ===================== */
 .diff-view {
-    width: 94%;
+    width: 90vw;
     margin: 1rem auto 2rem;
     display: grid;
     grid-template-columns: 280px 1fr;
