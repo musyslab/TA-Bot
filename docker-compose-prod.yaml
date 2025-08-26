@@ -51,6 +51,8 @@ services:
     build:
       context: ui
       dockerfile: Dockerfile.prod
+    environment:
+      VITE_API_URL: https://tabot.sh/api
     volumes:
       - "./ui:/app"
     ports:
