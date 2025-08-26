@@ -62,10 +62,6 @@ Go into UI folder:
 
 ```npm install``` 
 
-Still in the UI folder, create a file named: ```.env```
-
-Add the following line to that file: ```VITE_API_URL=http://localhost:5000/api```
-
 ## Run TA-Bot
 
 Go up a directory (from the UI folder) and run:
