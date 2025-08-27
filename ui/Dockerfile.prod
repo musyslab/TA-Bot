@@ -1,28 +1,32 @@
-FROM node:20.11.1 AS build
+# Pull node base image
+FROM node:20.11.1
 
-# If you still need legacy OpenSSL for some deps
-ENV NODE_OPTIONS=--openssl-legacy-provider
-
+# set working directory
 WORKDIR /app
 
-# Use cache efficiently
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+# Install depenencies
+COPY package.json .
+#COPY yarn.lock .
+RUN yarn install 
 
-# Client-visible env vars for Vite must be prefixed with VITE_
-# Pass this at build time: --build-arg VITE_BASE_API_URL=https://tabot.sh/api
-ARG VITE_BASE_API_URL
-ENV VITE_BASE_API_URL=$VITE_BASE_API_URL
-
-# Copy source and build
+# Add app
 COPY . .
-RUN yarn build   # outputs to /app/dist
 
-# ---------- Runtime stage ----------
+# build app
+RUN yarn build
+
+# production environment
 FROM nginx:stable-alpine
 
-# Copy built assets to nginx html root
-COPY --from=build /app/dist /usr/share/nginx/html
+# copy over app
+COPY --from=build /app/build /usr/share/nginx/html
 
-EXPOSE 80
+COPY nginx.conf /etc/nginx/nginx.conf
+
+EXPOSE 3000
+
+# start app
 CMD ["nginx", "-g", "daemon off;"]
+
+# build container: docker build -f Dockerfile.prod -t abacus-app:prod .
+# run container: docker run -it --rm -p 80:80 abacus-app:prod
