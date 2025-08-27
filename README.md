@@ -82,6 +82,20 @@ In DBBeaver, connect to: ```localhost:3306```
 
 Currently, manual setup required. Classes, lectures, and labs need to be manually added
 
+## Pushing Docker Image to Production:
+
+Get a github personal access token (PAT)
+
+```export CR_PAT=<github personal access token>```
+
+```echo $CR_PAT | docker login ghcr.io -u USERNAME --password-stdin```
+
+```cd into the frontend/backend directory```
+
+```docker build -f Dockerfile.prod -t ghcr.io/musyslab/tabot-<frontend/backend>:v<VERSION_NUMBER>-tbs-research .```
+
+```docker push ghcr.io/musyslab/tabot-<frontend/backend>:v<VERSION_NUMBER>-tbs-research```
+
 ## Commands for Sam when he's dumb
 
 ```wsl --list```
