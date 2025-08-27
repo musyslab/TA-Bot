@@ -47,7 +47,6 @@ services:
       context: ui
     environment:
       BROWSER: "none"  
-      VITE_API_URL: http://localhost:5000/api 
     volumes:
       - "./ui:/app"
     ports:
