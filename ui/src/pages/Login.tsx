@@ -125,7 +125,7 @@ class Login extends Component<{}, LoginPageState> {
             <Message>
               Create an account{' '}
               <a
-                href="https://drive.google.com/file/d/1VlA4wRcizy4VpFZuMQQ0V9Fnmq-l5vcm/view?usp=sharing"
+                href="https://docs.google.com/document/d/1QT--iGWE-y1Ix8GknsMAoiIKyZJcO_yEOhMBg0WFpyU/edit?usp=sharing"
                 target="_blank"
                 rel="noreferrer"
               >
