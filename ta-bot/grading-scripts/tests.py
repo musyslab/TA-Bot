@@ -8,8 +8,8 @@ import os
 TYPE_CONFIG_KEY="TYPE"
 DESCRIPTION_CONFIG_KEY="DESCRIPTION"
 HIDDEN_CONFIG_KEY="HIDDEN"
-#SERVER_URL = "https://piston.tabot.sh/api/v2/"
-SERVER_URL="https://emkc.org/api/v2/piston/"
+SERVER_URL = "https://piston.tabot.sh/api/v2/"
+#SERVER_URL="https://emkc.org/api/v2/piston/"
 
 class PistonApiReponse():
     def __init__(self, stdout, stderror, output, code, signal):
