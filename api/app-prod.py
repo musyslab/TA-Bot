@@ -18,12 +18,23 @@ from src import classes, auth, projects, submission, upload
 from src.services import timeout_service
 from sentry_sdk.integrations.flask import FlaskIntegration
 import sentry_sdk
+import os
 
 def create_app():
     app = Flask(__name__)
     container = Container()
     app.container = container
     container.wire(modules=[classes, auth, projects, submission, upload, timeout_service])
+
+    TEACHER_DIR = "/ta-bot/project-files/teacher-files"
+    STUDENT_DIR = "/ta-bot/project-files/student-files"
+    os.makedirs(TEACHER_DIR, exist_ok=True)
+    os.makedirs(STUDENT_DIR, exist_ok=True)
+    app.config.update({
+        'TEACHER_FILES_DIR': TEACHER_DIR,
+        'STUDENT_FILES_DIR': STUDENT_DIR,
+    })
+
     CORS(app)
     app.config['TABOT_PATH'] = '/home/agebhard/ta-bot/tabot.sh'
     app.config["JWT_SECRET_KEY"] = "5WZBHN8yWHH9V7IjIg8aeDwQSOMpYqVyEJXMaXhSuHpsutYyKDrx4BvVR0CEf69"
