@@ -39,8 +39,8 @@ import itertools
 from werkzeug.utils import secure_filename
 
 # PISTON_URL = "https://emkc.org/api/v2/piston/execute"
-PISTON_URL ="https://piston.tabot.sh/api/v2/execute"
-# PISTON_URL = "https://scarif-dev.cs.mu.edu/piston/v2/execute"
+# PISTON_URL ="https://piston.tabot.sh/api/v2/execute"
+PISTON_URL = "https://scarif-dev.cs.mu.edu/piston/v2/execute"
 
 projects_api = Blueprint('projects_api', __name__)
 

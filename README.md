@@ -64,7 +64,7 @@ Go into UI folder:
 
 Still in the UI folder, create a file named: ```.env```
 
-Add the following line to that file: ```VITE_API_URL=http://localhost:5001/api```
+Add the following line to that file: ```VITE_API_URL=http://localhost:5000/api```
 
 (Or different URL for Production)
 
