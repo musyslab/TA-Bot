@@ -35,31 +35,28 @@ from container import Container
 from datetime import datetime
 from src.services.link_service import LinkService
 import itertools
+import importlib.util
 
 from werkzeug.utils import secure_filename
-
-# PISTON_URL = "https://emkc.org/api/v2/piston/execute"
-# PISTON_URL ="https://piston.tabot.sh/api/v2/execute"
-PISTON_URL = "https://scarif-dev.cs.mu.edu/piston/v2/execute"
 
 projects_api = Blueprint('projects_api', __name__)
 
 ALLOWED_SOURCE_EXTS = {'.py', '.c', '.java', '.rkt'}
 
-def _project_root() -> str:
+def project_root() -> str:
     return "/ta-bot/project-files"
 
-def _teacher_root() -> str:
-    return os.path.join(_project_root(), "teacher-files")
+def teacher_root() -> str:
+    return os.path.join(project_root(), "teacher-files")
 
-def _student_root() -> str:
-    return os.path.join(_project_root(), "student-files")
+def student_root() -> str:
+    return os.path.join(project_root(), "student-files")
 
-def _project_dir(base_proj: str, ts: str) -> str:
+def project_dir(base_proj: str, ts: str) -> str:
     # teacher-files/<YYYYMMDD_HHMMSS>__<projectname>
-    return os.path.join(_teacher_root(), f"{ts}__{base_proj}")
+    return os.path.join(teacher_root(), f"{ts}__{base_proj}")
 
-def _extract_ts(name: str, base_proj: str) -> str:
+def extract_ts(name: str, base_proj: str) -> str:
     """
     Extract timestamp "YYYYMMDD_HHMMSS" from the **new** naming scheme:
       "{ts}__{file}__{base_proj}[.ext]"
@@ -75,7 +72,7 @@ def _extract_ts(name: str, base_proj: str) -> str:
     return ""
 
 # NEW: restrict which entries can be considered solutions
-def _is_solution_candidate(entry: str, full: str) -> bool:
+def is_solution_candidate(entry: str, full: str) -> bool:
     # never treat assignment descriptions or export folders as solutions
     if entry.startswith("assignment__"):
         return False
@@ -89,16 +86,16 @@ def _is_solution_candidate(entry: str, full: str) -> bool:
     return ext.lower() in ALLOWED_SOURCE_EXTS
 
 
-def _pick_latest_solution(proj_dir: str, base_proj: str):
+def pick_latest_solution(proj_dir: str, base_proj: str):
     """Return absolute path to the newest (by embedded timestamp) solution file/dir in proj_dir."""
     try:
         best_ts = ""
         best_path = None
         for entry in os.listdir(proj_dir):
             full = os.path.join(proj_dir, entry)
-            if not _is_solution_candidate(entry, full):
+            if not is_solution_candidate(entry, full):
                 continue
-            ts = _extract_ts(entry, base_proj)
+            ts = extract_ts(entry, base_proj) 
             if not ts:
                 continue
             if best_ts == "" or ts > best_ts:
@@ -108,67 +105,54 @@ def _pick_latest_solution(proj_dir: str, base_proj: str):
     except Exception:
         return None
 
-def _collect_files_for_piston(root_path: str, language: str, preferred_first: str | None = None):
-    """
-    Build the `files` payload for Piston.
-    - If `root_path` is a file, send that single file.
-    - If it's a directory, include relevant sources; for Java, put the main class first if found.
-    - If `preferred_first` is provided, put that file first and rename it to Piston's expected
-      entrypoint name (e.g., main.py / Main.java / main.c / main.cpp / main.rkt) in the payload.
-    """
-
-    def _read(path):
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read()
-
-    # allow a few extras that are commonly needed at build time
-    extra_exts = {".h", ".hpp", ".cpp", ".scm"}  # headers, C++, Scheme
-
-    files = []
-
-    def _entry_name_for(language: str, path: str) -> str:
-        lang = (language or "").lower()
-        _, ext = os.path.splitext(path)
-        if "java" in lang:
-            return "Main.java"
-        if "c++" in lang or "cpp" in lang:
-            return "main.cpp"
-        if lang == "c":
-            return "main.c"
-        if "racket" in lang or "scheme" in lang:
-            return "main.rkt"
-        # default python
-        return "main.py"
-
-    if os.path.isfile(root_path):
-        # If a specific entrypoint is passed, use its content/name; otherwise root_path is the file
-        actual = preferred_first if (preferred_first and os.path.isfile(preferred_first)) else root_path
-        return [{
-            "name": _entry_name_for(language, actual),
-            "content": _read(actual)
-        }]
-
-    # directory: gather
-    java_mains, regular = [], []
-    preferred_blob = None
-    for base, _, fnames in os.walk(root_path):
-        for fname in fnames:
-            full = os.path.join(base, fname)
-            _, ext = os.path.splitext(fname)
-            if (ext.lower() in ALLOWED_SOURCE_EXTS) or (ext.lower() in extra_exts):
-                content = _read(full)
-                if preferred_first and os.path.abspath(full) == os.path.abspath(preferred_first):
-                    preferred_blob = {"name": _entry_name_for(language, full), "content": content}
-                elif "java" in (language or "").lower() and "public static void main(" in content:                    
-                    java_mains.append({"name": os.path.basename(full), "content": content})
-                else:
-                    regular.append({"name": os.path.basename(full), "content": content})
-    ordered = []
-    if preferred_blob:
-        ordered.append(preferred_blob)
-    ordered.extend(java_mains)
-    ordered.extend(regular)
-    return ordered
+def collect_files_for_piston(root_path: str, language: str, preferred_first: str | None = None):
+     """
+     Build the `files` payload for Piston.
+     - If `root_path` is a file, send that single file.
+     - If it's a directory, include relevant sources; for Java, put the main class first if found.
+     - If `preferred_first` is provided, put that file first and rename it to Piston's expected
+       entrypoint name (e.g., main.py / Main.java / main.c / main.cpp / main.rkt) in the payload.
+     """
+     def read_file(path: str) -> str:
+         with open(path, "r", encoding="utf-8", errors="replace") as f:
+             return f.read()
+     # allow a few extras that are commonly needed at build time
+     extra_exts = {".h", ".hpp", ".cpp", ".scm"}  # headers, C++, Scheme
+     def entry_name_for(language: str, path: str) -> str:
+         lang = (language or "").lower()
+         _, ext = os.path.splitext(path)
+         if "java" in lang:
+             return "Main.java"
+         if "c++" in lang or "cpp" in lang:
+             return "main.cpp"
+         if lang == "c":
+             return "main.c"
+         if "racket" in lang or "scheme" in lang:
+             return "main.rkt"
+         return "main.py"
+     if os.path.isfile(root_path):
+         actual = preferred_first if (preferred_first and os.path.isfile(preferred_first)) else root_path
+         return [{"name": entry_name_for(language, actual), "content": read_file(actual)}]
+     java_mains, regular = [], []
+     preferred_blob = None
+     for base, _, fnames in os.walk(root_path):
+         for fname in fnames:
+             full = os.path.join(base, fname)
+             _, ext = os.path.splitext(fname)
+             if (ext.lower() in ALLOWED_SOURCE_EXTS) or (ext.lower() in extra_exts):
+                 content = read_file(full)
+                 if preferred_first and os.path.abspath(full) == os.path.abspath(preferred_first):
+                     preferred_blob = {"name": entry_name_for(language, full), "content": content}
+                 elif "java" in (language or "").lower() and "public static void main(" in content:
+                     java_mains.append({"name": os.path.basename(full), "content": content})
+                 else:
+                     regular.append({"name": os.path.basename(full), "content": content})
+     ordered = []
+     if preferred_blob:
+         ordered.append(preferred_blob)
+     ordered.extend(java_mains)
+     ordered.extend(regular)
+     return ordered
 
 @projects_api.route('/all_projects', methods=['GET'])
 @jwt_required()
@@ -293,10 +277,10 @@ def get_submission_by_user_most_recent_project(project_repo: ProjectRepository =
 @inject
 def create_project(project_repo: ProjectRepository = Provide[Container.project_repo]):
 
-    def _ts() -> str:
+    def ts_str() -> str:
         return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def _safe(s: str) -> str:
+    def safe_name(s: str) -> str:
         # normalize and remove unsafe chars; also collapse spaces
         return secure_filename(s or "").replace(" ", "_")
 
@@ -319,11 +303,11 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
     up = request.files['file']
-    base_prog = os.path.splitext(_safe(up.filename))[0]  
-    base_proj = _safe(name)
-    ts = _ts()
-    proj_dir = _project_dir(base_proj, ts)
-    os.makedirs(proj_dir, exist_ok=True)
+    base_prog = os.path.splitext(safe_name(up.filename))[0]
+    base_proj = safe_name(name)
+    ts = ts_str()
+    proj_dir_path = project_dir(base_proj, ts)
+    os.makedirs(proj_dir_path, exist_ok=True)
 
     # Save solution/program file
     filename = up.filename
@@ -331,7 +315,7 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     if ext == ".zip":
         # unique directory for extracted zip, inside the project folder
         dir_name = f"{ts}__{base_prog}__{base_proj}"
-        path = os.path.join(proj_dir, dir_name)
+        path = os.path.join(proj_dir_path, dir_name)
         os.makedirs(path, exist_ok=True)
         try:
             # Ensure we read the uploaded stream from the beginning
@@ -342,7 +326,7 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
             return make_response({'message': 'Uploaded ZIP is invalid'}, HTTPStatus.BAD_REQUEST)
     elif ext in ALLOWED_SOURCE_EXTS:
         unique_name = f"{ts}__{base_prog}__{base_proj}{ext}"
-        path = os.path.join(proj_dir, unique_name)
+        path = os.path.join(proj_dir_path, unique_name)
         up.save(path)
     else:
         return make_response({'message': f'Unsupported file type: {ext}'}, HTTPStatus.BAD_REQUEST)
@@ -350,10 +334,10 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     # Save assignment description using the same naming scheme as solutions:
     # "{ts}__{file}__{base_proj}[.ext]"
     ad = request.files['assignmentdesc']
-    ad_base = os.path.splitext(_safe(ad.filename or "assignment"))[0]
+    ad_base = os.path.splitext(safe_name(ad.filename or "assignment"))[0]
     ad_ext = os.path.splitext(ad.filename or "")[1] or ".pdf"
     ad_name = f"{ts}__{ad_base}__{base_proj}{ad_ext}"
-    assignmentdesc_path = os.path.join(proj_dir, ad_name)
+    assignmentdesc_path = os.path.join(proj_dir_path, ad_name)
     ad.save(assignmentdesc_path)
 
     # Use the just-uploaded path directly; avoid directory scan on create
@@ -368,10 +352,10 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
 @inject
 def edit_project(project_repo: ProjectRepository = Provide[Container.project_repo]):
 
-    def _ts() -> str:
+    def ts_str() -> str:
         return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def _safe(s: str) -> str:
+    def safe_name(s: str) -> str:
         return secure_filename(s or "").replace(" ", "_")
 
     if current_user.Role != ADMIN_ROLE:
@@ -390,8 +374,8 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
     # Ensure base_proj exists before any use (fix NameError) and compute project folder
-    base_proj = _safe(name)
-    ts = _ts()
+    base_proj = safe_name(name)
+    ts = ts_str()
     existing_path = project_repo.get_project_path(pid)
     if existing_path:
         proj_dir = os.path.dirname(existing_path)
@@ -401,9 +385,9 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
             if "__" in folder:
                 base_proj = folder.split("__", 1)[1]
             else:
-                base_proj = _safe(name)
+                base_proj = safe_name(name)
     else:
-        proj_dir = _project_dir(base_proj, ts)
+        proj_dir = project_dir(base_proj, ts)
     os.makedirs(proj_dir, exist_ok=True)
 
     # Default to existing paths if no new files are uploaded
@@ -414,19 +398,17 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     up = request.files.get('file')
     solution_changed = False
     if up and up.filename:
-        base_prog = os.path.splitext(_safe(up.filename))[0]
+        base_prog = os.path.splitext(safe_name(up.filename))[0]
         ext = os.path.splitext(up.filename)[1].lower()
         if ext != ".zip":
             unique_name = f"{ts}__{base_prog}__{base_proj}{ext}"
             path = os.path.join(proj_dir, unique_name)
             up.save(path)
         else:
-            # Keep same "{ts}__{file}__{base_proj}" scheme as creation so _pick_latest_solution works
+            # Keep same "{ts}__{file}__{base_proj}" scheme as creation so pick_latest_solution works
             dir_name = f"{ts}__{base_prog}__{base_proj}"
-
             path = os.path.join(proj_dir, dir_name)
             os.makedirs(path, exist_ok=True)
-
             try:
                 up.stream.seek(0)
             except Exception:
@@ -440,13 +422,13 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     # If a new assignment description was uploaded, save with a unique name
     ad = request.files.get('assignmentdesc')
     if ad and ad.filename:
-        ad_base = os.path.splitext(_safe(ad.filename or "assignment"))[0]
+        ad_base = os.path.splitext(safe_name(ad.filename or "assignment"))[0]
         ad_ext = os.path.splitext(ad.filename or "")[1] or ".pdf"
         assignmentdesc_path = os.path.join(proj_dir, f"{ts}__{ad_base}__{base_proj}{ad_ext}")
         ad.save(assignmentdesc_path)
 
     # Always point the project at the newest solution inside its folder
-    latest = _pick_latest_solution(proj_dir, base_proj)
+    latest = pick_latest_solution(proj_dir, base_proj)
     if latest:
         path = latest
 
@@ -456,7 +438,7 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     # any cached ORM objects or delayed reads.
     try:
         if solution_changed and path:
-            _recompute_expected_outputs(
+            recompute_expected_outputs(
                 project_repo,
                 int(pid),
                 solution_override_path=path,
@@ -470,96 +452,80 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
 
     return make_response("Project Edited", HTTPStatus.OK)
 
-def _has_allowed_ext(path: str) -> bool:
+def has_allowed_ext(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in ALLOWED_SOURCE_EXTS
 
-def _determine_entrypoint(root_path, language):
+def run_solution_for_input(solution_root: str, language: str, input_text: str, project_id: int, class_id: int) -> str:
     """
-    If root_path is a file, return it. If it's a dir, pick a plausible main file.
-    Minimal, Python-first heuristic; extend as needed for other languages.
+    Execute code strictly via /ta-bot/grading-scripts/tabot.py (ADMIN path).
+    Returns stdout (or stderr) with normalized newlines, or "" on failure.
     """
-    if not root_path or not os.path.exists(root_path):
-        return None
-    if os.path.isfile(root_path):
-        return root_path
-    lang = (language or "").lower()
-    preferred_exts = []
-    if lang.startswith("py"):
-        preferred_exts = [".py"]
-    elif "java" in lang:
-        preferred_exts = [".java"]
-    elif "cpp" in lang or "c++" in lang:
-        preferred_exts = [".cpp"]
-    elif lang == "c":
-        preferred_exts = [".c"]
-    elif "racket" in lang or "scheme" in lang:
-        preferred_exts = [".rkt", ".scm"]
-    # Pass 1: prefer files named like main.*
-    for base, _, files in os.walk(root_path):
-        for f in files:
-            name, ext = os.path.splitext(f)
-            if name.lower().startswith("main") and (not preferred_exts or ext.lower() in preferred_exts):
-                return os.path.join(base, f)
-    # Pass 2: first file matching preferred extension
-    for base, _, files in os.walk(root_path):
-        for f in files:
-            _, ext = os.path.splitext(f)
-            if not preferred_exts or ext.lower() in preferred_exts:
-                return os.path.join(base, f)
-    return None
-
-def _run_solution_for_input(entrypoint, language, input_text, workdir):
-    """
-    Run the stored solution via Piston and capture stdout.
-    Supports python/java/c/cpp/racket (if supported by your Piston instance).
-    """
-    if not entrypoint or not os.path.exists(entrypoint):
+    if not solution_root or not os.path.exists(solution_root):
         return ""
-
-    lang = (language or "").lower()
-    # map to Piston language keys
-    if lang.startswith("py"):
-        piston_lang = "python"
-    elif "java" in lang:
-        piston_lang = "java"
-    elif "c++" in lang or "cpp" in lang:
-        piston_lang = "cpp"
-    elif lang == "c":
-        piston_lang = "c"
-    elif "racket" in lang or "scheme" in lang:
-        piston_lang = "racket"
-    else:
-        # unknown: try raw string
-        piston_lang = language or "python"
-
-    # Build the file list with the resolved entrypoint first to avoid executing stale files
-    root_dir = (
-        os.path.dirname(entrypoint) if os.path.isfile(entrypoint)
-        else (entrypoint if os.path.isdir(entrypoint) else workdir)
-    )
-    files = _collect_files_for_piston(root_dir, piston_lang, preferred_first=entrypoint)
-
-    if not files:
-        return ""
-
+    script = "/ta-bot/grading-scripts/tabot.py"
+    args = [
+        "python", script,
+        "ADMIN",              # student_name triggers admin path
+        "1",                  # research_group == 1 -> admin_run
+        language or "python", # language as tabot expects
+        input_text or "",     # goes to admin_run(user_input)
+        solution_root,        # file or directory
+        "",                   # additional_file_path
+        str(project_id or 0),
+        str(class_id or 0),
+    ]
     try:
-        payload = {
-            "language": piston_lang,
-            "version": "*",
-            "stdin": input_text or "",
-            "files": files
-        }
-        resp = requests.post(PISTON_URL, json=payload, timeout=30)
-        if not resp.ok:
-            return ""
-        data = resp.json() or {}
-        run = data.get("run", {})
-        out = run.get("stdout") or run.get("stderr") or ""
-        return (out or "").strip()
+        proc = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(solution_root) if os.path.isfile(solution_root) else solution_root)
     except Exception:
         return ""
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    return (out or err)
 
-def _recompute_expected_outputs(project_repo, project_id, *, solution_override_path: str = None, language_override: str = None):
+def load_tabot_module():
+    """
+    Try to import tabot as a normal module first.
+    If that fails, load it from /ta-bot/grading-scripts and make sure
+    its directory is on sys.path so sibling imports (output, tests, CompilerRunner)
+    resolve correctly.
+    """
+    try:
+        import tabot as _t
+        return _t
+    except Exception:
+        pass
+
+    grading_dir = "/ta-bot/grading-scripts"
+    grading_path = os.path.join(grading_dir, "tabot.py")
+
+    spec = importlib.util.spec_from_file_location("tabot", grading_path)
+    if not spec or not spec.loader:
+        raise ImportError(f"Cannot load spec for {grading_path}")
+
+    # Ensure sibling imports like `from output import *` work
+    sys.path.insert(0, grading_dir)
+    try:
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["tabot"] = mod  # let subimports see the module name
+        # Optional but helps some relative-import edge cases:
+        mod.__package__ = None
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        # Avoid permanently polluting sys.path
+        try:
+            sys.path.remove(grading_dir)
+        except ValueError:
+            pass
+
+try:
+    TABOT = load_tabot_module()
+except Exception as e:
+    TABOT = None
+    print(f"[projects] Warning: tabot import failed (will use subprocess path): {e}", flush=True)
+
+def recompute_expected_outputs(project_repo, project_id, *, solution_override_path: str = None, language_override: str = None):    
+    
     """
     For each testcase, run the (updated) solution and persist the new output.
     IMPORTANT: preserve the testcase level by resolving level *name* from level *id*
@@ -572,22 +538,14 @@ def _recompute_expected_outputs(project_repo, project_id, *, solution_override_p
     except Exception:
         proj_obj = None
 
-    # Prefer the freshly-saved path/language if provided to avoid stale ORM caches.
     if solution_override_path and os.path.exists(solution_override_path):
         solution_root = solution_override_path
-        # If caller didn't pass language, fall back to the DB record (when available)
         lang = (language_override or (getattr(proj_obj, "Language", "") if proj_obj else "")).strip()
     else:
         if not proj_obj or not getattr(proj_obj, "solutionpath", None):
             return
         solution_root = getattr(proj_obj, "solutionpath", "")
         lang = getattr(proj_obj, "Language", "")
-
-    entry = _determine_entrypoint(solution_root, lang)
-
-    if not entry:
-        return
-    workdir = os.path.dirname(entry) if os.path.isfile(entry) else solution_root
 
     # Fetch testcases: { id: [levelid, name, desc, input, output, isHidden, addpath, (optional) levelname] }
     cases = project_repo.get_testcases(str(project_id))
@@ -623,7 +581,7 @@ def _recompute_expected_outputs(project_repo, project_id, *, solution_override_p
             lid = None
         resolved_levelname = existing_levelname or id_to_levelname.get(lid, "")
 
-        new_out = _run_solution_for_input(entry, lang, inp, workdir)
+        new_out = run_solution_for_input(solution_root, lang, inp, project_id, class_id)
         try:
             project_repo.add_or_update_testcase(
                 int(project_id),
@@ -662,11 +620,11 @@ def list_source_files(project_repo: ProjectRepository = Provide[Container.projec
         for base, _, fnames in os.walk(root):
             for fname in fnames:
                 full = os.path.join(base, fname)
-                if _has_allowed_ext(full):
+                if has_allowed_ext(full):
                     rel = os.path.relpath(full, root).replace("\\", "/")
                     files.append({'relpath': rel, 'bytes': os.path.getsize(full)})
     else:
-        if _has_allowed_ext(root):
+        if has_allowed_ext(root):
             files.append({'relpath': os.path.basename(root), 'bytes': os.path.getsize(root)})
 
     return jsonify({'files': files})
@@ -705,7 +663,7 @@ def get_source_file(project_repo: ProjectRepository = Provide[Container.project_
 
     if not os.path.exists(full):
         return make_response({'message': 'File not found'}, HTTPStatus.NOT_FOUND)
-    if not _has_allowed_ext(full):
+    if not has_allowed_ext(full):
         return make_response({'message': 'Unsupported file type'}, HTTPStatus.BAD_REQUEST)
 
     # Limit preview size to 2 MB
@@ -833,10 +791,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         project = project_repo.get_selected_project(int(project_id))
         language = (getattr(project, "Language", "") or "")
         solution_root = (getattr(project, "solutionpath", "") or "")
-        entrypoint = _determine_entrypoint(solution_root, language)
-        if entrypoint:
-            workdir = os.path.dirname(entrypoint) if os.path.isfile(entrypoint) else solution_root
-            output = _run_solution_for_input(entrypoint, language, input_data, workdir)
+        output = run_solution_for_input(solution_root, language, input_data, int(project_id), int(class_id_int))
     except Exception:
         # Fall back to the submitted output if recomputation fails
         pass

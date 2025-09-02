@@ -420,53 +420,6 @@ def submit_Suggestion(submission_repo: SubmissionRepository = Provide[Container.
     submission_repo.submitSuggestion(current_user.Id ,suggestion)
     return make_response("Suggestion Submitted", HTTPStatus.OK)
 
-
-
-@submission_api.route('/run_code_snippet', methods=['GET'])
-@jwt_required()
-@inject
-def run_code_snippet(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    student_code = unquote(request.args.get("code"))
-    test_case_input = unquote(request.args.get("input"))
-    language = str(request.args.get("language"))
-
-
-    # BASE_URL ="https://emkc.org/api/v2/piston/execute"
-    # BASE_URL ="https://piston.tabot.sh/api/v2/execute"
-    BASE_URL = "https://scarif-dev.cs.mu.edu/piston/v2/execute"
-
-    results = {}
-    files = []
-    files.append({ "name": "CodeSnippit", "content": student_code })
-    results["language"] = language
-    results["version"] = "*"
-    results["files"] = files
-    results["stdin"] = test_case_input + "\n"
-
-    try:
-        response = requests.post(BASE_URL, data=json.dumps(results), headers={ "Content-Type": "application/json" })
-        snippit_output = ""
-        if(response.ok):
-            output_obj = response.json()
-            for key, value in output_obj.items():
-                if key == 'run':
-                    syntax_error = value.get('stderr', '')
-                    if syntax_error != '':
-                        snippit_output = syntax_error.split(",")[1]
-                    else:
-                        snippit_output = value.get('stdout', '')
-            print(output_obj, flush=True)
-    except Exception as e:
-        print("Error: ", e, flush=True)
-        snippit_output = "Error: " + str(e)
-    try:
-        submission_repo.log_code_snippet(current_user.Id, student_code, language, snippit_output, language)
-    except Exception as e:
-        print("Unable to log code snippet", e, flush=True)
-    return make_response(snippit_output, HTTPStatus.OK)
-
-
-
 @submission_api.route('/GetCharges', methods=['GET'])
 @jwt_required()
 @inject

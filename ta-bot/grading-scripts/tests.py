@@ -8,8 +8,8 @@ import os
 TYPE_CONFIG_KEY="TYPE"
 DESCRIPTION_CONFIG_KEY="DESCRIPTION"
 HIDDEN_CONFIG_KEY="HIDDEN"
-SERVER_URL = "https://piston.tabot.sh/api/v2/execute"
-#SERVER_URL="https://emkc.org/api/v2/piston/execute"
+# PISTON_URL = "https://piston.tabot.sh/api/v2/execute"
+# PISTON_URL="https://emkc.org/api/v2/piston/execute"
 
 class PistonApiReponse():
     def __init__(self, stdout, stderror, output, code, signal):
@@ -95,7 +95,7 @@ class Test(ABC):
         results["files"] = files
         results["stdin"] = input_file_contents
 
-        response = requests.post(SERVER_URL, data=json.dumps(results), headers={ "Content-Type": "application/json" })
+        response = requests.post(PISTON_URL, data=json.dumps(results), headers={ "Content-Type": "application/json" })
 
         if(response.ok):
             output_obj = response.json()
