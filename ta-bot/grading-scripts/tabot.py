@@ -15,8 +15,10 @@ import tempfile
 import re
 import CompilerRunner
 
-BASE_URL ="https://emkc.org/api/v2/piston/execute"
-# BASE_URL ="https://piston.tabot.sh/api/v2/execute"
+PISTON_URL ="https://emkc.org/api/v2/piston/execute"
+# PISTON_URL ="https://piston.tabot.sh/api/v2/execute"
+# PISTON_URL = "https://scarif-dev.cs.mu.edu/piston/v2/execute"
+
 
 TEMP_PREFIX = "temp-"
 OUTPUT_PATH_NAME = "output"
@@ -149,7 +151,7 @@ def call_piston_api(student_file: str, testcase_in: str, language, additional_fi
         for attempt in range(3):
             try:
                 resp = requests.post(
-                    BASE_URL,
+                    PISTON_URL,
                     data=json.dumps(payload),
                     headers={"Content-Type": "application/json"},
                     timeout=30

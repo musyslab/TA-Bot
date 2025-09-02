@@ -1270,6 +1270,15 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                             'Submit changes'
                                         )}
                                     </button>
+                                    {selectedTestCaseId !== -1 && (
+                                        <button
+                                            type="button"
+                                            className="modal-trash-button"
+                                            onClick={() => buttonhandleTrashClick(selectedTestCaseId!)}
+                                        >
+                                            Remove testcase
+                                        </button>
+                                    )}
                                 </div>
                             </form>
                         </div>
