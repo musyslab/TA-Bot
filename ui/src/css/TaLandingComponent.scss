@@ -1,18 +1,17 @@
 .oh-page {
-    min-height: 100dvh;         /* use 100vh if you prefer */
-    box-sizing: border-box;      /* include padding in the min-height */
-    padding: 140px 0 24px;       /* top = your old 140px margin; bottom spacing for table */
-  }
+    min-height: 100dvh;
+    box-sizing: border-box;
+    padding: 140px 0 24px;
+}
 
 .title-row-oh {
     width: 90vw;
-    margin: 30px auto 10px;
+    margin: 30px auto 20px;
 
     .oh-title {
         width: 100%;
         text-align: center;
         background: #d1d5db;
-        /* darker gray, readable with black text */
         border: 1px solid #9ca3af;
         border-radius: 12px;
         padding: 1.1rem 1.25rem;
@@ -24,7 +23,6 @@
     }
 }
 
-/* ===== Global button styles used in the table ===== */
 .button {
     display: inline-flex;
     align-items: center;
@@ -172,6 +170,11 @@
                     width: 12%;
                 }
 
+                &.col-status {
+                    width: 10%;
+                    text-align: center;
+                }
+
                 &.col-feedback {
                     width: 14%;
                     text-align: center;
@@ -208,6 +211,17 @@
                 background: #e9eef4;
             }
 
+            &.is-in-oh {
+                background: #ecfdf5 !important;
+                /* subtle green */
+                /* left accent to stand out */
+                box-shadow: inset 4px 0 0 0 #10b981;
+            }
+
+            &.is-in-oh:hover {
+                background: #d1fae5 !important;
+            }
+
             td {
                 padding: 0.6rem 0.75rem;
                 border: 1px solid #e5e7eb;
@@ -235,6 +249,25 @@
                 &.cell-wait {
                     color: #1f2937;
                     font-variant-numeric: tabular-nums;
+                }
+
+                &.cell-status {
+                    text-align: center;
+
+                    .status.in-oh .icon {
+                        font-size: 1.75rem;
+                        line-height: 1;
+                    }
+
+                    .status.waiting {
+                        opacity: 0.7;
+                    }
+
+                    .status.waiting .icon {
+                        font-size: 1.75rem;
+                        line-height: 1;
+                    }
+
                 }
 
                 &.cell-feedback {

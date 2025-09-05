@@ -463,6 +463,7 @@
         font-size: 14px;
         font-weight: bold;
     }
+    
 }
 
 @keyframes fadeInScale {
@@ -502,3 +503,31 @@
         border-color: #0275d8;
     }
 }
+
+  /* Office Hours banner: centered text with left icon and symmetric ghost spacer */
+  .oh-banner.ui.icon.message {
+    display: grid !important;
+    align-items: center !important;
+    grid-template-columns: 3.5em 1fr 3.5em; /* icon | centered content | ghost spacer */
+    padding-left: 2rem !important;          /* keep the padding left of the icon */
+    text-align: center !important;
+  }
+
+  .oh-banner.ui.icon.message > i.icon {
+    grid-column: 1;
+    position: static !important;   /* in-flow so its width defines col 1 */
+    margin: 0 !important;
+    justify-self: start;
+  }
+
+  .oh-banner.ui.icon.message > .content {
+    grid-column: 2 !important;     /* middle column only */
+    margin: 0 auto !important;
+    text-align: center !important;
+  }
+
+  /* Ghost cell to balance the icon’s width on the right */
+  .oh-banner.ui.icon.message::after {
+    content: "";
+    grid-column: 3;
+  }

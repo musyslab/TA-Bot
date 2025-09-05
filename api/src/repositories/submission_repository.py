@@ -283,7 +283,13 @@ class SubmissionRepository():
         questions = StudentQuestions.query.filter(StudentQuestions.dismissed == 0).all()
         return questions
     def get_active_question(self, user_id):
-        question = StudentQuestions.query.filter(and_(StudentQuestions.StudentId == user_id, StudentQuestions.dismissed == 0)).first()
+        
+        question = StudentQuestions.query.filter(and_(
+            StudentQuestions.StudentId == user_id,
+            StudentQuestions.dismissed == 0,
+            StudentQuestions.ruling == 1  # only accepted OH counts as "active"
+        )).first()
+
         if question == None:
             return -1
         return question.Sqid
