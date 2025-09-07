@@ -217,6 +217,8 @@ def get_submission_information(submission_repo: SubmissionRepository = Provide[C
         time_for_next_submission = submission.Time + timedelta(minutes=0)
     return jsonify(submissions_remaining = 10, name = project.Name, end = project.End, Id = project.Id, max_submissions = 10, can_redeem = can_redeem, points=point, time_until_next_submission = time_for_next_submission.isoformat())
 
+
+
 @submission_api.route('/recentsubproject', methods=['POST'])
 @jwt_required()
 @inject
@@ -234,17 +236,45 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
         userids.append(user.Id)
     bucket = submission_repo.get_most_recent_submission_by_project(projectid, userids)    
     submission_counter_dict = submission_repo.submission_counter(projectid, userids)
-    user_lectures_dict =user_repo.get_user_lectures(userids, class_id)
+    user_lectures_dict = user_repo.get_user_lectures(userids, class_id)
+    user_labs_dict = user_repo.get_user_labs(userids, class_id)
     for user in users:
         if int(user.Role) == 0:
             if user.Id in bucket:
                 student_grade = project_repo.get_student_grade(projectid, user.Id)
                 student_id = user_repo.get_StudentNumber(user.Id)
-                studentattempts[user.Id]=[user.Lastname,user.Firstname,user_lectures_dict[user.Id],submission_counter_dict[user.Id],bucket[user.Id].Time.strftime("%x %X"),bucket[user.Id].IsPassing,bucket[user.Id].NumberOfPylintErrors,bucket[user.Id].Id, str(class_id), student_grade, student_id, user.IsLocked]    
+                studentattempts[user.Id]=[
+                    user.Lastname,
+                    user.Firstname,
+                    user_lectures_dict[user.Id],
+                    user_labs_dict[user.Id],                      
+                    submission_counter_dict[user.Id],
+                    bucket[user.Id].Time.strftime("%x %X"),
+                    bucket[user.Id].IsPassing,
+                    bucket[user.Id].NumberOfPylintErrors,
+                    bucket[user.Id].Id,
+                    str(class_id),
+                    student_grade,
+                    student_id,
+                    user.IsLocked
+                ]
             else:
-                student_grade = "0"
                 student_id = user_repo.get_StudentNumber(user.Id)
-                studentattempts[user.Id]=[user.Lastname,user.Firstname,user_lectures_dict[user.Id], "N/A", "N/A", "N/A",  "N/A", -1, "N/A", student_grade, student_id, user.IsLocked]
+                studentattempts[user.Id] = [
+                    user.Lastname,                   
+                    user.Firstname,                 
+                    user_lectures_dict[user.Id],    
+                    user_labs_dict[user.Id],        
+                    "N/A",                           
+                    "N/A",                          
+                    "N/A",                          
+                    "N/A",                         
+                    -1,                              
+                    str(class_id),                  
+                    "0",                             
+                    student_id,                      
+                    user.IsLocked                   
+                ]
     return make_response(json.dumps(studentattempts), HTTPStatus.OK)
 
 
@@ -336,7 +366,26 @@ def Dismiss_OH_Question(submission_repo: SubmissionRepository = Provide[Containe
 @jwt_required()
 @inject
 def get_active_Question(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    return make_response(str(submission_repo.get_active_question(current_user.Id)), HTTPStatus.OK)
+    accepted_only_raw = request.args.get("acceptedOnly", "")
+    accepted_only = str(accepted_only_raw).lower() in ("1", "true", "yes", "y")
+    return make_response(str(submission_repo.get_active_question(current_user.Id, accepted_only)), HTTPStatus.OK)
+
+@submission_api.route('/getAcceptedOHForClass', methods=['GET'])
+@jwt_required()
+@inject
+def get_accepted_oh_for_class(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    """
+    Returns the Sqid of the most recent ACCEPTED (ruling==1, not dismissed)
+    office-hours question for the current user, scoped to the given class_id's
+    current project. If none, returns -1.
+    """
+    class_id_raw = request.args.get("class_id", None)
+    try:
+        class_id = int(class_id_raw) if class_id_raw is not None else None
+    except (TypeError, ValueError):
+        class_id = None
+    qid = submission_repo.get_accepted_oh_for_class(current_user.Id, class_id)
+    return make_response(str(qid if qid is not None else -1), HTTPStatus.OK)
 
 @submission_api.route('/GetSubmissionDetails', methods=['GET'])
 @jwt_required()

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import 'semantic-ui-css/semantic.min.css'
-import { Button, Form, Grid, Segment, Dimmer, Header, Icon, Table } from 'semantic-ui-react'
+import { Button, Form, Grid, Segment, Dimmer, Header, Icon, Table, Message } from 'semantic-ui-react'
 import axios from 'axios'
 import MenuComponent from '../components/MenuComponent'
 import React from 'react'
@@ -57,10 +57,11 @@ const UploadPage = () => {
     const [SecondsUntilRecharge, setSecondsUntilRecharge] = useState<number>(0);
     const [RewardState, setRewardState] = useState<boolean>(false);
     const [displayClock, setDisplayClock] = useState<boolean>(false);
+    const [inOfficeHours, setInOfficeHours] = useState<boolean>(false);
 
     const [project_name, setProject_name] = useState<string>("");
     const [dueDate, setDueDate] = useState<string>("");
-    const canSubmit = (baseCharge > 0) || RewardState;
+    const canSubmit = inOfficeHours || (baseCharge > 0) || RewardState;
 
     // Allowed upload file extensions (frontend gate)
     const ALLOWED_EXTS = ['.py', '.java', '.c', '.rkt'];
@@ -89,6 +90,30 @@ const UploadPage = () => {
         }
     }, [project_name]);
 
+    function checkOfficeHours() {
+        // Show banner only if there is an ACCEPTED (ruling==1, not dismissed)
+        // OH entry for THIS class (via its current project).
+        axios.get(
+            `${import.meta.env.VITE_API_URL}/submissions/getAcceptedOHForClass?class_id=${class_id}`,
+            { headers: { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` } }
+        )
+            .then(res => {
+                // API returns the accepted question id or -1
+                const raw = (typeof res.data === 'object' && res.data !== null)
+                    ? (res.data.id ?? res.data.qid ?? res.data.value ?? res.data)
+                    : res.data;
+                const id = Number(raw);
+                setInOfficeHours(Number.isFinite(id) && id > 0);
+            })
+            .catch(err => {
+                console.error("Error checking office hours:", err);
+                setInOfficeHours(false);
+            });
+    }
+
+    useEffect(() => {
+        checkOfficeHours();
+    }, []);
 
     function handleFileChange(event: React.FormEvent) {
         const target = event.target as HTMLInputElement;
@@ -337,6 +362,17 @@ const UploadPage = () => {
                                 <h1>No Active Project</h1>
                             )}
                         </div>
+
+                        {inOfficeHours && (
+                            <Message positive icon className="oh-banner">
+                                <Icon name="handshake outline" />
+                                <Message.Content>
+                                    <Message.Header>You're in Office Hours</Message.Header>
+                                    Submissions will not consume energy while this is active.
+                                </Message.Content>
+                            </Message>
+                        )}
+
                         <Dimmer.Dimmable dimmed={true}>
                             <Segment stacked className="upload-segment">
                                 <div className="base-charge">

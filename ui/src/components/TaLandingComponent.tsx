@@ -1,4 +1,5 @@
 import { Component } from 'react'
+import { Icon } from 'semantic-ui-react'
 import axios from 'axios'
 import { Link } from 'react-router-dom'
 import '../css/TaLandingComponent.scss'
@@ -106,6 +107,7 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                     <table border={1} className="question-queue-table">
                         <thead className="table-head">
                             <tr className="head-row">
+                                <th className="col-status">Status</th>
                                 <th className="col-position">Queue</th>
                                 <th className="col-student">Student Name</th>
                                 <th className="col-question">Question</th>
@@ -118,7 +120,26 @@ class TaComponent extends Component<{}, OfficeHoursState> {
 
                         <tbody className="table-body">
                             {Student_questions.map((item: OHQuestion, index) => (
-                                <tr key={item.Question_id} className="data-row">
+                                <tr
+                                    key={item.Question_id}
+                                    className={`data-row ${item.ruled === 1 ? 'is-in-oh' : ''}`}
+                                >
+
+                                    <td
+                                        className="cell-status"
+                                        aria-label={item.ruled === 1 ? "In office hours" : "Waiting in queue"}
+                                    >
+                                        {item.ruled === 1 ? (
+                                            <span className="status in-oh" aria-hidden="true">
+                                                <Icon name="handshake outline" />
+                                            </span>
+                                        ) : (
+                                            <span className="status waiting" aria-hidden="true">
+                                                <Icon name="clock outline" />
+                                            </span>
+                                        )}
+                                    </td>
+
                                     <td className="cell-position">{index + 1}</td>
                                     <td className="cell-student">{item.Student_name}</td>
                                     <td className="cell-question">{item.question}</td>

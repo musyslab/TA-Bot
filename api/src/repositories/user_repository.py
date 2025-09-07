@@ -1,11 +1,12 @@
 import datetime
+import re
 from operator import and_
 from typing import Dict, List
 
 from sqlalchemy import asc, desc
 
 from src.repositories.database import db
-from .models import ClassAssignments, LectureSections, Users, LoginAttempts
+from .models import ClassAssignments, LectureSections, Users, LoginAttempts, Labs
 from flask_jwt_extended import current_user
 
 
@@ -178,6 +179,50 @@ class UserRepository():
             user_lectures_dict[class_assignment.UserId] = LectureSections.query.filter(LectureSections.Id == class_assignment.LectureId).one().Name
 
         return user_lectures_dict
+
+    def get_user_labs(self, userIds: List[int], class_id) -> Dict[int, int]:
+        """
+        Returns a dictionary mapping each userId to their Lab number for the given class.
+        If a user has no lab assigned, the value is -1.
+
+        Args:
+            userIds (List[int]): Users to look up.
+            class_id (int): Class context for the assignments.
+
+        Returns:
+            Dict[int, int]: { user_id: lab_number }
+        """
+        # Start with all users defaulting to -1 to avoid KeyErrors in callers.
+        user_labs_dict: Dict[int, int] = {uid: -1 for uid in userIds}
+
+        # Fetch class assignments for these users within this class.
+        class_assignments = ClassAssignments.query.filter(
+            and_(ClassAssignments.UserId.in_(userIds), ClassAssignments.ClassId == class_id)
+        ).all()
+
+        for ca in class_assignments:
+            lab_number = -1
+
+            # Expecting ClassAssignments to have a LabId foreign key to Labs.Id.
+            lab_id = getattr(ca, "LabId", None)
+            if lab_id is not None:
+                lab = Labs.query.filter(Labs.Id == lab_id).one_or_none()
+                if lab is not None:
+                    # Prefer an explicit numeric column if it exists (e.g., Labs.Number).
+                    if hasattr(lab, "Number") and lab.Number is not None:
+                        try:
+                            lab_number = int(lab.Number)
+                        except (TypeError, ValueError):
+                            lab_number = -1
+                    # Fallback: try to parse a number from a name like "Lab 3"
+                    elif hasattr(lab, "Name") and lab.Name:
+                        m = re.search(r"\d+", str(lab.Name))
+                        if m:
+                            lab_number = int(m.group(0))
+
+            user_labs_dict[ca.UserId] = lab_number
+
+        return user_labs_dict
         
     def get_user_email(self, userId) -> str:
         """
@@ -235,15 +280,3 @@ class UserRepository():
         for attempt in query:
             db.session.delete(attempt)
         db.session.commit()
-    
-    
-
-
-
-
-        
-
-
-
-        
-    

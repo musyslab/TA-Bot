@@ -19,6 +19,7 @@ class Row {
         this.isPassing = false;
         this.subid = 0;
         this.lecture_number = 0;
+        this.lab_number = 0;
         this.hidden = false;
         this.classId = '';
         this.grade = 0;
@@ -35,6 +36,7 @@ class Row {
     isPassing: boolean;
     subid: number;
     lecture_number: number;
+    lab_number: number;
     hidden: boolean;
     classId: string;
     grade: number;
@@ -52,6 +54,7 @@ interface StudentListState {
     rows: Array<Row>;
     isLoading: boolean;
     lecture_numbers: Array<Option>;
+    lab_numbers: Array<Option>;
     selectedStudent: number;
     modalIsLoading: boolean;
     modalIsOpen: boolean;
@@ -62,11 +65,13 @@ interface StudentListState {
     selectedStudentGrade: number;
     exportModalIsOpen: boolean;
     selectedLecture: number;
+    selectedLab: number;
     projectLanguage: string;
 
     // Added for modal "CodePage-like" UI
     activeView: 'table' | 'diff';
     selectedDiffId: string | null;
+    sortBy: 'lastname' | 'lastsubmitted';
 }
 
 class StudentList extends Component<StudentListProps, StudentListState> {
@@ -75,7 +80,8 @@ class StudentList extends Component<StudentListProps, StudentListState> {
 
         this.state = {
             rows: [],
-            lecture_numbers: [{ key: 1, text: 'All', value: 1 }],
+            lecture_numbers: [{ key: -1, text: 'All', value: -1 }],
+            lab_numbers: [{ key: -1, text: 'All', value: -1 }],
             isLoading: false,
             selectedStudent: -1,
             modalIsLoading: false,
@@ -87,14 +93,20 @@ class StudentList extends Component<StudentListProps, StudentListState> {
             selectedStudentGrade: 0,
             exportModalIsOpen: false,
             selectedLecture: -1,
+            selectedLab: -1,
             projectLanguage: '',
 
             activeView: 'table',
             selectedDiffId: null,
+            sortBy: 'lastname',
         };
 
         this.handleClick = this.handleClick.bind(this);
-        this.handleFilterChange = this.handleFilterChange.bind(this);
+
+        this.handleLectureChange = this.handleLectureChange.bind(this);
+        this.handleLabChange = this.handleLabChange.bind(this);
+        this.handleSortChange = this.handleSortChange.bind(this);
+
         this.handleUnlockClick = this.handleUnlockClick.bind(this);
         this.submitGrades = this.submitGrades.bind(this);
         this.exportGrades = this.exportGrades.bind(this);
@@ -113,26 +125,25 @@ class StudentList extends Component<StudentListProps, StudentListState> {
             )
             .then((res) => {
                 var data = res.data;
-                var rows: Array<Row> = [];
+                const rows: Array<Row> = [];
+                const lectureSet = new Set<number>([-1]);
+                const labSet = new Set<number>([-1]);
 
                 Object.entries(data).map(([key, value]) => {
-                    var row = new Row();
-                    var student_output_data = value as Array<string>;
+                    const row = new Row();
+                    const student_output_data = value as Array<string>;
                     row.id = parseInt(key);
                     row.Lname = student_output_data[0];
                     row.Fname = student_output_data[1];
                     row.lecture_number = parseInt(student_output_data[2]);
-                    if (!this.state.lecture_numbers.some((x) => x.value === row.lecture_number)) {
-                        this.state.lecture_numbers.push({
-                            key: row.lecture_number,
-                            text: row.lecture_number.toString(),
-                            value: row.lecture_number,
-                        });
-                    }
-                    row.numberOfSubmissions = parseInt(student_output_data[3]);
-                    row.date = student_output_data[4];
+                    row.lab_number = parseInt(student_output_data[3]); // NEW
+                    lectureSet.add(row.lecture_number);
+                    labSet.add(row.lab_number);
+                    row.numberOfSubmissions = parseInt(student_output_data[4]);
+                    row.date = student_output_data[5];
 
-                    const passRaw = String(student_output_data[5] ?? '').toLowerCase().trim();
+                    const passRaw = String(student_output_data[6] ?? '').toLowerCase().trim();
+
                     row.isPassing =
                         passRaw === 'true' ||
                         passRaw === '1' ||
@@ -141,19 +152,35 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                         passRaw === 'ok' ||
                         passRaw === 'success';
 
-                    row.numberOfPylintErrors = parseInt(student_output_data[6]);
-                    row.subid = parseInt(student_output_data[7]);
+                    row.numberOfPylintErrors = parseInt(student_output_data[7]);
+                    row.subid = parseInt(student_output_data[8]);
                     row.hidden = false;
-                    row.classId = student_output_data[8];
-                    row.grade = parseInt(student_output_data[9]);
-                    row.StudentNumber = parseInt(student_output_data[10]);
-                    row.IsLocked = Boolean(student_output_data[11]);
+                    row.classId = student_output_data[9];
+                    row.grade = parseInt(student_output_data[10]);
+                    row.StudentNumber = parseInt(student_output_data[11]);
+                    row.IsLocked = Boolean(student_output_data[12]);
                     rows.push(row);
                     return row;
                 });
 
-                rows = rows.sort((a, b) => a.Lname.localeCompare(b.Lname));
-                this.setState({ rows: rows });
+                const lecture_numbers: Option[] =
+                    Array.from(lectureSet)
+                        .filter(v => v !== -1)
+                        .sort((a, b) => a - b)
+                        .map(v => ({ key: v, text: String(v), value: v }));
+                lecture_numbers.unshift({ key: -1, text: 'All', value: -1 });
+
+                const lab_numbers: Option[] =
+                    Array.from(labSet)
+                        .filter(v => v !== -1)
+                        .sort((a, b) => a - b)
+                        .map(v => ({ key: v, text: String(v), value: v }));
+                lab_numbers.unshift({ key: -1, text: 'All', value: -1 });
+
+                rows.sort((a, b) => a.Lname.localeCompare(b.Lname));
+
+                this.setState({ rows, lecture_numbers, lab_numbers });
+
             });
     }
 
@@ -180,22 +207,27 @@ class StudentList extends Component<StudentListProps, StudentListState> {
             });
     }
 
-    handleFilterChange(ev: React.ChangeEvent<HTMLSelectElement>) {
+    handleLectureChange(ev: React.ChangeEvent<HTMLSelectElement>) {
         const value = parseInt(ev.target.value, 10);
-        var new_rows = this.state.rows.map((row) => {
-            if (value !== 1) {
-                if (row.lecture_number === value) {
-                    row.hidden = false;
-                } else {
-                    row.hidden = true;
-                }
-            } else {
-                row.hidden = false;
-            }
-            return row;
-        });
-        this.setState({ rows: new_rows, selectedLecture: value === 1 ? -1 : value });
+        this.setState({ selectedLecture: value }, this.applyFilters);
     }
+    handleLabChange(ev: React.ChangeEvent<HTMLSelectElement>) {
+        const value = parseInt(ev.target.value, 10);
+        this.setState({ selectedLab: value }, this.applyFilters);
+    }
+    handleSortChange(ev: React.ChangeEvent<HTMLSelectElement>) {
+        const value = ev.target.value as 'lastname' | 'lastsubmitted';
+        this.setState({ sortBy: value });
+    }
+    applyFilters = () => {
+        const { selectedLecture, selectedLab } = this.state;
+        const new_rows = this.state.rows.map((row) => {
+            const lectureOk = (selectedLecture === -1) || (row.lecture_number === selectedLecture);
+            const labOk = (selectedLab === -1) || (row.lab_number === selectedLab);
+            return { ...row, hidden: !(lectureOk && labOk) };
+        });
+        this.setState({ rows: new_rows });
+    };
 
     handleGradeChange = (e: React.ChangeEvent<HTMLInputElement>, row: Row) => {
         const newValue = parseFloat(e.target.value);
@@ -351,6 +383,21 @@ class StudentList extends Component<StudentListProps, StudentListState> {
 
     render() {
         const levels = ['Level 1', 'Level 2', 'Level 3']; // not strictly needed, kept in case of future use
+
+        const rowsForView = (() => {
+            const visible = this.state.rows.filter(r => !r.hidden);
+            if (this.state.sortBy === 'lastsubmitted') {
+                const timeVal = (r: Row) => {
+                    const t = Date.parse(r.date); // expects "MM/DD/YY HH:MM:SS"
+                    return isNaN(t) ? -Infinity : t;
+                };
+                return [...visible].sort((a, b) => timeVal(b) - timeVal(a)); // newest first
+            }
+            // default: lastname, then firstname
+            return [...visible].sort((a, b) =>
+                a.Lname.localeCompare(b.Lname) || a.Fname.localeCompare(b.Fname)
+            );
+        })();
 
         // ===== Helpers for modal "CodePage-like" UI =====
         const code = this.state.selectedStudentCode || '';
@@ -566,22 +613,45 @@ class StudentList extends Component<StudentListProps, StudentListState> {
 
                     {/* Connected white container (Lecture Section + buttons + table) */}
                     <div className="student-sub-panel">
-                        {/* Filter */}
+                        {/* Filters & Sort */}
                         <div className="filter-bar">
-                            <label className="filter-label" htmlFor="lectureFilter">
-                                Lecture Section:&nbsp;
-                            </label>
+                            <label className="filter-label" htmlFor="lectureFilter">Lecture:&nbsp;</label>
                             <select
                                 id="lectureFilter"
                                 className="filter-select lecture-filter"
-                                onChange={this.handleFilterChange}
-                                defaultValue={this.state.lecture_numbers[0]?.value}
+                                onChange={this.handleLectureChange}
+                                value={this.state.selectedLecture}
                             >
                                 {this.state.lecture_numbers.map((opt) => (
-                                    <option className="lecture-option" key={opt.key} value={opt.value}>
+                                    <option className="lecture-option" key={`lec-${opt.key}`} value={opt.value}>
                                         {opt.text}
                                     </option>
                                 ))}
+                            </select>
+                            &nbsp;&nbsp;
+                            <label className="filter-label" htmlFor="labFilter">Lab:&nbsp;</label>
+                            <select
+                                id="labFilter"
+                                className="filter-select lab-filter"
+                                onChange={this.handleLabChange}
+                                value={this.state.selectedLab}
+                            >
+                                {this.state.lab_numbers.map((opt) => (
+                                    <option className="lab-option" key={`lab-${opt.key}`} value={opt.value}>
+                                        {opt.text}
+                                    </option>
+                                ))}
+                            </select>
+                            &nbsp;&nbsp;
+                            <label className="filter-label" htmlFor="sortSelect">Sort by:&nbsp;</label>
+                            <select
+                                id="sortSelect"
+                                className="filter-select sort-select"
+                                value={this.state.sortBy}
+                                onChange={this.handleSortChange}
+                            >
+                                <option value="lastname">Last name (A→Z)</option>
+                                <option value="lastsubmitted">Last submitted (newest)</option>
                             </select>
                         </div>
 
@@ -602,6 +672,7 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                 <tr className="table-row">
                                     <th className="col-student-name">Student</th>
                                     <th className="col-lecture-number">Lecture</th>
+                                    <th className="col-lab-number">Lab</th>
                                     <th className="col-submissions">Submissions</th>
                                     <th className="col-date">Last Submitted</th>
                                     <th className="col-pylint-errors">Pylint Errors</th>
@@ -611,7 +682,7 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                 </tr>
                             </thead>
                             <tbody className="table-body">
-                                {this.state.rows.map((row) => {
+                                {rowsForView.map((row) => {
                                     if (row.hidden) return null;
 
                                     if (row.subid === -1) {
@@ -632,6 +703,7 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                     )}
                                                 </td>
                                                 <td className="lecture-number-cell">{row.lecture_number}</td>
+                                                <td className="lab-number-cell">{row.lab_number}</td>
                                                 <td className="submissions-cell">N/A</td>
                                                 <td className="date-cell">N/A</td>
                                                 <td className="pylint-errors-cell">N/A</td>
@@ -671,6 +743,7 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                 )}
                                             </td>
                                             <td className="lecture-number-cell">{row.lecture_number}</td>
+                                            <td className="lab-number-cell">{row.lab_number}</td>
                                             <td className="submissions-cell">{row.numberOfSubmissions}</td>
                                             <td className="date-cell">{row.date}</td>
                                             <td className="pylint-errors-cell">{row.numberOfPylintErrors}</td>
