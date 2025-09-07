@@ -282,17 +282,46 @@ class SubmissionRepository():
         #get all questions that have not been dismissed
         questions = StudentQuestions.query.filter(StudentQuestions.dismissed == 0).all()
         return questions
-    def get_active_question(self, user_id):
-        
-        question = StudentQuestions.query.filter(and_(
-            StudentQuestions.StudentId == user_id,
-            StudentQuestions.dismissed == 0,
-            StudentQuestions.ruling == 1  # only accepted OH counts as "active"
-        )).first()
 
-        if question == None:
+    def get_active_question(self, user_id, accepted_only: bool = False):
+        """
+        When accepted_only is False (default): any not-dismissed question counts as active
+        (used by the Office Hours queue to persist 'in-queue' state).
+        When True: only accepted questions (ruling == 1 AND TimeAccepted is not null) count as active
+        (used by Upload page to show the banner only after acceptance).
+        """
+        base_query = StudentQuestions.query.filter(
+            and_(StudentQuestions.StudentId == user_id, StudentQuestions.dismissed == 0)
+        )
+        if accepted_only:
+            base_query = base_query.filter(
+                and_(StudentQuestions.ruling == 1, StudentQuestions.TimeAccepted.isnot(None))
+            )
+        question = base_query.order_by(StudentQuestions.Sqid.desc()).first()
+        if question is None:
             return -1
         return question.Sqid
+
+    def get_accepted_oh_for_class(self, user_id, class_id):
+        """
+        Return Sqid of the most recent accepted (ruling==1, not dismissed, TimeAccepted set)
+        OH entry for this user that belongs to the current project of the given class_id.
+        If class_id is None or there is no current project match, fall back to any class.
+        """
+        # Base: accepted & not dismissed for this user
+        q = StudentQuestions.query.filter(
+            and_(StudentQuestions.StudentId == user_id,
+                 StudentQuestions.dismissed == 0,
+                 StudentQuestions.ruling == 1,
+                 StudentQuestions.TimeAccepted.isnot(None))
+        )
+        # If a class_id is provided, scope to projects from that class
+        if class_id is not None:
+            q = (q.join(Projects, Projects.Id == StudentQuestions.projectId)
+                   .filter(Projects.ClassId == class_id))
+        result = q.order_by(StudentQuestions.Sqid.desc()).first()
+        return result.Sqid if result else -1
+
     def check_timeout(self, user_id, project_id):
         tbs_settings = [5, 15, 45, 60, 90, 120, 120, 120]
         #get the two most recent submissions for a given projectID

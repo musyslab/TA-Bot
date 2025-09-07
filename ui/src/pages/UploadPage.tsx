@@ -91,14 +91,19 @@ const UploadPage = () => {
     }, [project_name]);
 
     function checkOfficeHours() {
+        // Show banner only if there is an ACCEPTED (ruling==1, not dismissed)
+        // OH entry for THIS class (via its current project).
         axios.get(
-            `${import.meta.env.VITE_API_URL}/submissions/getactivequestion`,
+            `${import.meta.env.VITE_API_URL}/submissions/getAcceptedOHForClass?class_id=${class_id}`,
             { headers: { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` } }
         )
             .then(res => {
-                // API returns an id or -1 as plain text
-                const id = parseInt(String(res.data), 10);
-                setInOfficeHours(!Number.isNaN(id) && id !== -1);
+                // API returns the accepted question id or -1
+                const raw = (typeof res.data === 'object' && res.data !== null)
+                    ? (res.data.id ?? res.data.qid ?? res.data.value ?? res.data)
+                    : res.data;
+                const id = Number(raw);
+                setInOfficeHours(Number.isFinite(id) && id > 0);
             })
             .catch(err => {
                 console.error("Error checking office hours:", err);
