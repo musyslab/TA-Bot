@@ -108,6 +108,9 @@
          padding: 0;
          border: none;
          background: transparent;
+         display: flex;
+         align-items: center;
+         flex-wrap: wrap;
 
          .filter-label {
              color: #374151;
@@ -128,6 +131,21 @@
              }
 
          }
+
+         #lectureFilter,
+         .lecture-filter {
+             margin-right: 12px;
+         }
+
+         .filter-label[for="sortSelect"] {
+             margin-left: auto;
+         }
+
+         #sortSelect,
+         .sort-select {
+             margin-left: 0.4rem;
+         }
+         
      }
 
      .actions-bar {
@@ -539,26 +557,3 @@
          }
      }
  }
-
- .filter-bar {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap; /* keeps it from overflowing on small screens */
-  }
-  
-  /* 1) A little spacing between the Lecture and Lab filters */
-  .filter-bar #lectureFilter,
-  .filter-bar .lecture-filter {
-    margin-right: 12px;
-  }
-  
-  /* 2) Push the "Sort by" label+select to the right edge */
-  .filter-bar .filter-label[for="sortSelect"] {
-    margin-left: auto;
-  }
-  
-  /* keep a small gap between the "Sort by" label and its select */
-  .filter-bar #sortSelect,
-  .filter-bar .sort-select {
-    margin-left: 0.4rem;
-  }
