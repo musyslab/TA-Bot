@@ -145,7 +145,7 @@
          .sort-select {
              margin-left: 0.4rem;
          }
-         
+
      }
 
      .actions-bar {
@@ -185,20 +185,22 @@
                  border: 1px solid #d1d5db;
                  white-space: nowrap;
 
-                 &.col-student-name {
-                     width: 22%;
-                 }
-
-                 &.col-lecture-number {
-                     width: 9%;
-                 }
+                &.col-student-name {
+                    width: 20%;
+                }
+                &.col-lecture-number {
+                    width: 8%;
+                }
+                &.col-lab-number {
+                    width: 8%;
+                }
 
                  &.col-submissions {
                      width: 10%;
                  }
 
                  &.col-date {
-                     width: 16%;
+                     width: 15%;
                  }
 
                  &.col-pylint-errors {
@@ -214,7 +216,7 @@
                  }
 
                  &.col-grade {
-                     width: 13%;
+                     width: 10%;
                  }
              }
          }
