@@ -579,6 +579,21 @@ class SubmissionRepository():
                         #Recoup the charge
                         charge.Recouped = 1
                         db.session.commit()
+
+            # If this is a new project (no base redemptions yet) and carryover left the student < 3,
+            # reset to full base charges so each project starts fresh.
+            current_proj_redemption = SubmissionChargeRedeptions.query.filter(
+                and_(
+                    SubmissionChargeRedeptions.UserId == int(user_id),
+                    SubmissionChargeRedeptions.ClassId == int(class_id),
+                    SubmissionChargeRedeptions.projectId == int(project_id),
+                    SubmissionChargeRedeptions.Type == "base"
+                )
+            ).first()
+            if charges.BaseCharge < 3 and current_proj_redemption is None:
+                charges.BaseCharge = 3
+                db.session.commit()
+
         except  Exception as e:
             return [0, 0]
         return [charges.BaseCharge, charges.RewardCharge]
@@ -599,8 +614,10 @@ class SubmissionRepository():
         ).order_by(SubmissionChargeRedeptions.RedeemedTime).first()
         #Idenify on what date the charge was redeemed
 
+        if charge_redemptions is None:
+            # No redemption in this project yet → nothing to count down from
+            return timedelta(seconds=0)
         charge_date = charge_redemptions.RedeemedTime
-
 
         #Identify how many days have passed since the project start date
         days_passed = (charge_date - project_start_date).days
@@ -726,10 +743,3 @@ class SubmissionRepository():
             print("An error occurred while handling the database operation", e)
             db.session.rollback()
             return 0
-        
-
-
-    
-
-
-
