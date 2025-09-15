@@ -107,13 +107,35 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                 },
             })
             .then((res) => {
+
                 const students = res.data as Array<Student>;
-                const studentsDropdown: Array<DropDownOption> = students.map((s) => ({
+                const lastNameOf = (full: string) => {
+                    const n = (full || '').trim();
+                    if (!n) return '';
+                    if (n.includes(',')) return n.split(',')[0]!.trim();
+                    const parts = n.split(/\s+/);
+                    return parts[parts.length - 1]!;
+                };
+                const isTestStudent = (name: string) =>
+                    (name || '').trim().toLowerCase() === 'test student';
+                const sorted = [...students].sort((a, b) => {
+                    const aTest = isTestStudent(a.name);
+                    const bTest = isTestStudent(b.name);
+                    if (aTest && !bTest) return -1;
+                    if (!aTest && bTest) return 1;
+                    const lnCmp = lastNameOf(a.name).localeCompare(lastNameOf(b.name), undefined, { sensitivity: 'base' });
+                    if (lnCmp !== 0) return lnCmp;
+                    const nameCmp = (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+                    if (nameCmp !== 0) return nameCmp;
+                    return a.id - b.id;
+                });
+                const studentsDropdown: Array<DropDownOption> = sorted.map((s) => ({
                     key: s.id,
-                    text: `${s.name}(${s.mscsnet})`,
+                    text: `${s.name} (${s.mscsnet})`,
                     value: s.id,
                 }));
                 this.setState({ studentList: studentsDropdown });
+
             })
             .catch((err) => {
                 this.setState({

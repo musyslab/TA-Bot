@@ -156,6 +156,41 @@ export function CodePage() {
         return lines.join('\n');
     }
 
+    type Seg = { text: string; changed: boolean };
+    function intralineSegments(a: string, b: string): { a: Seg[]; b: Seg[] } {
+        // Greedy two-pointer aligner tuned to highlight inserted/removed spaces well;
+        // falls back to marking both sides as changed for general mismatches.
+        const A: Seg[] = [], B: Seg[] = [];
+        let i = 0, j = 0;
+        let sameA = '', sameB = '', diffA = '', diffB = '';
+        const flushSame = () => { if (sameA || sameB) { A.push({ text: sameA, changed: false }); B.push({ text: sameB, changed: false }); sameA = sameB = ''; } };
+        const flushDiff = () => { if (diffA || diffB) { A.push({ text: diffA, changed: true }); B.push({ text: diffB, changed: true }); diffA = diffB = ''; } };
+        while (i < a.length || j < b.length) {
+            const ca = i < a.length ? a[i] : '';
+            const cb = j < b.length ? b[j] : '';
+            if (ca && cb && ca === cb) {
+                flushDiff(); sameA += ca; sameB += cb; i++; j++; continue;
+            }
+            // Prefer aligning by skipping spaces so space-only diffs are obvious
+            if (ca === ' ' && cb !== '') { flushSame(); diffA += ca; i++; continue; }
+            if (cb === ' ' && ca !== '') { flushSame(); diffB += cb; j++; continue; }
+            // General mismatch: mark both
+            flushSame();
+            if (ca) { diffA += ca; i++; }
+            if (cb) { diffB += cb; j++; }
+        }
+        flushSame(); flushDiff();
+        return { a: A, b: B };
+    }
+
+    function renderSegs(segs: Seg[], cls: 'add-ch' | 'del-ch') {
+        return segs.map((seg, idx) =>
+            seg.changed
+                ? <span key={idx} className={`intra ${cls}`}>{seg.text}</span>
+                : <span key={idx}>{seg.text}</span>
+        );
+    }
+
     // Build diff "files" for the Diff File View
     const diffFilesAll: DiffEntry[] = useMemo(() => {
         const entries: DiffEntry[] = [];
@@ -399,19 +434,90 @@ export function CodePage() {
 
                                 {selectedFile && (
                                     selectedFile.passed ? (
-                                        <div className="diff-line ctx">No differences.</div>
+                                        <div className="diff-content">
+                                            <div className="diff-line ctx">No differences.</div>
+                                        </div>
                                     ) : (
-                                        selectedFile.unified.split('\n').map((line, i) => {
-                                            const cls =
-                                                line.startsWith('+') ? 'add' :
-                                                    line.startsWith('-') ? 'del' :
-                                                        (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) ? 'meta' : 'ctx';
-                                            return (
-                                                <div key={i} className={`diff-line ${cls}`}>
-                                                    {line || ' '}
-                                                </div>
-                                            );
-                                        })
+                                        <div className="diff-content">
+                                            {(() => {
+                                                const lines = selectedFile.unified.split('\n');
+                                                const out: JSX.Element[] = [];
+
+                                                for (let i = 0; i < lines.length; i++) {
+                                                    const line = lines[i] ?? '';
+                                                    // Treat diff headers/hunk markers as meta FIRST so they never pair or get intra
+                                                    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) {
+                                                        // Header lines: no intraline. Use del for '---', add for '+++', meta for '@@'.
+                                                        const headerCls =
+                                                            line.startsWith('---') ? 'del header' :
+                                                                line.startsWith('+++') ? 'add header' :
+                                                                    'meta header';
+                                                        out.push(
+                                                            <div key={i} className={`diff-line ${headerCls}`}>
+                                                                {line || ' '}
+                                                            </div>
+                                                        );
+                                                        continue;
+                                                    }
+
+                                                    const type = line[0];
+                                                    const content = line.slice(1);
+                                                    const next = lines[i + 1] ?? '';
+                                                    // Only pair single-line +/- edits; exclude headers like '---'/'+++'
+                                                    const isSingleAdd = line.startsWith('+') && !line.startsWith('+++');
+                                                    const isSingleDel = line.startsWith('-') && !line.startsWith('---');
+                                                    const nextIsSingleAdd = next.startsWith('+') && !next.startsWith('+++');
+                                                    const nextIsSingleDel = next.startsWith('-') && !next.startsWith('---');
+                                                    const pairable = (isSingleDel && nextIsSingleAdd) || (isSingleAdd && nextIsSingleDel);
+
+                                                    if (pairable) {
+                                                        const otherType = next[0];
+                                                        const otherContent = next.slice(1);
+                                                        const { a, b } = type === '-'
+                                                            ? intralineSegments(content, otherContent)
+                                                            : intralineSegments(otherContent, content);
+                                                        if (type === '-') {
+                                                            out.push(
+                                                                <div key={`d-${i}`} className="diff-line del">
+                                                                    <span className="diff-sign">-</span>
+                                                                    {renderSegs(a, 'del-ch')}
+                                                                </div>
+                                                            );
+                                                            out.push(
+                                                                <div key={`a-${i + 1}`} className="diff-line add">
+                                                                    <span className="diff-sign">+</span>
+                                                                    {renderSegs(b, 'add-ch')}
+                                                                </div>
+                                                            );
+                                                        } else {
+                                                            out.push(
+                                                                <div key={`d-${i + 1}`} className="diff-line del">
+                                                                    <span className="diff-sign">-</span>
+                                                                    {renderSegs(a, 'del-ch')}
+                                                                </div>
+                                                            );
+                                                            out.push(
+                                                                <div key={`a-${i}`} className="diff-line add">
+                                                                    <span className="diff-sign">+</span>
+                                                                    {renderSegs(b, 'add-ch')}
+                                                                </div>
+                                                            );
+                                                        }
+                                                        i++; // consume the pair
+                                                        continue;
+                                                    }
+                                                    const cls =
+                                                        line.startsWith('+') ? 'add' :
+                                                            line.startsWith('-') ? 'del' : 'ctx';
+                                                    out.push(
+                                                        <div key={i} className={`diff-line ${cls}`}>
+                                                            {line || ' '}
+                                                        </div>
+                                                    );
+                                                }
+                                                return out;
+                                            })()}
+                                        </div>
                                     )
                                 )}
                             </div>
