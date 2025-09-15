@@ -77,7 +77,8 @@
         /* managed by .code-viewer rows */
         border-radius: 8px;
         box-shadow: 0 1px 6px rgba(80, 95, 126, 0.07);
-        overflow: hidden;
+        overflow-x: auto;
+        overflow-y: hidden;
 
         code {
             font-size: 0.95em;
@@ -94,6 +95,10 @@
             counter-reset: line;
             font-family: 'Fira Mono', 'Consolas', 'Menlo', monospace;
             font-size: 0.95em;
+
+            display: inline-block;
+            width: max-content;
+            min-width: 100%;
 
             &::before,
             &::after {
@@ -146,7 +151,10 @@
 
         .code-text {
             color: #111827;
-            overflow-wrap: anywhere;
+            /* Keep tokens unbroken; use horizontal scroll instead of wrapping */
+            white-space: pre;
+            overflow-wrap: normal;
+            word-break: normal;
         }
     }
 }
@@ -416,6 +424,13 @@
             white-space: pre;
             background: #ffffff;
 
+            .diff-content {
+                display: inline-block;
+                width: max-content;
+                min-width: 100%;
+                background: #ffffff;
+            }
+
             &::before,
             &::after {
                 content: '';
@@ -427,7 +442,16 @@
                 padding: 0.1rem 0.4rem;
                 border-left: 3px solid transparent;
                 white-space: inherit;
-                /* follow wrap toggle */
+                display: block;
+                width: 100%;
+
+                .diff-sign {
+                    display: inline-block;
+                    width: 1ch;
+                    font-weight: 700;
+                    opacity: 0.75;
+                    margin-right: 0.4rem;
+                }
 
                 &.meta {
                     background: #f0f4f8;
@@ -437,13 +461,13 @@
                 }
 
                 &.add {
-                    background: rgba(16, 185, 129, 0.12);
+                    background: rgba(16, 185, 129, 0.18);
                     color: #065f46;
                     border-left-color: #10b981;
                 }
 
                 &.del {
-                    background: rgba(239, 68, 68, 0.12);
+                    background: rgba(239, 68, 68, 0.18);
                     color: #7f1d1d;
                     border-left-color: #ef4444;
                 }
@@ -451,6 +475,22 @@
                 &.ctx {
                     color: #1f2937;
                 }
+
+                /* Intraline highlight for changed segments */
+                .intra {
+                    padding: 0 0.08rem;
+                    border-radius: 2px;
+                    white-space: inherit; /* preserve spaces we render as · */
+                }
+                .add-ch {
+                    background: rgba(16, 185, 129, 0.35);
+                    outline: 1px solid #10b981;
+                }
+                .del-ch {
+                    background: rgba(239, 68, 68, 0.35);
+                    outline: 1px solid #ef4444;
+                }         
+                
             }
         }
     }

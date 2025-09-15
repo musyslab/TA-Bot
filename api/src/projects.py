@@ -722,8 +722,15 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
             'message': 'Access Denied'
         }
         return make_response(message, HTTPStatus.UNAUTHORIZED)
+
     file = request.files['file']
     project_id = request.form["project_id"]
+    try:
+        proj = project_repo.get_selected_project(int(project_id))
+        class_id = int(getattr(proj, "ClassId", 0) or 0)
+    except Exception:
+        class_id = 0
+
     try:
         json_obj = json.load(file)
     except json.JSONDecodeError:
@@ -732,10 +739,22 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
         }
          return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
     else:
-        for testcase in json_obj:
-            project_repo.add_or_update_testcase(project_id, -1, testcase["levelname"], testcase["name"], testcase["description"], testcase["input"], testcase["output"], bool(testcase["isHidden"]), testcase["additionalfilepath"])
-    return make_response("Testcase Added", HTTPStatus.OK)
 
+        for testcase in json_obj:
+            project_repo.add_or_update_testcase(
+                int(project_id),
+                -1,
+                testcase["levelname"],
+                testcase["name"],
+                testcase["description"],
+                testcase["input"],
+                testcase["output"],
+                bool(testcase["isHidden"]),
+                testcase.get("additionalfilepath", ""),
+                class_id
+            )
+
+    return make_response("Testcase Added", HTTPStatus.OK)
 
 @projects_api.route('/add_or_update_testcase', methods=['POST'])
 @jwt_required()
