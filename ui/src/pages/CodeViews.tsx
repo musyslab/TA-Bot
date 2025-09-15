@@ -157,20 +157,67 @@ export function CodePage() {
     }
 
     type Seg = { text: string; changed: boolean };
-    function intralineSegments(a: string, b: string): { a: Seg[]; b: Seg[] } {
-        // Greedy two-pointer aligner tuned to highlight inserted/removed spaces well;
-        // falls back to marking both sides as changed for general mismatches.
+
+    // Disable intra-line highlighting when two lines are too different.
+    const NO_INTRA_THRESHOLD = 0.5;
+    // If the two lines are almost identical once whitespace is ignored,
+    // prefer the older space-aware aligner (keeps nice [ ]-only diffs).
+    const SPACE_BIAS_THRESHOLD = 0.985;
+
+    function diceCoefficient(a: string, b: string): number {
+        if (a === b) return 1;
+        const ax = a.length - 1, bx = b.length - 1;
+        if (ax < 1 || bx < 1) return 0;
+        const counts = new Map<string, number>();
+        for (let i = 0; i < ax; i++) {
+            const bg = a.slice(i, i + 2);
+            counts.set(bg, (counts.get(bg) || 0) + 1);
+        }
+        let matches = 0;
+        for (let i = 0; i < bx; i++) {
+            const bg = b.slice(i, i + 2);
+            const c = counts.get(bg) || 0;
+            if (c > 0) { counts.set(bg, c - 1); matches++; }
+        }
+        return (2 * matches) / (ax + bx);
+    }
+
+    // Helper: longest common prefix/suffix to coalesce a single contiguous change.
+    function commonPrefixLen(a: string, b: string): number {
+        const n = Math.min(a.length, b.length);
+        let i = 0;
+        while (i < n && a[i] === b[i]) i++;
+        return i;
+    }
+    function commonSuffixLen(a: string, b: string, minIdx: number): number {
+        let i = a.length - 1, j = b.length - 1, k = 0;
+        while (i >= minIdx && j >= minIdx && a[i] === b[j]) { i--; j--; k++; }
+        return k;
+    }
+
+    // Older, space-aware greedy aligner (good for mostly spacing differences).
+    function spaceAwareSegments(a: string, b: string): { a: Seg[]; b: Seg[] } {
         const A: Seg[] = [], B: Seg[] = [];
         let i = 0, j = 0;
         let sameA = '', sameB = '', diffA = '', diffB = '';
-        const flushSame = () => { if (sameA || sameB) { A.push({ text: sameA, changed: false }); B.push({ text: sameB, changed: false }); sameA = sameB = ''; } };
-        const flushDiff = () => { if (diffA || diffB) { A.push({ text: diffA, changed: true }); B.push({ text: diffB, changed: true }); diffA = diffB = ''; } };
+        const flushSame = () => {
+            if (sameA || sameB) {
+                A.push({ text: sameA, changed: false });
+                B.push({ text: sameB, changed: false });
+                sameA = sameB = '';
+            }
+        };
+        const flushDiff = () => {
+            if (diffA || diffB) {
+                A.push({ text: diffA, changed: true });
+                B.push({ text: diffB, changed: true });
+                diffA = diffB = '';
+            }
+        };
         while (i < a.length || j < b.length) {
             const ca = i < a.length ? a[i] : '';
             const cb = j < b.length ? b[j] : '';
-            if (ca && cb && ca === cb) {
-                flushDiff(); sameA += ca; sameB += cb; i++; j++; continue;
-            }
+            if (ca && cb && ca === cb) { flushDiff(); sameA += ca; sameB += cb; i++; j++; continue; }
             // Prefer aligning by skipping spaces so space-only diffs are obvious
             if (ca === ' ' && cb !== '') { flushSame(); diffA += ca; i++; continue; }
             if (cb === ' ' && ca !== '') { flushSame(); diffB += cb; j++; continue; }
@@ -180,6 +227,32 @@ export function CodePage() {
             if (cb) { diffB += cb; j++; }
         }
         flushSame(); flushDiff();
+        return { a: A, b: B };
+    }
+
+    function intralineSegments(a: string, b: string): { a: Seg[]; b: Seg[] } {
+        if (a === b) return { a: [{ text: a, changed: false }], b: [{ text: b, changed: false }] };
+
+        // If nearly identical ignoring whitespace, use the space-aware aligner
+        // to preserve the older, finer-grained behavior for spacing tweaks.
+        const ai = a.replace(/\s+/g, '');
+        const bi = b.replace(/\s+/g, '');
+        const simNoWS = diceCoefficient(ai, bi);
+        if (simNoWS >= SPACE_BIAS_THRESHOLD) {
+            return spaceAwareSegments(a, b);
+        }
+
+        // Otherwise, coalesce to a single contiguous change using prefix/suffix.
+        const A: Seg[] = [], B: Seg[] = [];
+        const p = commonPrefixLen(a, b);
+        const s = commonSuffixLen(a, b, p);
+        const pref = a.slice(0, p);
+        const coreA = a.slice(p, a.length - s);
+        const coreB = b.slice(p, b.length - s);
+        const suf = a.slice(a.length - s);
+        if (pref) { A.push({ text: pref, changed: false }); B.push({ text: pref, changed: false }); }
+        if (coreA.length || coreB.length) { A.push({ text: coreA, changed: true }); B.push({ text: coreB, changed: true }); }
+        if (suf) { A.push({ text: suf, changed: false }); B.push({ text: suf, changed: false }); }
         return { a: A, b: B };
     }
 
@@ -471,41 +544,46 @@ export function CodePage() {
                                                     const pairable = (isSingleDel && nextIsSingleAdd) || (isSingleAdd && nextIsSingleDel);
 
                                                     if (pairable) {
-                                                        const otherType = next[0];
                                                         const otherContent = next.slice(1);
-                                                        const { a, b } = type === '-'
-                                                            ? intralineSegments(content, otherContent)
-                                                            : intralineSegments(otherContent, content);
-                                                        if (type === '-') {
+                                                        // Normalize which one is deletion vs addition
+                                                        const addText = type === '-' ? otherContent : content;
+                                                        const delText = type === '-' ? content : otherContent;
+                                                        // If lines are too different, show full-line changes (no intra).
+                                                        const sim = diceCoefficient(delText, addText);
+                                                        if (sim < NO_INTRA_THRESHOLD) {
                                                             out.push(
                                                                 <div key={`d-${i}`} className="diff-line del">
                                                                     <span className="diff-sign">-</span>
-                                                                    {renderSegs(a, 'del-ch')}
+                                                                    {delText || '\u00A0'}
                                                                 </div>
                                                             );
                                                             out.push(
                                                                 <div key={`a-${i + 1}`} className="diff-line add">
                                                                     <span className="diff-sign">+</span>
-                                                                    {renderSegs(b, 'add-ch')}
+                                                                    {addText || '\u00A0'}
                                                                 </div>
                                                             );
-                                                        } else {
-                                                            out.push(
-                                                                <div key={`d-${i + 1}`} className="diff-line del">
-                                                                    <span className="diff-sign">-</span>
-                                                                    {renderSegs(a, 'del-ch')}
-                                                                </div>
-                                                            );
-                                                            out.push(
-                                                                <div key={`a-${i}`} className="diff-line add">
-                                                                    <span className="diff-sign">+</span>
-                                                                    {renderSegs(b, 'add-ch')}
-                                                                </div>
-                                                            );
+                                                            i++; // consume the pair
+                                                            continue;
                                                         }
+                                                        // Otherwise, keep intra-line highlighting.
+                                                        const { a, b } = intralineSegments(delText, addText);
+                                                        out.push(
+                                                            <div key={`d-${i}`} className="diff-line del">
+                                                                <span className="diff-sign">-</span>
+                                                                {renderSegs(a, 'del-ch')}
+                                                            </div>
+                                                        );
+                                                        out.push(
+                                                            <div key={`a-${i + 1}`} className="diff-line add">
+                                                                <span className="diff-sign">+</span>
+                                                                {renderSegs(b, 'add-ch')}
+                                                            </div>
+                                                        );
                                                         i++; // consume the pair
                                                         continue;
                                                     }
+
                                                     const cls =
                                                         line.startsWith('+') ? 'add' :
                                                             line.startsWith('-') ? 'del' : 'ctx';
