@@ -159,10 +159,10 @@ export function CodePage() {
     type Seg = { text: string; changed: boolean };
 
     // Disable intra-line highlighting when two lines are too different.
-    const NO_INTRA_THRESHOLD = 0.5;
+    const NO_INTRA_THRESHOLD = 0.3;
     // If the two lines are almost identical once whitespace is ignored,
     // prefer the older space-aware aligner (keeps nice [ ]-only diffs).
-    const SPACE_BIAS_THRESHOLD = 0.985;
+    const SPACE_BIAS_THRESHOLD = 0.97;
 
     function diceCoefficient(a: string, b: string): number {
         if (a === b) return 1;
