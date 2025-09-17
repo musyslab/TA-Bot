@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
 import '../css/CodeViews.scss'
+import { Icon } from 'semantic-ui-react'
 
 const defaultpagenumber = -1;
 
@@ -58,6 +59,8 @@ export function CodePage() {
 
     // Diff view UI state
     const [selectedDiffId, setSelectedDiffId] = useState<string | null>(null);
+    // Intra-line highlight toggle
+    const [intraEnabled, setIntraEnabled] = useState<boolean>(() => Math.random() < 0.5);
 
     // Fetch data
     useEffect(() => {
@@ -304,6 +307,30 @@ export function CodePage() {
         [diffFilesAll, selectedDiffId]
     );
 
+    const hasIntraInSelected = useMemo(() => {
+        if (!selectedFile || selectedFile.passed) return false;
+        const lines = selectedFile.unified.split('\n');
+        for (let i = 0; i < lines.length - 1; i++) {
+            const line = lines[i] ?? '';
+            // skip diff headers / hunk markers
+            if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) continue;
+            const next = lines[i + 1] ?? '';
+            const isSingleDel = line.startsWith('-') && !line.startsWith('---');
+            const isSingleAdd = line.startsWith('+') && !line.startsWith('+++');
+            const nextIsSingleAdd = next.startsWith('+') && !next.startsWith('+++');
+            const nextIsSingleDel = next.startsWith('-') && !next.startsWith('---');
+            const pairable = (isSingleDel && nextIsSingleAdd) || (isSingleAdd && nextIsSingleDel);
+            if (pairable) {
+                const delText = (isSingleDel ? line : next).slice(1);
+                const addText = (isSingleDel ? next : line).slice(1);
+                // If similarity meets the threshold we would render intra-line segments.
+                const sim = diceCoefficient(delText, addText);
+                if (sim >= NO_INTRA_THRESHOLD) return true;
+            }
+        }
+        return false;
+    }, [selectedFile]);
+
     const codeLines = useMemo(
         () => (code ? code.replace(/\r\n/g, '\n').split('\n') : []),
         [code]
@@ -500,6 +527,17 @@ export function CodePage() {
                                         : 'No selection'}
                                 </div>
                                 <div className="spacer" />
+                                {hasIntraInSelected && (
+                                    <button
+                                        type="button"
+                                        className={`btn toggle-intra ${intraEnabled ? 'on' : 'off'}`}
+                                        aria-pressed={intraEnabled}
+                                        onClick={() => setIntraEnabled(prev => !prev)}
+                                        title="Toggle intra-line highlighting"
+                                    >
+                                        Diff Finder: {intraEnabled ? 'On' : 'Off'}
+                                    </button>
+                                )}
                             </div>
 
                             <div className="diff-code">
@@ -508,7 +546,15 @@ export function CodePage() {
                                 {selectedFile && (
                                     selectedFile.passed ? (
                                         <div className="diff-content">
-                                            <div className="diff-line ctx">No differences.</div>
+                                            <div className="diff-empty" role="status" aria-live="polite">
+                                                <div className="empty-icon" aria-hidden="true">
+                                                    <Icon name="check square" />
+                                                </div>
+                                                <div className="empty-text">
+                                                    <div className="empty-title">No differences found</div>
+                                                    <div className="empty-subtitle">Your program’s output matches the expected output.</div>
+                                                </div>
+                                            </div>
                                         </div>
                                     ) : (
                                         <div className="diff-content">
@@ -550,7 +596,7 @@ export function CodePage() {
                                                         const delText = type === '-' ? content : otherContent;
                                                         // If lines are too different, show full-line changes (no intra).
                                                         const sim = diceCoefficient(delText, addText);
-                                                        if (sim < NO_INTRA_THRESHOLD) {
+                                                        if (!intraEnabled || sim < NO_INTRA_THRESHOLD) {
                                                             out.push(
                                                                 <div key={`d-${i}`} className="diff-line del">
                                                                     <span className="diff-sign">-</span>
