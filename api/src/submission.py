@@ -7,7 +7,7 @@ import urllib3
 from src.repositories.config_repository import ConfigRepository
 from src.repositories.user_repository import UserRepository
 from flask import Blueprint
-from flask import make_response
+from flask import make_response, request, current_app
 from flask import request
 from http import HTTPStatus
 from injector import inject
@@ -26,8 +26,9 @@ from dependency_injector.wiring import inject, Provide
 from container import Container
 from urllib.parse import unquote
 
-submission_api = Blueprint('submission_api', __name__)
+ui_clicks_log = "/ta-bot/project-files/code_view_clicks.log"
 
+submission_api = Blueprint('submission_api', __name__)
 
 def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
     parser = Parser()
@@ -531,3 +532,29 @@ def submitChat(submission_repo: SubmissionRepository = Provide[Container.submiss
         print("Error: ", e, flush=True)
         return make_response("Error: " + str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
     return make_response("Charge Consumed", HTTPStatus.OK)
+
+@submission_api.route('/log_ui', methods=['POST'])
+@jwt_required()
+def log_ui_click():
+    data = request.get_json(silent=True) or {}
+    submission_id = data.get('id', -1)
+    action = str(data.get('action', '')).strip()
+    started_state = data.get('started_state', None)
+    switched_to = data.get('switched_to', None)
+
+    username = getattr(current_user, 'Username', None) or 'unknown'
+    role = getattr(current_user, 'Role', None) or 'unknown'
+
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    log_path = ui_clicks_log
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    line = f"{ts} | user:{username} | role:{role} | submission:{submission_id} | action:{action}"
+    if action == 'Diff Finder':
+        line += f" | switched_to:{bool(switched_to)} | started:{bool(started_state)}"
+    line += "\n"
+
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(line)
+    return make_response({'status': 'logged'}, HTTPStatus.CREATED)

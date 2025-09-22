@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import axios from 'axios'
 import { useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
 import '../css/CodeViews.scss'
 import { Icon } from 'semantic-ui-react'
+import { diffChars } from 'diff'
 
 const defaultpagenumber = -1;
 
@@ -59,8 +60,33 @@ export function CodePage() {
 
     // Diff view UI state
     const [selectedDiffId, setSelectedDiffId] = useState<string | null>(null);
+
     // Intra-line highlight toggle
-    const [intraEnabled, setIntraEnabled] = useState<boolean>(() => Math.random() < 0.5);
+    const initialIntraRef = useRef<boolean>(Math.random() < 0.5);
+    const [intraEnabled, setIntraEnabled] = useState<boolean>(initialIntraRef.current);
+
+    // Track which (submissionId,cid) we've already logged to avoid duplicate logs (e.g., React StrictMode)
+    const initLogKeyRef = useRef<string | null>(null);
+
+    // === analytics: log UI clicks ===
+    const logUiClick = (
+        action: 'Table View' | 'File View' | 'Diff Finder',
+        startedState?: boolean,
+        switchedTo?: boolean
+    ) => {
+        axios.post(
+            `${import.meta.env.VITE_API_URL}/submissions/log_ui`,
+            {
+                id: submissionId,
+                class_id: cid,
+                action,
+                started_state: startedState,
+                switched_to: switchedTo,
+            },
+            { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+        );
+
+    };
 
     // Fetch data
     useEffect(() => {
@@ -80,6 +106,17 @@ export function CodePage() {
             })
             .then(res => setCode(res.data as string))
             .catch(err => console.log(err));
+    }, [submissionId, cid]);
+
+    // Log initial UI state on first load (and when navigating to a different submission/class)
+    useEffect(() => {
+        const key = `${submissionId}:${cid}`;
+        if (initLogKeyRef.current === key) return;
+        initLogKeyRef.current = key;
+        // Default tab on mount
+        logUiClick('Table View');
+        // Baseline the Diff Finder toggle’s initial state
+        logUiClick('Diff Finder', initialIntraRef.current, initialIntraRef.current);
     }, [submissionId, cid]);
 
     // Group tests by suite
@@ -160,103 +197,35 @@ export function CodePage() {
     }
 
     type Seg = { text: string; changed: boolean };
-
-    // Disable intra-line highlighting when two lines are too different.
-    const NO_INTRA_THRESHOLD = 0.3;
-    // If the two lines are almost identical once whitespace is ignored,
-    // prefer the older space-aware aligner (keeps nice [ ]-only diffs).
-    const SPACE_BIAS_THRESHOLD = 0.97;
-
-    function diceCoefficient(a: string, b: string): number {
-        if (a === b) return 1;
-        const ax = a.length - 1, bx = b.length - 1;
-        if (ax < 1 || bx < 1) return 0;
-        const counts = new Map<string, number>();
-        for (let i = 0; i < ax; i++) {
-            const bg = a.slice(i, i + 2);
-            counts.set(bg, (counts.get(bg) || 0) + 1);
-        }
-        let matches = 0;
-        for (let i = 0; i < bx; i++) {
-            const bg = b.slice(i, i + 2);
-            const c = counts.get(bg) || 0;
-            if (c > 0) { counts.set(bg, c - 1); matches++; }
-        }
-        return (2 * matches) / (ax + bx);
-    }
-
-    // Helper: longest common prefix/suffix to coalesce a single contiguous change.
-    function commonPrefixLen(a: string, b: string): number {
-        const n = Math.min(a.length, b.length);
-        let i = 0;
-        while (i < n && a[i] === b[i]) i++;
-        return i;
-    }
-    function commonSuffixLen(a: string, b: string, minIdx: number): number {
-        let i = a.length - 1, j = b.length - 1, k = 0;
-        while (i >= minIdx && j >= minIdx && a[i] === b[j]) { i--; j--; k++; }
-        return k;
-    }
-
-    // Older, space-aware greedy aligner (good for mostly spacing differences).
-    function spaceAwareSegments(a: string, b: string): { a: Seg[]; b: Seg[] } {
-        const A: Seg[] = [], B: Seg[] = [];
-        let i = 0, j = 0;
-        let sameA = '', sameB = '', diffA = '', diffB = '';
-        const flushSame = () => {
-            if (sameA || sameB) {
-                A.push({ text: sameA, changed: false });
-                B.push({ text: sameB, changed: false });
-                sameA = sameB = '';
-            }
-        };
-        const flushDiff = () => {
-            if (diffA || diffB) {
-                A.push({ text: diffA, changed: true });
-                B.push({ text: diffB, changed: true });
-                diffA = diffB = '';
-            }
-        };
-        while (i < a.length || j < b.length) {
-            const ca = i < a.length ? a[i] : '';
-            const cb = j < b.length ? b[j] : '';
-            if (ca && cb && ca === cb) { flushDiff(); sameA += ca; sameB += cb; i++; j++; continue; }
-            // Prefer aligning by skipping spaces so space-only diffs are obvious
-            if (ca === ' ' && cb !== '') { flushSame(); diffA += ca; i++; continue; }
-            if (cb === ' ' && ca !== '') { flushSame(); diffB += cb; j++; continue; }
-            // General mismatch: mark both
-            flushSame();
-            if (ca) { diffA += ca; i++; }
-            if (cb) { diffB += cb; j++; }
-        }
-        flushSame(); flushDiff();
-        return { a: A, b: B };
-    }
+    // Upper bound on how much of a line may change before we drop intra-highlighting
+    const MAX_CHANGE_RATIO_FOR_INTRA = 0.7;
 
     function intralineSegments(a: string, b: string): { a: Seg[]; b: Seg[] } {
-        if (a === b) return { a: [{ text: a, changed: false }], b: [{ text: b, changed: false }] };
-
-        // If nearly identical ignoring whitespace, use the space-aware aligner
-        // to preserve the older, finer-grained behavior for spacing tweaks.
-        const ai = a.replace(/\s+/g, '');
-        const bi = b.replace(/\s+/g, '');
-        const simNoWS = diceCoefficient(ai, bi);
-        if (simNoWS >= SPACE_BIAS_THRESHOLD) {
-            return spaceAwareSegments(a, b);
+        // Use jsdiff to split text into changed/unchanged chunks
+        const parts = diffChars(a ?? '', b ?? '');
+        const A: Seg[] = [];
+        const B: Seg[] = [];
+        for (const p of parts) {
+            if (p.added) {
+                B.push({ text: p.value, changed: true });
+            } else if (p.removed) {
+                A.push({ text: p.value, changed: true });
+            } else {
+                A.push({ text: p.value, changed: false });
+                B.push({ text: p.value, changed: false });
+            }
         }
-
-        // Otherwise, coalesce to a single contiguous change using prefix/suffix.
-        const A: Seg[] = [], B: Seg[] = [];
-        const p = commonPrefixLen(a, b);
-        const s = commonSuffixLen(a, b, p);
-        const pref = a.slice(0, p);
-        const coreA = a.slice(p, a.length - s);
-        const coreB = b.slice(p, b.length - s);
-        const suf = a.slice(a.length - s);
-        if (pref) { A.push({ text: pref, changed: false }); B.push({ text: pref, changed: false }); }
-        if (coreA.length || coreB.length) { A.push({ text: coreA, changed: true }); B.push({ text: coreB, changed: true }); }
-        if (suf) { A.push({ text: suf, changed: false }); B.push({ text: suf, changed: false }); }
         return { a: A, b: B };
+    }
+
+    function areSimilarForIntra(a: string, b: string): boolean {
+        const parts = diffChars(a ?? '', b ?? '');
+        let changed = 0;
+        let total = Math.max((a ?? '').length, (b ?? '').length, 1);
+        for (const p of parts) {
+            if (p.added || p.removed) changed += p.value.length;
+        }
+        return (changed / total) <= MAX_CHANGE_RATIO_FOR_INTRA;
     }
 
     function renderSegs(segs: Seg[], cls: 'add-ch' | 'del-ch') {
@@ -312,20 +281,17 @@ export function CodePage() {
         const lines = selectedFile.unified.split('\n');
         for (let i = 0; i < lines.length - 1; i++) {
             const line = lines[i] ?? '';
-            // skip diff headers / hunk markers
             if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) continue;
             const next = lines[i + 1] ?? '';
-            const isSingleDel = line.startsWith('-') && !line.startsWith('---');
             const isSingleAdd = line.startsWith('+') && !line.startsWith('+++');
+            const isSingleDel = line.startsWith('-') && !line.startsWith('---');
             const nextIsSingleAdd = next.startsWith('+') && !next.startsWith('+++');
             const nextIsSingleDel = next.startsWith('-') && !next.startsWith('---');
             const pairable = (isSingleDel && nextIsSingleAdd) || (isSingleAdd && nextIsSingleDel);
             if (pairable) {
                 const delText = (isSingleDel ? line : next).slice(1);
                 const addText = (isSingleDel ? next : line).slice(1);
-                // If similarity meets the threshold we would render intra-line segments.
-                const sim = diceCoefficient(delText, addText);
-                if (sim >= NO_INTRA_THRESHOLD) return true;
+                if (areSimilarForIntra(delText, addText)) return true;
             }
         }
         return false;
@@ -398,13 +364,13 @@ export function CodePage() {
             <div className="tab-menu view-switch">
                 <button
                     className={activeView === 'table' ? 'active menu-item-table' : 'menu-item-table'}
-                    onClick={() => setActiveView('table')}
+                    onClick={() => { logUiClick('Table View'); setActiveView('table'); }}
                 >
                     Table View
                 </button>
                 <button
                     className={`menu-item-diff ${activeView === 'diff' ? 'active' : ''}`}
-                    onClick={() => setActiveView('diff')}
+                    onClick={() => { logUiClick('File View'); setActiveView('diff'); }}
                 >
                     File View
                 </button>
@@ -532,7 +498,7 @@ export function CodePage() {
                                         type="button"
                                         className={`btn toggle-intra ${intraEnabled ? 'on' : 'off'}`}
                                         aria-pressed={intraEnabled}
-                                        onClick={() => setIntraEnabled(prev => !prev)}
+                                        onClick={() => { const next = !intraEnabled; logUiClick('Diff Finder', initialIntraRef.current, next); setIntraEnabled(next); }}
                                         title="Toggle intra-line highlighting"
                                     >
                                         Diff Finder: {intraEnabled ? 'On' : 'Off'}
@@ -595,8 +561,7 @@ export function CodePage() {
                                                         const addText = type === '-' ? otherContent : content;
                                                         const delText = type === '-' ? content : otherContent;
                                                         // If lines are too different, show full-line changes (no intra).
-                                                        const sim = diceCoefficient(delText, addText);
-                                                        if (!intraEnabled || sim < NO_INTRA_THRESHOLD) {
+                                                        if (!intraEnabled || !areSimilarForIntra(delText, addText)) {
                                                             out.push(
                                                                 <div key={`d-${i}`} className="diff-line del">
                                                                     <span className="diff-sign">-</span>
