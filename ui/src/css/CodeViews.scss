@@ -382,6 +382,136 @@
             .spacer {
                 flex: 1;
             }
+
+            .toggle-intra {
+                position: relative;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.55rem;
+                padding: 1rem 1rem 1rem 0rem;
+                border-radius: 999px;
+                border: 1px solid #9ca3af;
+                /* darker default border */
+                background: #f9fafb;
+                /* slightly tinted base */
+                color: #111827;
+                font-weight: 700;
+                font-size: 0.95rem;
+                line-height: 1;
+                cursor: pointer;
+                user-select: none;
+                box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04), 0 2px 6px rgba(0, 0, 0, 0.04);
+                transition:
+                    background 0.2s ease,
+                    border-color 0.2s ease,
+                    color 0.2s ease,
+                    box-shadow 0.2s ease,
+                    transform 0.06s ease;
+
+                /* switch metrics */
+                --track-w: 40px;
+                --track-h: 22px;
+                --knob: 18px;
+                --gap: 2px;
+                --travel: calc(var(--track-w) - var(--knob) - var(--gap) * 2);
+
+                /* make room for the switch on the left */
+                padding-left: calc(0.7rem + var(--track-w) + 0.5rem);
+            }
+
+            /* switch track */
+            .toggle-intra::before {
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 0.7rem;
+                width: var(--track-w);
+                height: var(--track-h);
+                transform: translateY(-50%);
+                border-radius: 999px;
+                background: #e5e7eb;
+                border: 1px solid #9ca3af;
+                box-shadow:
+                    inset 0 0 0 2px #ffffff,
+                    0 1px 0 rgba(0, 0, 0, 0.06);
+                transition:
+                    background 0.25s ease,
+                    border-color 0.25s ease,
+                    box-shadow 0.25s ease;
+            }
+
+            /* switch knob */
+            .toggle-intra::after {
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: calc(0.7rem + var(--gap));
+                width: var(--knob);
+                height: var(--knob);
+                transform: translateY(-50%);
+                border-radius: 999px;
+                background: #d1d5db;
+                /* darker knob when off */
+                border: 1px solid #6b7280;
+                /* stronger outline for knob */
+                box-shadow:
+                    inset 0 0 0 2px #ffffff,
+                    0 1px 0 rgba(0, 0, 0, 0.06);
+                transition:
+                    transform 0.25s ease,
+                    background 0.25s ease,
+                    border-color 0.25s ease;
+                will-change: transform;
+            }
+
+            /* Explicit OFF state */
+            .toggle-intra.off {
+                color: #111827;
+                background: #f3f4f6;
+                /* clearer contrast */
+                border-color: #6b7280;
+            }
+
+            .toggle-intra.off:hover {
+                background: #e5e7eb;
+                border-color: #4b5563;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            }
+
+            /* ON state */
+            .toggle-intra.on {
+                color: #065f46;
+                background: rgba(16, 185, 129, 0.12);
+                border-color: #10b981;
+            }
+
+            .toggle-intra.on::before {
+                background: rgba(16, 185, 129, 0.25);
+                border-color: #10b981;
+            }
+
+            .toggle-intra.on::after {
+                background: #10b981;
+                border-color: #10b981;
+                transform: translate(calc(var(--travel)), -50%);
+            }
+
+            .toggle-intra:hover {
+                background: #eef2f7;
+            }
+
+            .toggle-intra.on:hover {
+                background: rgba(16, 185, 129, 0.18);
+            }
+
+            .toggle-intra:active {
+                transform: translateY(1px);
+            }
+
+            .toggle-intra:focus-visible {
+                outline: 2px solid #3b82f6;
+                outline-offset: 2px;
+            }
         }
 
         .wrap-toggle {
@@ -480,26 +610,60 @@
                 .intra {
                     padding: 0 0.08rem;
                     border-radius: 2px;
-                    white-space: inherit; /* preserve spaces we render as · */
+                    white-space: inherit;
+                    /* preserve spaces we render as · */
                 }
+
                 .add-ch {
                     background: rgba(16, 185, 129, 0.35);
                     outline: 1px solid #10b981;
                 }
+
                 .del-ch {
                     background: rgba(239, 68, 68, 0.35);
                     outline: 1px solid #ef4444;
-                }         
-                
-            }
-        }
-    }
-}
+                }
 
-/* Responsive tweak for diff-view columns */
-@media (max-width: 900px) {
-    .diff-view {
-        grid-template-columns: 1fr;
+            }
+
+            .diff-empty {
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                gap: 0.75rem;
+                margin: 0.25rem 0.25rem 0.5rem;
+                padding: 0.9rem 1rem;
+                border-radius: 8px;
+                border: 1px solid #10b981;
+                background: rgba(16, 185, 129, 0.12);
+                color: #065f46;
+                box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.12);
+            }
+
+            .diff-empty .empty-icon {
+                font-size: 2.2rem;
+                line-height: 0;
+                display: grid;
+                place-items: center;
+                align-self: flex-start;
+                transform: translateY(1.25rem);
+            }
+
+            .diff-empty .empty-text {
+                text-align: left;
+            }
+
+            .diff-empty .empty-title {
+                font-weight: 700;
+                font-size: 1rem;
+            }
+
+            .diff-empty .empty-subtitle {
+                font-size: 0.92rem;
+                opacity: 0.9;
+            }
+
+        }
     }
 }
 
