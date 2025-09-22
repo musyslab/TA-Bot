@@ -24,11 +24,15 @@ Update Packages:
 
 ```sudo apt update```
 
-Install Node.js
+Install nvm:
+
+```curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash```
+
+Install Node.js:
 
 ```nvm install --latest-npm```
 
-Verify node/npm is working
+Verify node/npm is working:
 
 ```node -v```
 
@@ -52,7 +56,7 @@ Make it so you don't have to run sudo everytime in docker:
 
 ## Install TA-Bot:
 
-```git clone https://github.com/Sam-Mazzone/TA-Bot.git```
+```git clone https://github.com/musyslab/TA-Bot.git```
 
 Enter Github username and personal access token (not password)
 

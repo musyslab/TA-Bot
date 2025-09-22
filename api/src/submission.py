@@ -543,7 +543,7 @@ def log_ui_click():
     switched_to = data.get('switched_to', None)
 
     username = getattr(current_user, 'Username', None) or 'unknown'
-    role = getattr(current_user, 'Role', None) or 'unknown'
+    role = getattr(current_user, 'Role', None) or 0
 
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 

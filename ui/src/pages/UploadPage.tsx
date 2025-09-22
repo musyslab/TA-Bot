@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react';
 import 'semantic-ui-css/semantic.min.css'
-import { Button, Form, Grid, Segment, Dimmer, Header, Icon, Table, Message } from 'semantic-ui-react'
-import axios from 'axios'
-import MenuComponent from '../components/MenuComponent'
+import { Button, Form, Grid, Segment, Dimmer, Header, Icon, Table } from 'semantic-ui-react'
+import axios from 'axios';
+import MenuComponent from '../components/MenuComponent';
 import React from 'react'
 import { SemanticCOLORS } from 'semantic-ui-react'
-import ErrorMessage from '../components/ErrorMessage'
-import Countdown from 'react-countdown'
-import { Helmet } from 'react-helmet'
-import { useParams } from 'react-router-dom'
-import '../css/UploadPage.scss'
+import ErrorMessage from '../components/ErrorMessage';
+import Countdown from 'react-countdown';
+import { Helmet } from 'react-helmet';
+import { useParams } from 'react-router-dom';
+import '../css/UploadPage.scss';
 
 interface UploadProps {
     class_id?: string
@@ -57,18 +57,9 @@ const UploadPage = () => {
     const [SecondsUntilRecharge, setSecondsUntilRecharge] = useState<number>(0);
     const [RewardState, setRewardState] = useState<boolean>(false);
     const [displayClock, setDisplayClock] = useState<boolean>(false);
-    const [inOfficeHours, setInOfficeHours] = useState<boolean>(false);
 
     const [project_name, setProject_name] = useState<string>("");
     const [dueDate, setDueDate] = useState<string>("");
-    const canSubmit = inOfficeHours || (baseCharge > 0) || RewardState;
-
-    // Allowed upload file extensions (frontend gate)
-    const ALLOWED_EXTS = ['.py', '.java', '.c', '.rkt'];
-    const isAllowedFileName = (name: string) => {
-        const ext = '.' + (name.split('.').pop() || '').toLowerCase();
-        return ALLOWED_EXTS.includes(ext);
-    };
 
     let activeDay: number;
     if (project_name !== "") {
@@ -90,40 +81,12 @@ const UploadPage = () => {
         }
     }, [project_name]);
 
-    function checkOfficeHours() {
-        // Show banner only if there is an ACCEPTED (ruling==1, not dismissed)
-        // OH entry for THIS class (via its current project).
-        axios.get(
-            `${import.meta.env.VITE_API_URL}/submissions/getAcceptedOHForClass?class_id=${class_id}`,
-            { headers: { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` } }
-        )
-            .then(res => {
-                // API returns the accepted question id or -1
-                const raw = (typeof res.data === 'object' && res.data !== null)
-                    ? (res.data.id ?? res.data.qid ?? res.data.value ?? res.data)
-                    : res.data;
-                const id = Number(raw);
-                setInOfficeHours(Number.isFinite(id) && id > 0);
-            })
-            .catch(err => {
-                console.error("Error checking office hours:", err);
-                setInOfficeHours(false);
-            });
-    }
-
-    useEffect(() => {
-        checkOfficeHours();
-    }, []);
 
     function handleFileChange(event: React.FormEvent) {
         const target = event.target as HTMLInputElement;
-        const selected = target.files ? Array.from(target.files) : [];
-        const valid = selected.filter(f => isAllowedFileName(f.name));
-        if (selected.length && valid.length === 0) {
-            setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
-            setIsErrorMessageHidden(false);
-        }
-        setFiles(valid);
+        const selected = target.files;
+        // accept multiple files
+        setFiles(selected ? Array.from(selected) : []);
     };
 
     function getCharges() {
@@ -194,21 +157,7 @@ const UploadPage = () => {
         window.location.reload();
     }
 
-    function officeHoursPage() {
-        window.location.href = "/class/OfficeHours/" + class_id;
-    }
-
     function handleSubmit() {
-        // Block submits when there are no usable charges
-        if (!canSubmit) {
-            alert(
-                "You’re out of charges.\n\n" +
-                "Please wait until your energy recharges (see countdown), " +
-                "or use a FastPass charge first to submit now."
-            );
-            return;
-        }
-
         // Make sure at least one file is selected
         if (files.length === 0) {
             setError_Message("Please select a file to upload.");
@@ -218,13 +167,6 @@ const UploadPage = () => {
 
         // Grab the first file from your files state
         const fileToUpload = files[0];
-
-        // Validate extension again at submit time (belt & suspenders)
-        if (!isAllowedFileName(fileToUpload.name)) {
-            setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
-            setIsErrorMessageHidden(false);
-            return;
-        }
 
         setIsErrorMessageHidden(true);
         setIsLoading(true);
@@ -243,8 +185,16 @@ const UploadPage = () => {
             }
         )
             .then(res => {
-                window.location.href = "code";
+                const sid = (res?.data && (res.data.sid ?? res.data.Sid ?? res.data.id)) as number | string | undefined;
+                if (sid !== undefined && class_id !== undefined) {
+                    window.location.href = `/class/${class_id}/code/${sid}`;
+                } else if (class_id !== undefined) {
+                    window.location.href = `/class/${class_id}/code`;
+                } else {
+                    window.location.href = "code";
+                }
             })
+
             .catch(err => {
                 setError_Message(err.response?.data?.message || "Upload failed.");
                 setIsErrorMessageHidden(false);
@@ -362,17 +312,6 @@ const UploadPage = () => {
                                 <h1>No Active Project</h1>
                             )}
                         </div>
-
-                        {inOfficeHours && (
-                            <Message positive icon className="oh-banner">
-                                <Icon name="handshake outline" />
-                                <Message.Content>
-                                    <Message.Header>You're in Office Hours</Message.Header>
-                                    Submissions will not consume energy while this is active.
-                                </Message.Content>
-                            </Message>
-                        )}
-
                         <Dimmer.Dimmable dimmed={true}>
                             <Segment stacked className="upload-segment">
                                 <div className="base-charge">
@@ -395,14 +334,8 @@ const UploadPage = () => {
                                             onDragOver={e => e.preventDefault()}
                                             onDrop={e => {
                                                 e.preventDefault();
-                                                const dropped = Array.from(e.dataTransfer.files || []);
-                                                const valid = dropped.filter(f => isAllowedFileName(f.name));
-                                                if (dropped.length && valid.length === 0) {
-                                                    setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
-                                                    setIsErrorMessageHidden(false);
-                                                    return;
-                                                }
-                                                setFiles(valid);
+                                                const files = e.dataTransfer.files;
+                                                if (files && files.length === 1) setFile(files[0]);
                                             }}
                                         >
                                             {!files.length ? (
@@ -410,7 +343,6 @@ const UploadPage = () => {
                                                     <input
                                                         type="file"
                                                         className="file-input"
-                                                        accept=".py,.java,.c,.rkt"
                                                         multiple
                                                         onChange={handleFileChange}
                                                     />
@@ -448,11 +380,11 @@ const UploadPage = () => {
 
                                     <Button
                                         type="submit"
-                                        disabled={!is_allowed_to_submit || !canSubmit}
+                                        disabled={!is_allowed_to_submit}
                                         fluid
                                         size="large"
                                         className={
-                                            `upload-button ${(!is_allowed_to_submit || !canSubmit) ? 'disabled' : ''} ${RewardState ? 'reward' : ''
+                                            `upload-button ${!is_allowed_to_submit ? 'disabled' : ''} ${RewardState ? 'reward' : ''
                                             }`
                                         }
                                     >
