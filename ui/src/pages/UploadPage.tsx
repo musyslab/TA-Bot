@@ -170,8 +170,34 @@ const UploadPage = () => {
             setTimeUntilNextSubmission(res.data[2]);
             setProject_name(res.data[3]);
             setDueDate(res.data[4]);
+            setProject_id(Number(res.data[5] || 0));
         })
     }
+
+    const downloadAssignment = (pid: number) => {
+        if (!pid || pid <= 0) return;
+        axios.get(
+            `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${pid}`,
+            {
+                headers: { Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` },
+                responseType: "blob",
+            }
+        ).then((res) => {
+            const type = (res.headers as any)["content-type"] || "application/octet-stream";
+            const blob = new Blob([res.data], { type });
+            // Prefer server-exposed filename, fallback to generic
+            let name = (res.headers as any)["x-filename"] || "assignment_description";
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }).catch(err => console.error("Download failed:", err));
+    };
+
     function submitSuggestions() {
         axios.post(import.meta.env.VITE_API_URL + `/submissions/submit_suggestion`,
             {
@@ -351,8 +377,9 @@ const UploadPage = () => {
                         <div className="project-header">
                             {project_name ? (
                                 <>
-                                    <h2>Current Project</h2>
-                                    <h1>{project_name.replace(/_/g, " ")}</h1>
+                                    <h1 className="project-title">
+                                        {project_name.replace(/_/g, " ")}
+                                    </h1>
                                     {dueDate && (
                                         <p className="due-date">
                                             Due: {new Date(dueDate).toLocaleString(undefined, {
@@ -364,6 +391,16 @@ const UploadPage = () => {
                                             })}
                                         </p>
                                     )}
+                                    <button
+                                        type="button"
+                                        className="assignment-link"
+                                        onClick={() => downloadAssignment(project_id)}
+                                        disabled={!project_id || project_id <= 0}
+                                        aria-label="Download assignment description"
+                                    >
+                                        <Icon name="download" />
+                                        <span>Download Assignment Instructions</span>
+                                    </button>
                                 </>
                             ) : (
                                 <h1>No Active Project</h1>

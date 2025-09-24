@@ -671,8 +671,12 @@ class SubmissionRepository():
         if len(reward_charge) > 0:
             for reward in reward_charge:
                 if reward.RedeemedTime is None:
+                    if charge.RewardCharge > 0:
+                        charge.RewardCharge -= 1
+                        db.session.commit()
                     reward.RedeemedTime = dt_string
                     reward.submissionId = submission_id
+                    reward.Recouped = 1
                     db.session.commit()
                     visible = 1
                     submission = Submissions.query.filter(Submissions.Id == submission_id).first()
@@ -732,9 +736,15 @@ class SubmissionRepository():
             student_submissionCharges = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
             if student_submissionCharges.RewardCharge < 1:
                 return 0
-            student_submissionCharges.RewardCharge -= 1
-
-            reward_charge = SubmissionChargeRedeptions(UserId=user_id, ClassId=class_id, projectId=project, Type="reward", ClaimedTime=dt_string, Recouped=1)
+            # Reserve a FastPass without consuming it yet (pending until next submission)
+            reward_charge = SubmissionChargeRedeptions(
+                UserId=user_id,
+                ClassId=class_id,
+                projectId=project,
+                Type="reward",
+                ClaimedTime=dt_string,
+                Recouped=0
+            )
             db.session.add(reward_charge)
             db.session.commit()
             

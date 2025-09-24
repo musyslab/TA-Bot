@@ -3,6 +3,61 @@
     margin: 0 auto;
     padding-top: 75px;
 
+    .project-header {
+        background: #d1d5db;
+        border: 1px solid #9ca3af;
+        padding: 5px;
+        border-radius: 12px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+
+        h1 {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 0;
+            font-family: 'Arial', sans-serif;
+            color: #333;
+            text-align: center;
+        }
+
+        .due-date {
+            color: red;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 0;
+        }
+
+        .assignment-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 9999px;
+            border: 1px solid #9ca3af;
+            background: #ffffff;
+            color: #111827;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            margin: 0;
+        }
+
+        .assignment-link:hover:not(:disabled) {
+            background: #f3f4f6;
+        }
+
+        .assignment-link:disabled,
+        .assignment-link[aria-disabled="true"] {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+    }
+
     .upload-grid {
         .column {
             flex: 0 0 100% !important;
@@ -261,6 +316,10 @@
         &.reward {
             background: purple;
             animation: pulse 2s infinite;
+
+            &:not(.disabled):not([aria-disabled="true"]):not(:disabled):hover {
+                background: #660066 !important;
+            }
         }
 
         /* No hover effects while disabled */
@@ -434,38 +493,6 @@
     }
 }
 
-.project-header {
-    background: #d1d5db;
-    border: 1px solid #9ca3af;
-    padding: 5px;
-    border-radius: 12px;
-    margin-bottom: 15px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    text-align: center;
-
-    h2 {
-        font-size: 20px;
-        color: #555;
-        margin: 0;
-    }
-
-    h1 {
-        font-size: 28px;
-        font-weight: bold;
-        margin: 5px 0 0 0;
-        font-family: 'Arial', sans-serif;
-        color: #333;
-    }
-
-    .due-date {
-        color: red;
-        margin: 4px 0 0;
-        font-size: 14px;
-        font-weight: bold;
-    }
-    
-}
-
 @keyframes fadeInScale {
     from {
         opacity: 0;
@@ -504,30 +531,34 @@
     }
 }
 
-  /* Office Hours banner: centered text with left icon and symmetric ghost spacer */
-  .oh-banner.ui.icon.message {
+/* Office Hours banner: centered text with left icon and symmetric ghost spacer */
+.oh-banner.ui.icon.message {
     display: grid !important;
     align-items: center !important;
-    grid-template-columns: 3.5em 1fr 3.5em; /* icon | centered content | ghost spacer */
-    padding-left: 2rem !important;          /* keep the padding left of the icon */
+    grid-template-columns: 3.5em 1fr 3.5em;
+    /* icon | centered content | ghost spacer */
+    padding-left: 2rem !important;
+    /* keep the padding left of the icon */
     text-align: center !important;
-  }
+}
 
-  .oh-banner.ui.icon.message > i.icon {
+.oh-banner.ui.icon.message>i.icon {
     grid-column: 1;
-    position: static !important;   /* in-flow so its width defines col 1 */
+    position: static !important;
+    /* in-flow so its width defines col 1 */
     margin: 0 !important;
     justify-self: start;
-  }
+}
 
-  .oh-banner.ui.icon.message > .content {
-    grid-column: 2 !important;     /* middle column only */
+.oh-banner.ui.icon.message>.content {
+    grid-column: 2 !important;
+    /* middle column only */
     margin: 0 auto !important;
     text-align: center !important;
-  }
+}
 
-  /* Ghost cell to balance the icon’s width on the right */
-  .oh-banner.ui.icon.message::after {
+/* Ghost cell to balance the icon’s width on the right */
+.oh-banner.ui.icon.message::after {
     content: "";
     grid-column: 3;
-  }
+}

@@ -17,6 +17,7 @@ interface OHQuestion {
     ruled: number;
     submission_id: number;
     class_id: number;
+    project_id: number;
 }
 
 class TaComponent extends Component<{}, OfficeHoursState> {
@@ -30,10 +31,51 @@ class TaComponent extends Component<{}, OfficeHoursState> {
         this.handleRuling = this.handleRuling.bind(this);
         this.fetchOHQuestions = this.fetchOHQuestions.bind(this);
         this.startFetchingInterval = this.startFetchingInterval.bind(this);
+        this.downloadAssignment = this.downloadAssignment.bind(this);
     }
 
     componentDidMount() {
         this.startFetchingInterval();
+    }
+
+    downloadAssignment(projectId: number) {
+        axios.get(
+            `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${projectId}`,
+            {
+                headers: { Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` },
+                responseType: "blob",
+            }
+        ).then((res) => {
+            const h = res.headers as Record<string, string>;
+            const type = h["content-type"] || "application/octet-stream";
+            const blob = new Blob([res.data], { type });
+
+            // Filename: prefer CORS-exposed header, else simple Content-Disposition parse, else MIME guess
+            let name = h["x-filename"];
+            if (!name) {
+                const disp = h["content-disposition"] || "";
+                const m = /filename="?([^"]+)"?/.exec(disp);
+                if (m && m[1]) {
+                    name = m[1];
+                }
+            }
+            if (!name) {
+                const ext = type.includes("pdf") ? ".pdf"
+                    : type.includes("wordprocessingml") ? ".docx"
+                        : type.includes("msword") ? ".doc"
+                            : "";
+                name = `assignment${ext}`;
+            }
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }).catch((err) => console.error("Download failed:", err));
     }
 
     fetchOHQuestions = () => {
@@ -50,6 +92,7 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                     question_time: item[2],
                     Student_name: item[3],
                     ruled: item[4],
+                    project_id: item[5],
                     class_id: item[6],
                     submission_id: item[7],
                 }));
@@ -114,6 +157,7 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                                 <th className="col-wait">Time in Queue</th>
                                 <th className="col-feedback">Decision</th>
                                 <th className="col-code">Student Code</th>
+                                <th className="col-assignment">Assignment</th>
                                 <th className="col-complete">Complete</th>
                             </tr>
                         </thead>
@@ -154,22 +198,22 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                                                     className="button button-reject"
                                                     onClick={() => this.handleRuling(item.Question_id, 0)}
                                                 >
-                                                    Reject
+                                                    <Icon name="times circle outline" aria-hidden="true" /> Reject
                                                 </button>
                                                 <button
                                                     className="button button-accept"
                                                     onClick={() => this.handleRuling(item.Question_id, 1)}
                                                 >
-                                                    Accept
+                                                    <Icon name="check circle outline" aria-hidden="true" /> Accept
                                                 </button>
                                             </div>
                                         ) : (
                                             <div className="feedback-actions is-disabled">
                                                 <button className="button button-reject" disabled>
-                                                    Reject
+                                                    <Icon name="times circle outline" aria-hidden="true" /> Reject
                                                 </button>
                                                 <button className="button button-accept" disabled>
-                                                    Accept
+                                                    <Icon name="check circle outline" aria-hidden="true" /> Accept
                                                 </button>
                                             </div>
                                         )}
@@ -185,7 +229,7 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                                                     aria-describedby={`lock-${item.Question_id}-code`}
                                                     title="Locked until you Accept or Reject"
                                                 >
-                                                    View
+                                                    <Icon name="eye" aria-hidden="true" /> View
                                                 </button>
                                             </div>
                                         ) : item.submission_id !== -1 ? (
@@ -197,8 +241,30 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                                                 <button className="button button-view-code">View</button>
                                             </Link>
                                         ) : (
-                                            <button className="button button-view-code" disabled>
-                                                View
+                                            <button className="button button-view-code"><Icon name="eye" aria-hidden="true" /> View</button>
+                                        )}
+                                    </td>
+
+                                    <td className="cell-assignment">
+                                        {item.ruled === -1 ? (
+                                            <div className="locked-box">
+                                                <button
+                                                    className="button button-assignment is-locked"
+                                                    disabled
+                                                    aria-disabled="true"
+                                                    aria-describedby={`lock-${item.Question_id}-assignment`}
+                                                    title="Locked until you Accept or Reject"
+                                                >
+                                                    <Icon name="download" aria-hidden="true" />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                className="button button-assignment"
+                                                onClick={() => this.downloadAssignment(item.project_id)}
+                                                title="Download assignment description"
+                                            >
+                                                <Icon name="download" aria-hidden="true" />
                                             </button>
                                         )}
                                     </td>
@@ -213,7 +279,7 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                                                     aria-describedby={`lock-${item.Question_id}-complete`}
                                                     title="Locked until you Accept or Reject"
                                                 >
-                                                    Completed
+                                                    <Icon name="check circle" aria-hidden="true" /> Completed
                                                 </button>
                                             </div>
                                         ) : (
@@ -221,7 +287,7 @@ class TaComponent extends Component<{}, OfficeHoursState> {
                                                 className="button button-completed"
                                                 onClick={this.handleComplete(item.Question_id)}
                                             >
-                                                Completed
+                                                <Icon name="check circle" aria-hidden="true" /> Completed
                                             </button>
                                         )}
                                     </td>
