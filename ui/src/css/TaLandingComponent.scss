@@ -85,7 +85,7 @@
         }
     }
 
-    &.button-view-description {
+    &.button-assignment {
         border-color: #8b5cf6;
         background: #f5f3ff;
         color: #4c1d95;
@@ -140,6 +140,11 @@
     border-radius: 12px;
     overflow: hidden;
 
+    .icon {
+        line-height: 1;
+        vertical-align: middle;
+    }
+
     .table-head {
         background: #e5e7eb;
 
@@ -180,7 +185,7 @@
                     text-align: center;
                 }
 
-                &.col-description {
+                &.col-assignment {
                     width: 10%;
                     text-align: center;
                 }
@@ -287,7 +292,7 @@
                     }
                 }
 
-                &.cell-description,
+                &.cell-assignment,
                 &.cell-code,
                 &.cell-complete {
                     text-align: center;

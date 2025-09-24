@@ -421,7 +421,8 @@ def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Contai
         submission_details.append("None")
     submission_details.append(project.get(projectId)[0])
     end_time_str = project.get(projectId)[2]  
-    submission_details.append(end_time_str)    
+    submission_details.append(end_time_str)
+    submission_details.append(str(projectId))    
     return make_response(submission_details, HTTPStatus.OK)
 
 @submission_api.route('/submitgrades', methods=['POST'])

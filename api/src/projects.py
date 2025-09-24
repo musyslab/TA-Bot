@@ -36,8 +36,8 @@ from datetime import datetime
 from src.services.link_service import LinkService
 import itertools
 import importlib.util
-
 from werkzeug.utils import secure_filename
+from urllib.parse import quote
 
 projects_api = Blueprint('projects_api', __name__)
 
@@ -900,12 +900,17 @@ def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container
     else:
         mime = 'application/octet-stream'
     file_stream = BytesIO(assignmentdesc_contents)
-
-    # Send as a download with the original filename and best-guess MIME type
+    data = file_stream.getvalue()
+    # Send original filename; expose headers for CORS so frontend can read them
     return Response(
-        file_stream.getvalue(),
+        data,
         content_type=mime,
-        headers={'Content-Disposition': f'attachment; filename={fname}'}
+        headers={
+            'Content-Disposition': f"attachment; filename=\"{fname}\"; filename*=UTF-8''{quote(fname)}",
+            'Content-Length': str(len(data)),
+            'X-Filename': fname,
+            'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type, X-Filename',
+        },
     )
 
 @projects_api.route('/ProjectGrading', methods=['POST'])

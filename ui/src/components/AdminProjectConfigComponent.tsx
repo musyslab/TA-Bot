@@ -53,18 +53,16 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [solutionfileName, setSolutionFileName] = useState<string>("");
     const [descfileName, setDescFileName] = useState<string>("");
     const [jsonfilename, setjsonfilename] = useState<string>("");
-
     const [activeTab, setActiveTab] = useState<'psettings' | 'testcases'>('psettings');
-    // Loading indicators
     const [submittingProject, setSubmittingProject] = useState<boolean>(false);
     const [submittingTestcase, setSubmittingTestcase] = useState<boolean>(false);
-
+    const [submittingJson, setSubmittingJson] = useState<boolean>(false);
     const [modalDraft, setModalDraft] = useState<Testcase | null>(null);
-
     const [previewOpen, setPreviewOpen] = useState(false);
     const [previewTitle, setPreviewTitle] = useState("");
     const [previewText, setPreviewText] = useState("");
     const [serverFiles, setServerFiles] = useState<string[] | null>(null);
+
     const API = import.meta.env.VITE_API_URL;
     const authHeader = { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` };
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i;
@@ -326,21 +324,30 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             });
     }
 
-    function handleJsonSubmit() {
-        const formData = new FormData();
-        formData.append("file", File!);
-        formData.append("project_id", props.id.toString());
-        formData.append("class_id", props.class_id.toString());
-        axios.post(import.meta.env.VITE_API_URL + `/projects/json_add_testcases`, formData, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
-            }
-        })
-            .then(res => {
-                reloadtests();
-            }).catch(function (error) {
-                console.log(error);
-            });
+    async function handleJsonSubmit() {
+        try {
+            setSubmittingJson(true);
+            const formData = new FormData();
+            formData.append("file", File!);
+            formData.append("project_id", props.id.toString());
+            formData.append("class_id", props.class_id.toString());
+            await axios.post(
+                import.meta.env.VITE_API_URL + `/projects/json_add_testcases`,
+                formData,
+                { headers: { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` } }
+            );
+            await reloadtests();
+
+            // Reset JSON file UI back to drag & drop
+            setjsonfilename('');
+            const jsonInput = document.getElementById('jsonFile') as HTMLInputElement | null;
+            if (jsonInput) jsonInput.value = '';
+
+        } catch (error) {
+            console.log(error);
+        } finally {
+            setSubmittingJson(false);
+        }
     }
 
     async function handleNewSubmit() {
@@ -1029,7 +1036,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                 <button
                                                     type="button"
                                                     className="exchange-icon"
-                                                    onClick={() => setjsonfilename('')}
+                                                    onClick={() => {
+                                                        setjsonfilename('');
+                                                        const jsonInput = document.getElementById('jsonFile') as HTMLInputElement | null;
+                                                        if (jsonInput) jsonInput.value = '';
+                                                    }}
                                                 >
                                                     <i className="exchange icon"></i>
                                                 </button>
@@ -1043,8 +1054,18 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                         type="button"
                                         className="json-submit-button"
                                         onClick={handleJsonSubmit}
+                                        disabled={submittingJson}
                                     >
-                                        <i className="upload icon"></i> {SubmitJSON}
+                                        {submittingJson ? (
+                                            <>
+                                                <i className="notched circle loading icon"></i>
+                                                &nbsp;Submitting...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <i className="upload icon"></i> {SubmitJSON}
+                                            </>
+                                        )}
                                     </button>
                                     <div className="json-button-spacer" />
                                     <button

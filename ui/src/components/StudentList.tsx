@@ -3,6 +3,7 @@ import axios from 'axios'
 import { Link } from 'react-router-dom'
 import '../css/StudentList.scss'
 import '../css/CodeViews.scss'
+import { Icon } from 'semantic-ui-react'
 
 interface StudentListProps {
     project_id: number;
@@ -110,6 +111,31 @@ class StudentList extends Component<StudentListProps, StudentListState> {
         this.handleUnlockClick = this.handleUnlockClick.bind(this);
         this.submitGrades = this.submitGrades.bind(this);
         this.exportGrades = this.exportGrades.bind(this);
+        this.downloadStudentCode = this.downloadStudentCode.bind(this);
+    }
+
+    async downloadStudentCode(row: Row) {
+        try {
+            if (row.subid === -1) return;
+            const url = `${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${row.subid}&class_id=${row.classId}`;
+            const res = await axios.get<string | string[]>(url, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                responseType: 'text',
+            });
+            const code = Array.isArray(res.data) ? (res.data[0] ?? '') : (res.data ?? '');
+            const safe = (s: string) => (s || '').replace(/\s+/g, '_');
+            const fname = `${safe(row.Fname)}_${safe(row.Lname)}_${row.subid}.py`;
+            const blob = new Blob([code], { type: 'text/x-python' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+        } catch (_e) {
+            window.alert('Failed to download code. Please try again.');
+        }
     }
 
     componentDidMount() {
@@ -678,6 +704,7 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                     <th className="col-pylint-errors">Pylint Errors</th>
                                     <th className="col-status">Status</th>
                                     <th className="col-view">View</th>
+                                    <th className="col-download">Download</th>
                                     <th className="col-grade">Grade</th>
                                 </tr>
                             </thead>
@@ -709,6 +736,7 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                 <td className="pylint-errors-cell">N/A</td>
                                                 <td className="status-cell">N/A</td>
                                                 <td className="view-cell">N/A</td>
+                                                <td className="download-cell">N/A</td>
                                                 <td className="grade-cell">
                                                     <input
                                                         className="grade-input"
@@ -761,8 +789,18 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                     target="_blank"
                                                     rel="noreferrer"
                                                 >
-                                                    View
+                                                    <Icon name="eye" aria-label="View" /> View
                                                 </Link>
+                                            </td>
+                                            <td className="download-cell">
+                                                <button
+                                                    className="btn download-btn"
+                                                    onClick={() => this.downloadStudentCode(row)}
+                                                    aria-label="Download code"
+                                                    title="Download code"
+                                                >
+                                                    <Icon name="download" />
+                                                </button>
                                             </td>
                                             <td className="grade-cell">
                                                 <input
