@@ -693,31 +693,73 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                         */}
 
                         {/* Table */}
-                        <table className="students-table">
-                            <thead className="table-head">
-                                <tr className="table-row">
-                                    <th className="col-student-name">Student</th>
-                                    <th className="col-lecture-number">Lecture</th>
-                                    <th className="col-lab-number">Lab</th>
-                                    <th className="col-submissions">Submissions</th>
-                                    <th className="col-date">Last Submitted</th>
-                                    <th className="col-pylint-errors">Pylint Errors</th>
-                                    <th className="col-status">Status</th>
-                                    <th className="col-view">View</th>
-                                    <th className="col-download">Download</th>
-                                    <th className="col-grade">Grade</th>
-                                </tr>
-                            </thead>
-                            <tbody className="table-body">
-                                {rowsForView.map((row) => {
-                                    if (row.hidden) return null;
+                        <div className="table-scroll" role="region" aria-label="Student submissions" tabIndex={0}>
+                            <table className="students-table">
+                                <thead className="table-head">
+                                    <tr className="table-row">
+                                        <th className="col-student-name">Student</th>
+                                        <th className="col-lecture-number">Lecture</th>
+                                        <th className="col-lab-number">Lab</th>
+                                        <th className="col-submissions">Submissions</th>
+                                        <th className="col-date">Last Submitted</th>
+                                        <th className="col-pylint-errors">Pylint Errors</th>
+                                        <th className="col-status">Status</th>
+                                        <th className="col-view">View</th>
+                                        <th className="col-download">Download</th>
+                                        <th className="col-grade">Grade</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="table-body">
+                                    {rowsForView.map((row) => {
+                                        if (row.hidden) return null;
 
-                                    if (row.subid === -1) {
+                                        if (row.subid === -1) {
+                                            return (
+                                                <tr
+                                                    className="student-row student-row--no-submission"
+                                                    key={`row-${row.id}-na`}
+                                                >
+                                                    <td className="student-name-cell">
+                                                        {row.Fname + ' ' + row.Lname}{' '}
+                                                        {row.IsLocked === true && (
+                                                            <button
+                                                                className="btn unlock-btn"
+                                                                onClick={() => this.handleUnlockClick(row.id)}
+                                                            >
+                                                                Unlock
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                    <td className="lecture-number-cell">{row.lecture_number}</td>
+                                                    <td className="lab-number-cell">{row.lab_number}</td>
+                                                    <td className="submissions-cell">N/A</td>
+                                                    <td className="date-cell">N/A</td>
+                                                    <td className="pylint-errors-cell">N/A</td>
+                                                    <td className="status-cell">N/A</td>
+                                                    <td className="view-cell">N/A</td>
+                                                    <td className="download-cell">N/A</td>
+                                                    <td className="grade-cell">
+                                                        <input
+                                                            className="grade-input"
+                                                            type="text"
+                                                            placeholder="optional"
+                                                            value={row.grade}
+                                                            onChange={(e) => this.handleGradeChange(e, row)}
+                                                            disabled
+                                                        />
+                                                        <button
+                                                            className="btn grade-btn"
+                                                            onClick={() => this.openGradingModule(row.id)}
+                                                        >
+                                                            Grade
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        }
+
                                         return (
-                                            <tr
-                                                className="student-row student-row--no-submission"
-                                                key={`row-${row.id}-na`}
-                                            >
+                                            <tr className="student-row" key={`row-${row.id}`}>
                                                 <td className="student-name-cell">
                                                     {row.Fname + ' ' + row.Lname}{' '}
                                                     {row.IsLocked === true && (
@@ -731,12 +773,36 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                 </td>
                                                 <td className="lecture-number-cell">{row.lecture_number}</td>
                                                 <td className="lab-number-cell">{row.lab_number}</td>
-                                                <td className="submissions-cell">N/A</td>
-                                                <td className="date-cell">N/A</td>
-                                                <td className="pylint-errors-cell">N/A</td>
-                                                <td className="status-cell">N/A</td>
-                                                <td className="view-cell">N/A</td>
-                                                <td className="download-cell">N/A</td>
+                                                <td className="submissions-cell">{row.numberOfSubmissions}</td>
+                                                <td className="date-cell">{row.date}</td>
+                                                <td className="pylint-errors-cell">{row.numberOfPylintErrors}</td>
+                                                <td
+                                                    className={
+                                                        row.isPassing ? 'status-cell status passed' : 'status-cell status failed'
+                                                    }
+                                                >
+                                                    {row.isPassing ? 'PASSED' : 'FAILED'}
+                                                </td>
+                                                <td className="view-cell">
+                                                    <Link
+                                                        className="view-link"
+                                                        to={`/class/${row.classId}/code/${row.subid}`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                    >
+                                                        <Icon name="eye" aria-label="View" /> View
+                                                    </Link>
+                                                </td>
+                                                <td className="download-cell">
+                                                    <button
+                                                        className="btn download-btn"
+                                                        onClick={() => this.downloadStudentCode(row)}
+                                                        aria-label="Download code"
+                                                        title="Download code"
+                                                    >
+                                                        <Icon name="download" />
+                                                    </button>
+                                                </td>
                                                 <td className="grade-cell">
                                                     <input
                                                         className="grade-input"
@@ -755,74 +821,10 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                 </td>
                                             </tr>
                                         );
-                                    }
-
-                                    return (
-                                        <tr className="student-row" key={`row-${row.id}`}>
-                                            <td className="student-name-cell">
-                                                {row.Fname + ' ' + row.Lname}{' '}
-                                                {row.IsLocked === true && (
-                                                    <button
-                                                        className="btn unlock-btn"
-                                                        onClick={() => this.handleUnlockClick(row.id)}
-                                                    >
-                                                        Unlock
-                                                    </button>
-                                                )}
-                                            </td>
-                                            <td className="lecture-number-cell">{row.lecture_number}</td>
-                                            <td className="lab-number-cell">{row.lab_number}</td>
-                                            <td className="submissions-cell">{row.numberOfSubmissions}</td>
-                                            <td className="date-cell">{row.date}</td>
-                                            <td className="pylint-errors-cell">{row.numberOfPylintErrors}</td>
-                                            <td
-                                                className={
-                                                    row.isPassing ? 'status-cell status passed' : 'status-cell status failed'
-                                                }
-                                            >
-                                                {row.isPassing ? 'PASSED' : 'FAILED'}
-                                            </td>
-                                            <td className="view-cell">
-                                                <Link
-                                                    className="view-link"
-                                                    to={`/class/${row.classId}/code/${row.subid}`}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                >
-                                                    <Icon name="eye" aria-label="View" /> View
-                                                </Link>
-                                            </td>
-                                            <td className="download-cell">
-                                                <button
-                                                    className="btn download-btn"
-                                                    onClick={() => this.downloadStudentCode(row)}
-                                                    aria-label="Download code"
-                                                    title="Download code"
-                                                >
-                                                    <Icon name="download" />
-                                                </button>
-                                            </td>
-                                            <td className="grade-cell">
-                                                <input
-                                                    className="grade-input"
-                                                    type="text"
-                                                    placeholder="optional"
-                                                    value={row.grade}
-                                                    onChange={(e) => this.handleGradeChange(e, row)}
-                                                    disabled
-                                                />
-                                                <button
-                                                    className="btn grade-btn"
-                                                    onClick={() => this.openGradingModule(row.id)}
-                                                >
-                                                    Grade
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div >
 

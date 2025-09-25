@@ -167,12 +167,25 @@
          box-sizing: border-box;
      }
 
+     .table-scroll {
+         width: 100%;
+         overflow-x: auto;
+         -webkit-overflow-scrolling: touch;
+     }
+
      .students-table {
          width: 100%;
          border-collapse: collapse;
          background: #f3f4f6;
          border: 1px solid #d1d5db;
          border-radius: 12px;
+         overflow: hidden;
+
+         /* Keep the grade column from ballooning */
+         .table-head th.col-grade,
+         .table-body td.grade-cell {
+             width: clamp(125px, 14vw, 200px);
+         }
 
          .table-head {
              background: #e5e7eb;
@@ -183,43 +196,6 @@
                  color: #111827;
                  font-size: 0.95rem;
                  border: 1px solid #d1d5db;
-                 white-space: nowrap;
-
-                 &.col-student-name {
-                     width: 20%;
-                 }
-
-                 &.col-lecture-number {
-                     width: 8%;
-                 }
-
-                 &.col-lab-number {
-                     width: 8%;
-                 }
-
-                 &.col-submissions {
-                     width: 10%;
-                 }
-
-                 &.col-date {
-                     width: 15%;
-                 }
-
-                 &.col-pylint-errors {
-                     width: 12%;
-                 }
-
-                 &.col-status {
-                     width: 10%;
-                 }
-
-                 &.col-view {
-                     width: 8%;
-                 }
-
-                 &.col-grade {
-                     width: 10%;
-                 }
              }
          }
 
@@ -328,13 +304,17 @@
                          }
                      }
 
+                     /* / .student-sub-panel .students-table .table-body tr.student-row td */
                      &.grade-cell {
                          display: flex;
                          gap: 0.5rem;
                          align-items: center;
 
+                         /* INPUT + BUTTON SPLIT THE ROW */
                          .grade-input {
-                             width: 65px;
+                             /* removed: width: 65px; */
+                             flex: 1 1 0%;
+                             min-width: 0;
                              padding: 0.45rem 0.6rem;
                              border-radius: 8px;
                              border: 1px solid #d1d5db;
@@ -350,6 +330,12 @@
                              &::placeholder {
                                  color: #6b7280;
                              }
+                         }
+
+                         .grade-btn {
+                             flex: 1 1 0%;
+                             min-width: 0;
+                             /* inherits .btn styles defined above */
                          }
                      }
                  }
@@ -580,5 +566,14 @@
                  box-shadow: none;
              }
          }
+     }
+ }
+
+ /* Ensure the table fits on screens 1050px wide or less (width-only changes) */
+ @media (max-width: 1050px) {
+     .student-sub-panel {
+         width: 97vw;
+         margin-left: 1vw;
+         margin-right: 1vw;
      }
  }
