@@ -12,7 +12,7 @@ class AdminUpload extends Component<{}, {}> {
         return (
             <div>
                 <Helmet>
-                    <title>[Admin] Student Upload | TA-Bot</title>
+                    <title>[Admin] TA-Bot</title>
                 </Helmet>
                 <MenuComponent
                     showUpload={false}

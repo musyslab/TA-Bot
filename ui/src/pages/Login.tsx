@@ -88,7 +88,7 @@ class Login extends Component<{}, LoginPageState> {
     return (
       <div>
         <Helmet>
-          <title>Login | TA-Bot</title>
+          <title>TA-Bot</title>
         </Helmet>
         <NewUserModal
           username={this.state.username}

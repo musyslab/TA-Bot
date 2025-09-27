@@ -17,7 +17,7 @@ function ProjectAnalytics() {
     return (
         <div>
             <Helmet>
-                <title>[Admin] Project Analytics | TA-Bot</title>
+                <title>[Admin] TA-Bot</title>
             </Helmet>
             <MenuComponent
                 showUpload={false}

@@ -359,7 +359,7 @@ const UploadPage = () => {
     return (
         <div className="upload-page">
             <Helmet>
-                <title>Upload | TA-Bot</title>
+                <title>TA-Bot</title>
             </Helmet>
             <MenuComponent
                 showAdminUpload={false}

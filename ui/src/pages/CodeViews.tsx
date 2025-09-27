@@ -347,7 +347,7 @@ export function CodePage() {
     return (
         <div className="page-container" id="code-page">
             <Helmet>
-                <title>Submission | TA-Bot</title>
+                <title>TA-Bot</title>
             </Helmet>
 
             <MenuComponent

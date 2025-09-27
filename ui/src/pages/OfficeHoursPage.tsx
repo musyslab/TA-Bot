@@ -11,7 +11,7 @@ const OfficeHoursPage = () => {
     return (
         <div>
             <Helmet>
-                <title> Office Hours | TA-Bot</title>
+                <title> TA-Bot</title>
             </Helmet>
             <MenuComponent
                 showUpload={true}
