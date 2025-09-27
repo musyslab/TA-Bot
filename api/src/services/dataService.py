@@ -1,58 +1,58 @@
-from typing import List
+import os
+from typing import List, Dict, Any
 from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.user_repository import UserRepository
-import mosspy
-import threading
-import smtplib
-from email.mime.application import MIMEApplication
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import COMMASPACE, formatdate
+from src.repositories.project_repository import ProjectRepository
+from src.plagiarism_detector import detect_plagiarism 
+
+def run_local_plagiarism(projectid: int, submission_repository: SubmissionRepository, user_repository: UserRepository, project_repository: ProjectRepository) -> Dict[str, Any]:    
+    """
+    Collect the most recent submission file for each user in the project,
+    then run a fully-local similarity analysis (robust to variable renaming).
+    Returns a JSON-serializable dict with 'pairs'.
+    """
+    class_name = project_repository.get_className_by_projectId(projectid)
+    class_id = project_repository.get_class_id_by_name(class_name)
+    users = user_repository.get_all_users_by_cid(class_id)
+    userids = [u.Id for u in users]
+    bucket = submission_repository.get_most_recent_submission_by_project(projectid, userids)
 
 
-def all_submissions(projectid: int, userId: int, submission_repository: SubmissionRepository, user_repository: UserRepository):
+    # Build a list of file entries with metadata for reporting/links
+    entries: List[Dict[str, Any]] = []
+    # Build a quick lookup for user names
+    name_map: Dict[int, str] = {}
+    for u in users:
+        first = getattr(u, 'Firstname', None) or getattr(u, 'Fname', '')
+        last  = getattr(u, 'Lastname',  None) or getattr(u, 'Lname',  '')
+        name_map[u.Id] = (f"{first} {last}".strip() or f"User {u.Id}")
 
-    ##thread creation function
-    files = []
-    users = user_repository.get_all_users()
-    userids=[]
-    for user in users:
-        userids.append(user.Id)
-    bucket = submission_repository.get_most_recent_submission_by_project(projectid, userids)    
-    for user in users:
-        if user.Id in bucket:
-            files.append(bucket[user.Id].CodeFilepath)
+    for u in users:
+        if u.Id in bucket:
+            sub = bucket[u.Id]
+            fp = sub.CodeFilepath
+            if os.path.isdir(fp):
+                files = [f for f in os.listdir(fp) if f.endswith((".py", ".java", ".c", ".cpp"))]
+                pick = "Main.java" if "Main.java" in files else (files[0] if files else None)
+                if pick:
+                    fp = os.path.join(fp, pick)
+            entries.append({
+                "user_id": u.Id,
+                "name": name_map.get(u.Id, f"User {u.Id}"),
+                "class_id": str(class_id),
+                "submission_id": getattr(sub, "Id", getattr(sub, "SubmissionId", -1)),
+                "filepath": fp,
+            })
 
-    #Gets the user Email to email Moss results to.
-    email=user_repository.get_user_email(userId)
+    result = detect_plagiarism(entries)
+    return result
 
-    thread = threading.Thread(target=moss_submissions, args=(files, email), daemon=True)
-    thread.start()
-
-
-def moss_submissions(files: List[str], email: str):
-    # TODO: Load in language from DB
-    m = mosspy.Moss("41498278", "python")
-    for file in files:
-        m.addFile(file)
-    url = m.send(lambda file_path, display_name: print('*', end='', flush=True))
-    gmail_user = 'autotabugreports@gmail.com'
-    gmail_password ='cgoafdqjabnwgxoa'
-    receivers = [str(email)]
-    sent_from = gmail_user
-
-    subject = 'TA-Bot MOSS REPORT'
-
-    msg = MIMEMultipart()
-    msg['From'] = "autotabugreports@gmail.com"
-    msg['To'] = email
-    msg['Date'] = formatdate(localtime=True)
-    msg['Subject'] = subject
-
-    msg.attach(MIMEText("Here is the MOSS link: "+ str(url)))
-
-    smtpObj = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-    smtpObj.ehlo()
-    smtpObj.login(gmail_user, gmail_password)
-    smtpObj.sendmail("autotabugreports@gmail.com", receivers, msg.as_string())         
-    smtpObj.close()
+def all_submissions(
+     projectid: int,
+     userId: int,  # kept for signature compatibility; not used
+     submission_repository: SubmissionRepository,
+     user_repository: UserRepository,
+     project_repository: ProjectRepository,
+ ) -> Dict[str, Any]:
+     # userId is intentionally unused; we no longer email results.
+     return run_local_plagiarism(projectid, submission_repository, user_repository, project_repository)

@@ -227,10 +227,10 @@ def check_time_conflict(project_repo: ProjectRepository = Provide[Container.proj
 
     return jsonify({'conflict': bool(conflicts), 'conflicts': conflicts})
 
-@projects_api.route('/run-moss', methods=['POST'])
+@projects_api.route('/run-plagiarism', methods=['POST'])
 @jwt_required()
 @inject
-def run_moss(user_repo: UserRepository = Provide[Container.user_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+def run_plagiarism(user_repo: UserRepository = Provide[Container.user_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
     if current_user.Role != ADMIN_ROLE:
         message = {
             'message': 'Access Denied'
@@ -240,11 +240,9 @@ def run_moss(user_repo: UserRepository = Provide[Container.user_repo], submissio
     input_json = request.get_json()
     projectid = input_json['project_id']
 
-    userId=current_user.Id
-    all_submissions(projectid, userId, submission_repo, user_repo)
-    
-    return make_response("Done, the results should appear in your email within 24 hours. Please only run this call once a day. NOTE: PLEASE CHECK JUNK FOLDER ", HTTPStatus.OK)
-    
+    from src.services.dataService import run_local_plagiarism
+    result = run_local_plagiarism(projectid, submission_repo, user_repo, project_repo)
+    return make_response(result, HTTPStatus.OK)
     
 @projects_api.route('/projects-by-user', methods=['GET'])
 @jwt_required()
