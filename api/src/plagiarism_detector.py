@@ -1,74 +1,78 @@
 # src/services/plagiarism_detector.py
-from __future__ import annotations
 
 import ast
-import io
 import os
 import re
-import tokenize
-from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
+import javalang  
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-# External packages do the heavy lifting:
+# External packages:
 #  - datasketch: MinHash + LSH for fast near-duplicate detection on token shingles
-#  - scikit-learn: character n-gram TF-IDF
+#  - scikit-learn: character n-gram TF-IDF (for a recall-oriented candidate set)
 from datasketch import MinHash, MinHashLSH
 from sklearn.feature_extraction.text import TfidfVectorizer
-
 
 def detect_plagiarism(
     file_entries: List[Dict[str, Any]],
     *,
+    language: Optional[str] = None,
+    # Token channel (language-independent) parameters
     token_shingle_size: int = 5,
     minhash_perm: int = 128,
-    # LSH thresholds
-    lsh_threshold: float = 0.80,                 # lexical channel (identifiers preserved)
-    lsh_threshold_canon: float = 0.80,           # canonical channel (identifiers collapsed)
+    lsh_threshold_token: float = 0.80,
     # TF-IDF high-cosine candidate pull-in
     tfidf_candidate_threshold: float = 0.92,
     # Inclusion rule: report pair if ANY signal >= report_threshold
     report_threshold: float = 0.60,
 ) -> Dict[str, Any]:
     """
-    file_entries: list of { user_id, name, class_id, submission_id, filepath }
+    Two-signal plagiarism detector.
+
+    1) Token Similarity (language-independent, rename-sensitive):
+       - Simple regex tokenizer shared by all languages.
+       - Identifiers are kept AS-IS; literals are normalized.
+       - Shingle tokens and use MinHash LSH to generate candidates.
+
+    2) AST Similarity (language-specific, rename-robust):
+       - Python: true AST via `ast` -> node-type n-grams (IDs/consts collapsed).
+       - Java: `javalang` AST 
 
     Returns:
       {
         'pairs': [
           {
             'a': {...}, 'b': {...},
-            'similarity_token': float,  # lexical token-shingle Jaccard
-            'similarity_ast': float,    # AST node-gram Jaccard
+            'similarity_token': float,
+            'similarity_ast': float,
             'overlap_snippet_a': str,
             'overlap_snippet_b': str,
           }, ...
         ]
       }
     """
-    # Load raw code
+    # Load code (keep alignment on failures)
     docs: List[str] = []
     for e in file_entries:
         try:
             with open(e["filepath"], "r", encoding="utf-8", errors="ignore") as f:
                 docs.append(f.read())
         except Exception:
-            docs.append("")  # keep alignment even if a file is missing
+            docs.append("")
 
     n = len(file_entries)
 
+    # Resolve language preference: explicit arg > extension heuristic
+    lang = (language or "").strip().lower()
+    if not lang:
+        exts = {os.path.splitext(e.get("filepath", ""))[1].lower() for e in file_entries}
+        lang = "java" if ".java" in exts else "python"
+
     # -------------------------------
-    # Token channels
+    # TOKEN CHANNEL (language-agnostic; rename-sensitive)
     # -------------------------------
-    # Lexical tokens (identifiers preserved) -> drives "Token Sim"
-    lex_token_lists: List[List[str]] = [lex_tokens_py(src) for src in docs]
+    lex_token_lists: List[List[str]] = [simple_lex_tokens(src) for src in docs]
     lex_shingle_sets: List[Set[str]] = [set(make_shingles(toks, token_shingle_size)) for toks in lex_token_lists]
 
-    # Canonical tokens (identifiers collapsed) -> improves recall for pure-rename cases
-    canon_token_lists: List[List[str]] = [canonical_tokens_py(src) for src in docs]
-    canon_shingle_sets: List[Set[str]] = [set(make_shingles(toks, token_shingle_size)) for toks in canon_token_lists]
-
-    # -------------------------------
-    # LSH over lexical shingles
-    # -------------------------------
     minhashes_lex: List[MinHash] = []
     for sset in lex_shingle_sets:
         mh = MinHash(num_perm=minhash_perm)
@@ -76,46 +80,25 @@ def detect_plagiarism(
             mh.update(sh.encode("utf-8"))
         minhashes_lex.append(mh)
 
-    lsh_lex = MinHashLSH(threshold=lsh_threshold, num_perm=minhash_perm)
+    lsh_lex = MinHashLSH(threshold=lsh_threshold_token, num_perm=minhash_perm)
     for idx, mh in enumerate(minhashes_lex):
         lsh_lex.insert(str(idx), mh)
 
-    # -------------------------------
-    # LSH over canonical shingles
-    # -------------------------------
-    minhashes_canon: List[MinHash] = []
-    for sset in canon_shingle_sets:
-        mh = MinHash(num_perm=minhash_perm)
-        for sh in sset:
-            mh.update(sh.encode("utf-8"))
-        minhashes_canon.append(mh)
-
-    lsh_canon = MinHashLSH(threshold=lsh_threshold_canon, num_perm=minhash_perm)
-    for idx, mh in enumerate(minhashes_canon):
-        lsh_canon.insert(str(idx), mh)
-
-    # -------------------------------
-    # Candidate union: lexical-LSH ∪ canonical-LSH
-    # -------------------------------
     candidates: Set[Tuple[int, int]] = set()
     for i in range(n):
         for j_str in lsh_lex.query(minhashes_lex[i]):
             j = int(j_str)
             if j > i:
                 candidates.add((i, j))
-        for j_str in lsh_canon.query(minhashes_canon[i]):
-            j = int(j_str)
-            if j > i:
-                candidates.add((i, j))
 
     # -------------------------------
-    # TF-IDF character n-grams
+    # TF-IDF character n-grams (cross-language)
     # -------------------------------
     tfidf = TfidfVectorizer(analyzer="char", ngram_range=(4, 6), min_df=1)
     tfidf_mat = tfidf.fit_transform([normalize_for_tfidf(s) for s in docs])
-
     cos_mat = (tfidf_mat * tfidf_mat.T).toarray()
-    # Tie candidateing to inclusion: allow any pair that could pass report_threshold
+
+    # Be inclusive in candidateing: any pair that could clear report_threshold
     effective_cos_thresh = min(tfidf_candidate_threshold, report_threshold)
     for i in range(n):
         row = cos_mat[i]
@@ -124,37 +107,52 @@ def detect_plagiarism(
                 candidates.add((i, j))
 
     # -------------------------------
-    # AST node-gram sets (precompute)
+    # AST CHANNEL (language-specific; rename-robust)
     # -------------------------------
-    ast_sets: List[Set[str]] = [ast_node_ngrams(src) for src in docs]
+    if lang == "java":
+        ast_sets: List[Set[str]] = [ast_node_ngrams_java(src) for src in docs]
+    else:
+        ast_sets = [ast_node_ngrams_py(src) for src in docs]
+
+    # -------------------------------
+    # AST-BASED CANDIDATEING (rename-robust pull-in)
+    # Ensure pairs with high AST overlap are scored even if tokens differ.
+    # Use the same report_threshold so we don't inflate recall too much.
+    # -------------------------------
+    for i in range(n):
+        ai = ast_sets[i]
+        if not ai:
+            continue
+        for j in range(i + 1, n):
+            bj = ast_sets[j]
+            if not bj:
+                continue
+            if jaccard(ai, bj) >= report_threshold:
+                candidates.add((i, j))
 
     # -------------------------------
     # Score and collect results
     # -------------------------------
     results: List[Dict[str, Any]] = []
     for i, j in sorted(candidates):
-        # Signals
-        jac_lex = jaccard(lex_shingle_sets[i], lex_shingle_sets[j])  # displayed as "Token Sim"
-        ast_sim = jaccard(ast_sets[i], ast_sets[j])                  # displayed as "AST Sim"
-        cos = cos_mat[i][j]                                          # auxiliary
+        token_sim = jaccard(lex_shingle_sets[i], lex_shingle_sets[j])  # rename-sensitive
+        ast_sim = jaccard(ast_sets[i], ast_sets[j])                    # rename-robust
+        cos = cos_mat[i][j]                                            # auxiliary
 
-        # Inclusion rule: include if any signal is strong enough
-        if max(jac_lex, ast_sim, cos) < report_threshold:
+        if max(token_sim, ast_sim, cos) < report_threshold:
             continue
 
-        # Build a short overlap snippet from raw code
         snip_a, snip_b = best_overlap_snippets(docs[i], docs[j])
-
         results.append({
             "a": pick(file_entries[i], "user_id", "name", "class_id", "submission_id"),
             "b": pick(file_entries[j], "user_id", "name", "class_id", "submission_id"),
-            "similarity_token": float(jac_lex),
+            "similarity_token": float(token_sim),
             "similarity_ast": float(ast_sim),
             "overlap_snippet_a": snip_a,
             "overlap_snippet_b": snip_b,
         })
 
-    # Sort by strongest signal first, prefer higher AST when ties
+    # Sort by strongest signal; prefer higher AST on ties
     results.sort(
         key=lambda r: (
             max(r["similarity_token"], r["similarity_ast"]),
@@ -170,14 +168,17 @@ def detect_plagiarism(
 # ---------------------------
 # Helpers
 # ---------------------------
+
 def pick(d: Dict[str, Any], *keys: str) -> Dict[str, Any]:
     return {k: d.get(k) for k in keys}
 
 
 def normalize_for_tfidf(s: str) -> str:
-    # Strip comments and shrink spaces to stabilize n-grams a bit
-    s = re.sub(r"#.*", "", s)
-    s = re.sub(r'"""(?:.|\n)*?"""', '""', s)
+    # Strip common comments and compress whitespace
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)  # Java /* ... */
+    s = re.sub(r"//.*", "", s)                   # Java //
+    s = re.sub(r"#.*", "", s)                    # Python #
+    s = re.sub(r'"""(?:.|\n)*?"""', '""', s)     # Python triple-quoted
     s = re.sub(r"'''(?:.|\n)*?'''", "''", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
@@ -196,91 +197,38 @@ def jaccard(a: Set[str], b: Set[str]) -> float:
 def make_shingles(tokens: Sequence[str], k: int) -> List[str]:
     if k <= 1:
         return list(tokens)
-    return [" ".join(tokens[i:i + k]) for i in range(0, max(0, len(tokens) - k + 1))]
+    n = max(0, len(tokens) - k + 1)
+    return [" ".join(tokens[i:i + k]) for i in range(n)]
 
 
-# -------- Tokenization helpers --------
-def lex_tokens_py(src: str) -> List[str]:
+# -------- LANGUAGE-INDEPENDENT LEXICAL TOKENIZATION --------
+
+def simple_lex_tokens(src: str) -> List[str]:
     """
-    Lexical tokens with identifiers preserved (comments/whitespace dropped).
-    This makes Token Sim sensitive to variable/function renames.
+    Simple regex tokenizer shared by all languages.
+    Identifiers are kept AS-IS (rename-sensitive). Literals are normalized.
     """
-    try:
-        toks: List[str] = []
-        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
-            ttype, tstr = tok.type, tok.string
-            if ttype in (
-                tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE,
-                tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING, tokenize.ENDMARKER
-            ):
-                continue
-            if ttype == tokenize.NAME:
-                # keep keywords and identifiers as-is (keywords are still NAME here)
-                toks.append(tstr)
-                continue
-            if ttype == tokenize.NUMBER:
-                toks.append("NUMBER")
-                continue
-            if ttype == tokenize.STRING:
-                toks.append("STRING")
-                continue
-            if ttype == tokenize.OP:
-                toks.append(tstr)
-                continue
-        return toks
-    except Exception:
-        # Fallback: simple regex tokenization
-        return re.findall(r"[A-Za-z_]+|\d+|==|!=|<=|>=|[-+*/%(){}[\],.:;<>=]", src)
+    # Remove comments (keep spacing approximately)
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)  # Java block comments
+    src = re.sub(r"//.*", "", src)                   # Java single-line
+    src = re.sub(r"#.*", "", src)                    # Python single-line
+
+    # Normalize string and number literals
+    src = re.sub(r'\"(?:\\.|[^"])*\"|\'(?:\\.|[^\'])*\'', "STRING", src)
+    src = re.sub(r"\b\d+(?:\.\d+)?\b", "NUMBER", src)
+
+    # Split into identifiers/operators/punctuation
+    pattern = r"[A-Za-z_][A-Za-z_0-9]*|==|!=|<=|>=|&&|\|\||[-+*/%(){}\[\],.;:<>]"
+    return re.findall(pattern, src)
 
 
-# -------- Canonicalization (robust to renames) --------
-def canonical_tokens_py(src: str) -> List[str]:
+# -------- PYTHON AST N-GRAMS (rename-robust) --------
+
+def ast_node_ngrams_py(src: str, n: int = 3) -> Set[str]:
     """
-    Produce a structural token stream:
-      - Variable/function names -> generic markers (ID/FUNC)
-      - Constants -> CONST
-      - Node type names to capture structure
+    Python AST -> sequence of node type names (IDs/consts collapsed),
+    then n-gram shingles. Robust to identifier renaming.
     """
-    try:
-        tree = ast.parse(src)
-    except Exception:
-        # Fallback: crude tokenization on words if parsing fails
-        return re.findall(r"[A-Za-z_]+|\d+|==|!=|<=|>=|[-+*/%(){}[\],.:;<>=]", src)
-
-    tokens: List[str] = []
-
-    class Tok(ast.NodeVisitor):
-        def visit_Name(self, node: ast.Name):
-            tokens.append("ID")
-
-        def visit_Attribute(self, node: ast.Attribute):
-            tokens.append("ATTR")
-            self.generic_visit(node)
-
-        def visit_arg(self, node: ast.arg):
-            tokens.append("ARG")
-
-        def visit_Constant(self, node: ast.Constant):
-            tokens.append("CONST")
-
-        def visit_FunctionDef(self, node: ast.FunctionDef):
-            tokens.append("FUNC")
-            self.generic_visit(node)
-
-        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-            tokens.append("FUNC")
-            self.generic_visit(node)
-
-        def generic_visit(self, node: ast.AST):
-            tokens.append(type(node).__name__)
-            super().generic_visit(node)
-
-    Tok().visit(tree)
-    return tokens
-
-
-def ast_node_ngrams(src: str, n: int = 3) -> Set[str]:
-    """Set of n-grams over AST node type names (IDs/consts collapsed)."""
     try:
         tree = ast.parse(src)
     except Exception:
@@ -289,24 +237,40 @@ def ast_node_ngrams(src: str, n: int = 3) -> Set[str]:
     seq: List[str] = []
 
     class V(ast.NodeVisitor):
-        def visit_Name(self, node: ast.Name):
+        def visit_Name(self, node: ast.Name) -> None:
             seq.append("ID")
 
-        def visit_Constant(self, node: ast.Constant):
+        def visit_Attribute(self, node: ast.Attribute) -> None:
+            seq.append("ATTR")
+            self.generic_visit(node)
+
+        def visit_arg(self, node: ast.arg) -> None:
+            seq.append("ARG")
+
+        def visit_Constant(self, node: ast.Constant) -> None:
             seq.append("CONST")
 
-        def visit_FunctionDef(self, node: ast.FunctionDef):
-            # Keep robustness but add a tiny signal of function-name length
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
             seq.append("FUNC")
-            seq.append(f"FN_LEN_{min(8, len(getattr(node, 'name', '')))}")
+            # tiny structural hints
+            seq.append(f"FN_LEN_{min(8, len(getattr(node, 'name', '') or ''))}")
+            arity = len(getattr(node, "args", None).args) if getattr(node, "args", None) else 0
+            seq.append(f"ARGS_{min(8, arity)}")
             self.generic_visit(node)
 
-        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
             seq.append("FUNC")
-            seq.append(f"FN_LEN_{min(8, len(getattr(node, 'name', '')))}")
+            seq.append(f"FN_LEN_{min(8, len(getattr(node, 'name', '') or ''))}")
+            arity = len(getattr(node, "args", None).args) if getattr(node, "args", None) else 0
+            seq.append(f"ARGS_{min(8, arity)}")
             self.generic_visit(node)
 
-        def generic_visit(self, node: ast.AST):
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            seq.append("CLASS")
+            seq.append(f"CN_LEN_{min(8, len(getattr(node, 'name', '') or ''))}")
+            self.generic_visit(node)
+
+        def generic_visit(self, node: ast.AST) -> None:
             seq.append(type(node).__name__)
             super().generic_visit(node)
 
@@ -314,29 +278,65 @@ def ast_node_ngrams(src: str, n: int = 3) -> Set[str]:
     return set(make_shingles(seq, n))
 
 
+# -------- JAVA AST N-GRAMS --------
+
+def ast_node_ngrams_java(src: str, n: int = 3) -> Set[str]:
+    """
+    Java AST -> node-type sequence via `javalang`.
+    """
+
+    seq: List[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, javalang.tree.Node):
+            tname = type(node).__name__
+            seq.append(tname)
+            # add hints for methods
+            if isinstance(node, javalang.tree.MethodDeclaration):
+                name = getattr(node, "name", "") or ""
+                params = getattr(node, "parameters", []) or []
+                seq.append(f"FN_LEN_{min(8, len(name))}")
+                seq.append(f"ARGS_{min(8, len(params))}")
+            for attr in node.attrs:
+                val = getattr(node, attr, None)
+                if isinstance(val, list):
+                    for v in val:
+                        walk(v)
+                else:
+                    walk(val)
+        # primitives/None ignored
+
+    # Parse Java source to a CompilationUnit; fail closed if it doesn't parse
+    try:
+        tree = javalang.parse.parse(src)
+    except Exception:
+        return set()
+    walk(tree)
+    return set(make_shingles(seq, n))
+
+# -------- Overlap snippet (teacher convenience) --------
+
 def best_overlap_snippets(a: str, b: str, context_lines: int = 5) -> Tuple[str, str]:
     """
-    Cheap heuristic: find the longest common substring window after whitespace
-    compression and return a few raw lines around it from each side.
+    Heuristic: find the longest contiguous window of identical lines after
+    whitespace compression; return a few raw lines around it from each side.
     """
     a_lines = a.splitlines()
     b_lines = b.splitlines()
-    a_comp = [re.sub(r"\s+", " ", ln).strip() for ln in a_lines]
-    b_comp = [re.sub(r"\s+", " ", ln).strip() for ln in b_lines]
+    a_norm = [re.sub(r"\s+", " ", ln).strip() for ln in a_lines]
+    b_norm = [re.sub(r"\s+", " ", ln).strip() for ln in b_lines]
 
     best = (0, 0, 0)  # length, ai, bi
-    # Brute force but bounded (typical classroom sizes are fine)
-    for ai, al in enumerate(a_comp):
+    for ai, al in enumerate(a_norm):
         if not al:
             continue
-        for bi, bl in enumerate(b_comp):
+        for bi, bl in enumerate(b_norm):
             if al and al == bl:
-                # expand downward while equal
                 k = 0
                 while (
-                    ai + k < len(a_comp)
-                    and bi + k < len(b_comp)
-                    and a_comp[ai + k] == b_comp[bi + k]
+                    ai + k < len(a_norm)
+                    and bi + k < len(b_norm)
+                    and a_norm[ai + k] == b_norm[bi + k]
                 ):
                     k += 1
                 if k > best[0]:

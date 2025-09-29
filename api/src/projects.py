@@ -240,8 +240,13 @@ def run_plagiarism(user_repo: UserRepository = Provide[Container.user_repo], sub
     input_json = request.get_json()
     projectid = input_json['project_id']
 
+    # Fetch language from projects DB and pass it through
+    proj = project_repo.get_selected_project(projectid)
+    language = getattr(proj, "Language", "") if proj else ""
+
     from src.services.dataService import run_local_plagiarism
-    result = run_local_plagiarism(projectid, submission_repo, user_repo, project_repo)
+    result = run_local_plagiarism(projectid, submission_repo, user_repo, project_repo, language=language)
+
     return make_response(result, HTTPStatus.OK)
     
 @projects_api.route('/projects-by-user', methods=['GET'])
