@@ -66,6 +66,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const API = import.meta.env.VITE_API_URL;
     const authHeader = { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` };
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i;
+    const VALID_LEVELS = new Set(['Level 1', 'Level 2', 'Level 3']);
 
     async function openLocalPreview(file: File) {
         if (!SUPPORTED_RE.test(file.name)) { window.alert("Preview supports .py .c .h .java .rkt .scm (.cpp optional)"); return; }
@@ -153,7 +154,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                 testcase.output = "";
                 testcase.isHidden = false;
                 testcase.additionalfilepath = "None";
-                testcase.levelname = "UNKNOWN";
+                testcase.levelname = "";
 
 
                 rows.push(testcase);
@@ -312,7 +313,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                 testcase.input = "";
                 testcase.output = "";
                 testcase.isHidden = false;
-                testcase.levelname = "UNKNOWN";
+                testcase.levelname = "";
                 testcase.additionalfilepath = "None";
 
                 rows.push(testcase);
@@ -485,7 +486,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             t.output = "";
             t.isHidden = false;
             t.additionalfilepath = "None";
-            t.levelname = "UNKNOWN";
+            t.levelname = "";
             setModalDraft(t);
         } else {
             const source = testcases.find(tc => tc.id === TestCaseId);
@@ -614,6 +615,12 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             window.alert("Please fill out all fields");
             return;
         }
+        
+        if (!VALID_LEVELS.has(modalDraft.levelname)) {
+            window.alert("Please select a level (Level 1, Level 2, or Level 3).");
+            return;
+        }
+
         try {
             if (modalDraft.id === -1) setSubmittingTestcase(true);
             await axios.post(import.meta.env.VITE_API_URL + `/projects/add_or_update_testcase`, formData, {

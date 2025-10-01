@@ -743,7 +743,18 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
          return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
     else:
 
+        # Validate level names against project's defined levels
+        try:
+            levels = project_repo.get_levels_by_project(int(project_id))
+            allowed_levels = {getattr(l, "Name", "") for l in levels}
+        except Exception:
+            allowed_levels = set()
+
         for testcase in json_obj:
+            lvl = str(testcase.get("levelname", "")).strip()
+            if not lvl or lvl not in allowed_levels:
+                return make_response({'message': f'Invalid or missing level name: "{lvl}"'}, HTTPStatus.BAD_REQUEST)
+            
             project_repo.add_or_update_testcase(
                 int(project_id),
                 -1,
@@ -793,7 +804,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     else:
         additionalFile = None
     
-    if id_val == '' or name == '' or input_data == '' or project_id == '' or isHidden == '' or description == '' or class_id == '':
+    if id_val == '' or name == '' or input_data == '' or project_id == '' or isHidden == '' or description == '' or class_id == '' or level_name == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
 
     # Coerce types with validation
@@ -805,6 +816,15 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         return make_response("Invalid numeric id", HTTPStatus.BAD_REQUEST)
 
     isHidden = True if isHidden.lower() == "true" else False  
+
+    # Enforce level validity against project levels
+    try:
+        levels = project_repo.get_levels_by_project(project_id)
+        allowed_levels = {getattr(l, "Name", "") for l in levels}
+    except Exception:
+        allowed_levels = set()
+    if not level_name or level_name not in allowed_levels:
+        return make_response("Invalid level name", HTTPStatus.BAD_REQUEST)
 
     # Auto-recompute expected output when editing a testcase.
     # If the project's language is Python, run the saved solution with the new input
