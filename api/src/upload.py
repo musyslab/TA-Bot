@@ -329,6 +329,22 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
             'message': 'No selected file'
         }
         return make_response(message, HTTPStatus.BAD_REQUEST)
+
+    # Enforce language/file-type compatibility to avoid, e.g., compiling .py as Java
+    orig_ext = os.path.splitext(file.filename)[1].lower()
+    proj_lang = (project.Language or "").strip().lower()
+    if proj_lang == "java":
+        if not (orig_ext == ".java" or file.filename.lower().endswith(".zip")):
+            message = {
+                'message': 'Selected project expects Java: upload a .java file.'
+            }
+            return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+    elif proj_lang == "python":
+        if orig_ext != ".py":
+            message = {
+                'message': 'Selected project expects Python: upload a .py file.'
+            }
+            return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
     filedata=file.read()
     classname = class_repo.get_class_name_withId(class_id)
     

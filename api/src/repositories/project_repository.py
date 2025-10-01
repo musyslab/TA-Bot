@@ -255,10 +255,9 @@ class ProjectRepository():
         testcase_holder={}
         testcase = Testcases.query.filter(Testcases.ProjectId == project_id)
         for test in testcase:
-            level  =  Levels.query.filter(Levels.Id == test.LevelId)
-            print(level, flush=True)
-            level_name=level[0].Name
-            testcase_holder[test.Id] = [test.Name,level_name,test.Description, test.input, test.Output, test.IsHidden, test.additionalfilepath]
+            level = Levels.query.filter(Levels.Id == test.LevelId).first()
+            level_name = level.Name if level else ""
+            testcase_holder[test.Id] = [test.Name, level_name, test.Description, test.input, test.Output, test.IsHidden, test.additionalfilepath]
         json_object = json.dumps(testcase_holder)
         print(json_object,flush=True) 
         return json_object
