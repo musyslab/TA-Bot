@@ -1,6 +1,12 @@
 import React, { Component } from 'react'
 import 'semantic-ui-css/semantic.min.css'
-import mscsimg from '../MUCS-tag.png'
+
+//Uncomment for Marquette
+import img from '../MUCS-tag.png'
+
+//Uncomment for Carroll
+//import img from '../Pioneer.png'
+
 import axios from 'axios'
 import ErrorMessage from '../components/ErrorMessage'
 import NewUserModal from '../components/NewUserModal'
@@ -88,7 +94,7 @@ class Login extends Component<{}, LoginPageState> {
     return (
       <div>
         <Helmet>
-          <title>Login | TA-Bot</title>
+          <title>TA-Bot</title>
         </Helmet>
         <NewUserModal
           username={this.state.username}
@@ -97,7 +103,13 @@ class Login extends Component<{}, LoginPageState> {
         />
         <Grid textAlign="center" verticalAlign="middle" style={{ height: '100vh' }}>
           <Grid.Column style={{ maxWidth: 450 }}>
+
+            {/* Uncomment for Marquette */}
             <Header as="h2">Login to your MSCSNet account</Header>
+
+            {/* Uncomment for Carroll */}
+            {/* <Header as="h2">Login to your Pioneer account</Header> */}
+
             <Form onSubmit={this.handleSubmit}>
               <Segment>
                 <Form.Input
@@ -134,7 +146,7 @@ class Login extends Component<{}, LoginPageState> {
               .
             </Message>
             <div>
-              <Image src={mscsimg} />
+              <Image src={img} />
             </div>
           </Grid.Column>
         </Grid>

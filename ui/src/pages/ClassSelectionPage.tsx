@@ -9,7 +9,7 @@ class ClassSelectionPage extends Component {
         return (
             <div id="code-page">
                 <Helmet>
-                    <title>Select A Class | TA-Bot</title>
+                    <title>TA-Bot</title>
                 </Helmet>
                 <MenuComponent
                     showUpload={true}

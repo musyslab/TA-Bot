@@ -20,6 +20,7 @@ import CreateAccountPage from './pages/AccountCreationPage';
 import TaLanding from './AdminPages/TaLanding';
 import OfficeHoursPage from './pages/OfficeHoursPage';
 import ProjectAnalytics from './AdminPages/ProjectAnalitics';
+import PlagiarismCompare from "./pages/PlagiarismCompare";
 
 class App extends Component {
 
@@ -105,6 +106,11 @@ class App extends Component {
                     <Route path="/user/createAccount" element={
                         <ProtectedRoute>
                             <CreateAccountPage />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/plagiarism/compare" element={
+                        <ProtectedRoute>
+                            <PlagiarismCompare />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/AdminAnalytics/:id" element={

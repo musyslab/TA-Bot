@@ -40,7 +40,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [CreateNewState, setCreateNewState] = useState<boolean>();
     const [testcases, setTestcases] = useState<Array<Testcase>>([]);
     const [ProjectName, setProjectName] = useState<string>("");
-    const [ProjectLanguage, setProjectLanguage] = useState<string>("");
+    const [ProjectLanguage, setProjectLanguage] = useState<string>("java");
     const [SubmitButton, setSubmitButton] = useState<string>("Create new assignment");
     const [SubmitJSON, setSubmitJSON] = useState<string>("Submit JSON file");
     const [getJSON, setGetJSON] = useState<string>("Export test cases");

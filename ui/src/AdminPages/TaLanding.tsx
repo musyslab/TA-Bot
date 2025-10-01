@@ -9,7 +9,7 @@ class TaLanding extends Component<{}, {}> {
         return (
             <div>
                 <Helmet>
-                    <title>[Admin] Projects | TA-Bot</title>
+                    <title>[Admin] TA-Bot</title>
                 </Helmet>
                 <MenuComponent
                     showUpload={false}

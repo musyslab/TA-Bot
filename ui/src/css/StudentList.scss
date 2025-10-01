@@ -147,6 +147,26 @@
              margin-left: 0.4rem;
          }
 
+         .plagiarism-btn {
+             margin-left: 12px;
+             min-height: 36px;
+             padding: 0.45rem 0.75rem;
+             border-radius: 10px;
+             background: #6b7280;
+             /* gray-500 */
+             border-color: #6b7280;
+             color: #ffffff;
+             font-weight: 700;
+             line-height: 1;
+             white-space: nowrap;
+
+             &:hover {
+                 background: #4b5563;
+                 /* gray-600 */
+                 border-color: #4b5563;
+             }
+
+         }
      }
 
      .actions-bar {
@@ -167,6 +187,12 @@
          box-sizing: border-box;
      }
 
+     .table-scroll {
+         width: 100%;
+         overflow-x: auto;
+         -webkit-overflow-scrolling: touch;
+     }
+
      .students-table {
          width: 100%;
          border-collapse: collapse;
@@ -174,6 +200,12 @@
          border: 1px solid #d1d5db;
          border-radius: 12px;
          overflow: hidden;
+
+         /* Keep the grade column from ballooning */
+         .table-head th.col-grade,
+         .table-body td.grade-cell {
+             width: clamp(125px, 14vw, 200px);
+         }
 
          .table-head {
              background: #e5e7eb;
@@ -184,43 +216,6 @@
                  color: #111827;
                  font-size: 0.95rem;
                  border: 1px solid #d1d5db;
-                 white-space: nowrap;
-
-                 &.col-student-name {
-                     width: 20%;
-                 }
-
-                 &.col-lecture-number {
-                     width: 8%;
-                 }
-
-                 &.col-lab-number {
-                     width: 8%;
-                 }
-
-                 &.col-submissions {
-                     width: 10%;
-                 }
-
-                 &.col-date {
-                     width: 15%;
-                 }
-
-                 &.col-pylint-errors {
-                     width: 12%;
-                 }
-
-                 &.col-status {
-                     width: 10%;
-                 }
-
-                 &.col-view {
-                     width: 8%;
-                 }
-
-                 &.col-grade {
-                     width: 10%;
-                 }
              }
          }
 
@@ -329,13 +324,17 @@
                          }
                      }
 
+                     /* / .student-sub-panel .students-table .table-body tr.student-row td */
                      &.grade-cell {
                          display: flex;
                          gap: 0.5rem;
                          align-items: center;
 
+                         /* INPUT + BUTTON SPLIT THE ROW */
                          .grade-input {
-                             width: 90px;
+                             /* removed: width: 65px; */
+                             flex: 1 1 0%;
+                             min-width: 0;
                              padding: 0.45rem 0.6rem;
                              border-radius: 8px;
                              border: 1px solid #d1d5db;
@@ -351,6 +350,12 @@
                              &::placeholder {
                                  color: #6b7280;
                              }
+                         }
+
+                         .grade-btn {
+                             flex: 1 1 0%;
+                             min-width: 0;
+                             /* inherits .btn styles defined above */
                          }
                      }
                  }
@@ -371,11 +376,6 @@
      filter: blur(4px);
      pointer-events: none;
      user-select: none;
- }
-
- /* lock background/page scroll whenever the grading modal exists */
- body:has(.testcase-modal) {
-     overflow: hidden;
  }
 
  .modal-overlay {
@@ -587,4 +587,55 @@
              }
          }
      }
+ }
+
+ /* Ensure the table fits on screens 1050px wide or less (width-only changes) */
+ @media (max-width: 1050px) {
+     .student-sub-panel {
+         width: 97vw;
+         margin-left: 1vw;
+         margin-right: 1vw;
+     }
+ }
+
+ /* Plagiarism table similarity buckets */
+ /* Evenly ramp from yellow (low) -> red (critical) */
+ .results-table td.status-cell {
+     font-weight: 700;
+ }
+
+ /* 0–40%  (low) — yellow */
+ .results-table td.status-cell.sim-low {
+     color: #713f12;
+     background: rgba(250, 204, 21, 0.18);
+     border-left: 3px solid #eab308;
+ }
+
+ /* 40–60% (medium-low) — amber/orange */
+ .results-table td.status-cell.sim-medlow {
+     color: #7c2d12;
+     background: rgba(245, 158, 11, 0.18);
+     border-left: 3px solid #f59e0b;
+ }
+
+ /* 60–75% (medium) — orange */
+ .results-table td.status-cell.sim-medium {
+     color: #7c2d12;
+     background: rgba(249, 115, 22, 0.18);
+     border-left: 3px solid #f97316;
+ }
+
+ /* 75–90% (high) — orange-red */
+ .results-table td.status-cell.sim-high {
+     color: #7f1d1d;
+     background: rgba(239, 68, 68, 0.16);
+     border-left: 3px solid #ef4444;
+ }
+
+ /* 90–100% (critical) — red */
+ .results-table td.status-cell.sim-critical {
+     color: #7f1d1d;
+     background: rgba(185, 28, 28, 0.18);
+     border-left: 3px solid #b91c1c;
+     box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.12);
  }

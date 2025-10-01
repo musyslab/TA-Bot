@@ -13,7 +13,7 @@ class AdminProject extends Component<{}, {}> {
             <div>
                 <div>hi</div>
                 <Helmet>
-                    <title>[Admin] Projects | TA-Bot</title>
+                    <title>[Admin] TA-Bot</title>
                 </Helmet>
                 <MenuComponent
                     showUpload={false}

@@ -16,7 +16,7 @@ const AdminProjectConfig = () => {
     return (
         <div style={{ height: "100%" }}>
             <Helmet>
-                <title>[Admin] Projects | TA-Bot</title>
+                <title>[Admin] TA-Bot</title>
             </Helmet>
             <MenuComponent
                 showUpload={false}

@@ -363,7 +363,7 @@ class AdminAnalyticsComponent extends Component<AdminAnalyticsProps, AdminAnalyt
     return (
       <div className="analytics-container">
         <Helmet>
-          <title>Analytics | TA-Bot</title>
+          <title>TA-Bot</title>
         </Helmet>
         <br />
         <Grid divided='vertically'>

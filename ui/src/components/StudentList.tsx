@@ -73,6 +73,16 @@ interface StudentListState {
     activeView: 'table' | 'diff';
     selectedDiffId: string | null;
     sortBy: 'lastname' | 'lastsubmitted';
+
+    plagiarismModalIsOpen: boolean;
+    plagiarismResults: Array<{
+        a: { user_id: number; name: string; class_id: string; submission_id: number; };
+        b: { user_id: number; name: string; class_id: string; submission_id: number; };
+        similarity_token: number;
+        similarity_ast: number;
+        overlap_snippet_a?: string;
+        overlap_snippet_b?: string;
+    }>;
 }
 
 class StudentList extends Component<StudentListProps, StudentListState> {
@@ -100,6 +110,8 @@ class StudentList extends Component<StudentListProps, StudentListState> {
             activeView: 'table',
             selectedDiffId: null,
             sortBy: 'lastname',
+            plagiarismModalIsOpen: false,
+            plagiarismResults: [],
         };
 
         this.handleClick = this.handleClick.bind(this);
@@ -211,11 +223,12 @@ class StudentList extends Component<StudentListProps, StudentListState> {
     }
 
     // Run MOSS
-    handleClick() {
+    handleClick = () => {
+        // Now runs the LOCAL detector and shows results in a modal
         this.setState({ isLoading: true });
         axios
             .post(
-                import.meta.env.VITE_API_URL + `/projects/run-moss`,
+                import.meta.env.VITE_API_URL + `/projects/run-plagiarism`,
                 { project_id: this.props.project_id },
                 {
                     headers: {
@@ -224,11 +237,16 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                 }
             )
             .then((res) => {
-                window.alert(res.data);
-                this.setState({ isLoading: false });
+                const data = res.data || {};
+                const pairs = Array.isArray(data.pairs) ? data.pairs : [];
+                this.setState({
+                    plagiarismResults: pairs,
+                    plagiarismModalIsOpen: true,
+                    isLoading: false,
+                });
             })
-            .catch((exc) => {
-                window.alert('Error running MOSS.  Please try again');
+            .catch((_exc) => {
+                window.alert('Error running plagiarism detector. Please try again.');
                 this.setState({ isLoading: false });
             });
     }
@@ -669,6 +687,18 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                 ))}
                             </select>
                             &nbsp;&nbsp;
+                            <button
+                                type="button"
+                                className="btn plagiarism-btn"
+                                onClick={this.handleClick}
+                                disabled={this.state.isLoading}
+                                aria-label="Run Plagiarism Detector"
+                                title="Run Plagiarism Detector"
+                            >
+                                <Icon name="clone" />
+                                &nbsp;Run Plagiarism Detector
+                            </button>
+                            &nbsp;&nbsp;
                             <label className="filter-label" htmlFor="sortSelect">Sort by:&nbsp;</label>
                             <select
                                 id="sortSelect"
@@ -693,31 +723,73 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                         */}
 
                         {/* Table */}
-                        <table className="students-table">
-                            <thead className="table-head">
-                                <tr className="table-row">
-                                    <th className="col-student-name">Student</th>
-                                    <th className="col-lecture-number">Lecture</th>
-                                    <th className="col-lab-number">Lab</th>
-                                    <th className="col-submissions">Submissions</th>
-                                    <th className="col-date">Last Submitted</th>
-                                    <th className="col-pylint-errors">Pylint Errors</th>
-                                    <th className="col-status">Status</th>
-                                    <th className="col-view">View</th>
-                                    <th className="col-download">Download</th>
-                                    <th className="col-grade">Grade</th>
-                                </tr>
-                            </thead>
-                            <tbody className="table-body">
-                                {rowsForView.map((row) => {
-                                    if (row.hidden) return null;
+                        <div className="table-scroll" role="region" aria-label="Student submissions" tabIndex={0}>
+                            <table className="students-table">
+                                <thead className="table-head">
+                                    <tr className="table-row">
+                                        <th className="col-student-name">Student</th>
+                                        <th className="col-lecture-number">Lecture</th>
+                                        <th className="col-lab-number">Lab</th>
+                                        <th className="col-submissions">Submissions</th>
+                                        <th className="col-date">Last Submitted</th>
+                                        <th className="col-pylint-errors">Pylint Errors</th>
+                                        <th className="col-status">Status</th>
+                                        <th className="col-view">View</th>
+                                        <th className="col-download">Download</th>
+                                        <th className="col-grade">Grade</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="table-body">
+                                    {rowsForView.map((row) => {
+                                        if (row.hidden) return null;
 
-                                    if (row.subid === -1) {
+                                        if (row.subid === -1) {
+                                            return (
+                                                <tr
+                                                    className="student-row student-row--no-submission"
+                                                    key={`row-${row.id}-na`}
+                                                >
+                                                    <td className="student-name-cell">
+                                                        {row.Fname + ' ' + row.Lname}{' '}
+                                                        {row.IsLocked === true && (
+                                                            <button
+                                                                className="btn unlock-btn"
+                                                                onClick={() => this.handleUnlockClick(row.id)}
+                                                            >
+                                                                Unlock
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                    <td className="lecture-number-cell">{row.lecture_number}</td>
+                                                    <td className="lab-number-cell">{row.lab_number}</td>
+                                                    <td className="submissions-cell">N/A</td>
+                                                    <td className="date-cell">N/A</td>
+                                                    <td className="pylint-errors-cell">N/A</td>
+                                                    <td className="status-cell">N/A</td>
+                                                    <td className="view-cell">N/A</td>
+                                                    <td className="download-cell">N/A</td>
+                                                    <td className="grade-cell">
+                                                        <input
+                                                            className="grade-input"
+                                                            type="text"
+                                                            placeholder="optional"
+                                                            value={row.grade}
+                                                            onChange={(e) => this.handleGradeChange(e, row)}
+                                                            disabled
+                                                        />
+                                                        <button
+                                                            className="btn grade-btn"
+                                                            onClick={() => this.openGradingModule(row.id)}
+                                                        >
+                                                            Grade
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        }
+
                                         return (
-                                            <tr
-                                                className="student-row student-row--no-submission"
-                                                key={`row-${row.id}-na`}
-                                            >
+                                            <tr className="student-row" key={`row-${row.id}`}>
                                                 <td className="student-name-cell">
                                                     {row.Fname + ' ' + row.Lname}{' '}
                                                     {row.IsLocked === true && (
@@ -731,12 +803,36 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                 </td>
                                                 <td className="lecture-number-cell">{row.lecture_number}</td>
                                                 <td className="lab-number-cell">{row.lab_number}</td>
-                                                <td className="submissions-cell">N/A</td>
-                                                <td className="date-cell">N/A</td>
-                                                <td className="pylint-errors-cell">N/A</td>
-                                                <td className="status-cell">N/A</td>
-                                                <td className="view-cell">N/A</td>
-                                                <td className="download-cell">N/A</td>
+                                                <td className="submissions-cell">{row.numberOfSubmissions}</td>
+                                                <td className="date-cell">{row.date}</td>
+                                                <td className="pylint-errors-cell">{row.numberOfPylintErrors}</td>
+                                                <td
+                                                    className={
+                                                        row.isPassing ? 'status-cell status passed' : 'status-cell status failed'
+                                                    }
+                                                >
+                                                    {row.isPassing ? 'PASSED' : 'FAILED'}
+                                                </td>
+                                                <td className="view-cell">
+                                                    <Link
+                                                        className="view-link"
+                                                        to={`/class/${row.classId}/code/${row.subid}`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                    >
+                                                        <Icon name="eye" aria-label="View" /> View
+                                                    </Link>
+                                                </td>
+                                                <td className="download-cell">
+                                                    <button
+                                                        className="btn download-btn"
+                                                        onClick={() => this.downloadStudentCode(row)}
+                                                        aria-label="Download code"
+                                                        title="Download code"
+                                                    >
+                                                        <Icon name="download" />
+                                                    </button>
+                                                </td>
                                                 <td className="grade-cell">
                                                     <input
                                                         className="grade-input"
@@ -755,76 +851,96 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                 </td>
                                             </tr>
                                         );
-                                    }
-
-                                    return (
-                                        <tr className="student-row" key={`row-${row.id}`}>
-                                            <td className="student-name-cell">
-                                                {row.Fname + ' ' + row.Lname}{' '}
-                                                {row.IsLocked === true && (
-                                                    <button
-                                                        className="btn unlock-btn"
-                                                        onClick={() => this.handleUnlockClick(row.id)}
-                                                    >
-                                                        Unlock
-                                                    </button>
-                                                )}
-                                            </td>
-                                            <td className="lecture-number-cell">{row.lecture_number}</td>
-                                            <td className="lab-number-cell">{row.lab_number}</td>
-                                            <td className="submissions-cell">{row.numberOfSubmissions}</td>
-                                            <td className="date-cell">{row.date}</td>
-                                            <td className="pylint-errors-cell">{row.numberOfPylintErrors}</td>
-                                            <td
-                                                className={
-                                                    row.isPassing ? 'status-cell status passed' : 'status-cell status failed'
-                                                }
-                                            >
-                                                {row.isPassing ? 'PASSED' : 'FAILED'}
-                                            </td>
-                                            <td className="view-cell">
-                                                <Link
-                                                    className="view-link"
-                                                    to={`/class/${row.classId}/code/${row.subid}`}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                >
-                                                    <Icon name="eye" aria-label="View" /> View
-                                                </Link>
-                                            </td>
-                                            <td className="download-cell">
-                                                <button
-                                                    className="btn download-btn"
-                                                    onClick={() => this.downloadStudentCode(row)}
-                                                    aria-label="Download code"
-                                                    title="Download code"
-                                                >
-                                                    <Icon name="download" />
-                                                </button>
-                                            </td>
-                                            <td className="grade-cell">
-                                                <input
-                                                    className="grade-input"
-                                                    type="text"
-                                                    placeholder="optional"
-                                                    value={row.grade}
-                                                    onChange={(e) => this.handleGradeChange(e, row)}
-                                                    disabled
-                                                />
-                                                <button
-                                                    className="btn grade-btn"
-                                                    onClick={() => this.openGradingModule(row.id)}
-                                                >
-                                                    Grade
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div >
+
+                {/* NEW: Plagiarism results modal */}
+                {this.state.plagiarismModalIsOpen && (
+                    <>
+                        <div
+                            className="modal-overlay"
+                            onClick={() => this.setState({ plagiarismModalIsOpen: false })}
+                            aria-hidden="true"
+                        />
+                        <div
+                            className="testcase-modal"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="plagiarism-modal-title"
+                        >
+                            <button
+                                type="button"
+                                className="modal-close-button"
+                                aria-label="Close"
+                                onClick={() => this.setState({ plagiarismModalIsOpen: false })}
+                            >
+                                ✕
+                            </button>
+                            <div className="modal-body">
+                                <div className="modal-header">
+                                    <div className="modal-title" id="plagiarism-modal-title">
+                                        Potentially Similar Submissions
+                                    </div>
+                                </div>
+                                <div className="tab-content">
+                                    <section className="tests-section">
+                                        <table className="results-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Student A</th>
+                                                    <th>Student B</th>
+                                                    <th>Token Sim.</th>
+                                                    <th>AST Sim.</th>
+                                                    <th>Open</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {this.state.plagiarismResults.length === 0 && (
+                                                    <tr><td className="no-data-message" colSpan={5}>No similar pairs found (above threshold).</td></tr>
+                                                )}
+                                                {this.state.plagiarismResults.map((p, i) => {
+                                                    const pct = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%';
+                                                    const bucketClass = (v: number) => {
+                                                        const p = v * 100;
+                                                        if (p < 40) return 'status-cell sim-low';
+                                                        if (p < 60) return 'status-cell sim-medlow';
+                                                        if (p < 75) return 'status-cell sim-medium';
+                                                        if (p < 90) return 'status-cell sim-high';
+                                                        return 'status-cell sim-critical';
+                                                    };
+                                                    return (
+                                                        <tr key={`plag-${i}`}>
+                                                            <td>{p.a.name}</td>
+                                                            <td>{p.b.name}</td>
+                                                            <td className={bucketClass(p.similarity_token)}>{pct(p.similarity_token)}</td>
+                                                            <td className={bucketClass(p.similarity_ast)}>{pct(p.similarity_ast)}</td>
+                                                            <td>
+                                                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                                <Link
+                                                                    className="view-link"
+                                                                    to={`/plagiarism/compare?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(p.a.name)}&bn=${encodeURIComponent(p.b.name)}`}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                >
+                                                                    <Icon name="eye" /> View
+                                                                </Link>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </section>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
 
                 {/* Real modal & overlay, rendered at the root so it floats above and locks body via :has() */}
                 {
@@ -1033,7 +1149,7 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                     selectedStudentGrade: v === '' ? undefined : Number(v),
                                                 });
                                             }}
-                                            onWheel={(e) => e.currentTarget.blur()} // 👈 stop mouse wheel from changing value
+                                            onWheel={(e) => e.currentTarget.blur()} // stop mouse wheel from changing value
                                         />
 
                                         <button

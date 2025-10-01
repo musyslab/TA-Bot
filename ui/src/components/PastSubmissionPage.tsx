@@ -64,7 +64,7 @@ class PastSubmissionPage extends Component<{}, ProjectsState> {
         return (
             <div className="past-submissions">
                 <Helmet>
-                    <title>Past Submissions | TA-Bot</title>
+                    <title>TA-Bot</title>
                 </Helmet>
 
                 <MenuComponent
