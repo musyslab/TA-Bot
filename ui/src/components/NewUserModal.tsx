@@ -8,7 +8,10 @@ import ErrorMessage from './ErrorMessage'
 interface NewUserModalProps {
     username: string,
     password: string,
-    isOpen: boolean
+    isOpen: boolean,
+    samlEmail?: string,
+    samlFirstName?: string,
+    samlLastName?: string
 }
 
 interface IdNamePair {
@@ -42,7 +45,8 @@ interface NewUserModalState {
     error_msg: string,
     classOptions: Array<DropDownOption>,
     labOptions: Array<DropDownOption>,
-    lectureOptions: Array<DropDownOption>
+    lectureOptions: Array<DropDownOption>,
+    isSAMLUser: boolean
 }
 
 class NewUserModal extends Component<NewUserModalProps, NewUserModalState> {
@@ -59,11 +63,14 @@ class NewUserModal extends Component<NewUserModalProps, NewUserModalState> {
         this.handleLectureIdChange = this.handleLectureIdChange.bind(this);
         this.handleClick = this.handleClick.bind(this);
 
+        // Check if this is a SAML user by checking if SAML data exists
+        const isSAMLUser = !!(props.samlEmail || props.samlFirstName || props.samlLastName);
+
         this.state = {
-            FirstName: "",
-            LastName: "",
+            FirstName: props.samlFirstName || "",
+            LastName: props.samlLastName || "",
             StudentNumber: "",
-            Email: "",
+            Email: props.samlEmail || "",
             ClassId: -1,
             LabId: -1,
             LectureId: -1,
@@ -72,7 +79,8 @@ class NewUserModal extends Component<NewUserModalProps, NewUserModalState> {
             error_msg: "",
             classOptions: [],
             labOptions: [],
-            lectureOptions: []
+            lectureOptions: [],
+            isSAMLUser
         }
     }
 
@@ -123,7 +131,12 @@ class NewUserModal extends Component<NewUserModalProps, NewUserModalState> {
 
     handleClick(ev: any) {
         ev.preventDefault(); // prevent page reload
-        if (this.props.password !== "NAN" && this.props.password !== "NAN") {
+
+        // For SAML users, use a dummy password since they authenticate via SAML
+        const password = this.state.isSAMLUser ? 'SAML_AUTH' : this.props.password;
+
+        if (!this.state.isSAMLUser && this.props.password !== "NAN" && this.props.password !== "NAN") {
+            // Regular PAM authentication user
             axios.post(import.meta.env.VITE_API_URL + `/auth/create`, {
                 password: this.props.password,
                 username: this.props.username,
@@ -137,6 +150,11 @@ class NewUserModal extends Component<NewUserModalProps, NewUserModalState> {
             })
                 .then(res => {
                     localStorage.setItem("AUTOTA_AUTH_TOKEN", res.data.access_token);
+                    // Clear SAML data from localStorage if any
+                    localStorage.removeItem('SAML_USERNAME');
+                    localStorage.removeItem('SAML_EMAIL');
+                    localStorage.removeItem('SAML_FIRST_NAME');
+                    localStorage.removeItem('SAML_LAST_NAME');
                     window.location.href = "/class/classes";
                 })
                 .catch(err => {
@@ -144,8 +162,9 @@ class NewUserModal extends Component<NewUserModalProps, NewUserModalState> {
                 });
         }
         else {
-            axios.post(import.meta.env.VITE_API_URL + `/auth/create_newclass`, {
-                password: this.props.password,
+            // SAML user or create_newclass path
+            axios.post(import.meta.env.VITE_API_URL + `/auth/create`, {
+                password: password,
                 username: this.props.username,
                 fname: this.state.FirstName,
                 lname: this.state.LastName,
@@ -157,6 +176,11 @@ class NewUserModal extends Component<NewUserModalProps, NewUserModalState> {
             })
                 .then(res => {
                     localStorage.setItem("AUTOTA_AUTH_TOKEN", res.data.access_token);
+                    // Clear SAML data from localStorage
+                    localStorage.removeItem('SAML_USERNAME');
+                    localStorage.removeItem('SAML_EMAIL');
+                    localStorage.removeItem('SAML_FIRST_NAME');
+                    localStorage.removeItem('SAML_LAST_NAME');
                     window.location.href = "/class/classes";
                 })
                 .catch(err => {
@@ -196,12 +220,36 @@ class NewUserModal extends Component<NewUserModalProps, NewUserModalState> {
                     <ErrorMessage isHidden={this.state.error_msg === ""} message={this.state.error_msg}></ErrorMessage>
                     <Form>
                         <Form.Group widths='equal'>
-                            <Form.Input fluid label='First name' placeholder='First name' onChange={this.handleFirstNameChange} />
-                            <Form.Input fluid label='Last name' placeholder='Last name' onChange={this.handleLastNameChange} />
+                            <Form.Input
+                                fluid
+                                label='First name'
+                                placeholder='First name'
+                                value={this.state.FirstName}
+                                onChange={this.handleFirstNameChange}
+                            />
+                            <Form.Input
+                                fluid
+                                label='Last name'
+                                placeholder='Last name'
+                                value={this.state.LastName}
+                                onChange={this.handleLastNameChange}
+                            />
                         </Form.Group>
                         <Form.Group widths='equal'>
-                            <Form.Input fluid label='School ID' placeholder='001234567' onChange={this.handleStudentNumberChange} />
-                            <Form.Input fluid label='School Email' placeholder='first.last@marquette.edu' onChange={this.handleEmailChange} />
+                            <Form.Input
+                                fluid
+                                label='School ID'
+                                placeholder='001234567'
+                                value={this.state.StudentNumber}
+                                onChange={this.handleStudentNumberChange}
+                            />
+                            <Form.Input
+                                fluid
+                                label='School Email'
+                                placeholder='first.last@carroll.edu'
+                                value={this.state.Email}
+                                onChange={this.handleEmailChange}
+                            />
                         </Form.Group>
                         <Form.Group widths='equal'>
                             <Form.Select

@@ -39,6 +39,7 @@ pytest==8.3.3
 pytest-mock==3.14.1
 python-pam==2.0.2
 pyyaml==6.0.2
+python3-saml==1.16.0
 requests==2.32.4
 scikit-learn==1.4.2
 scp==0.15.0

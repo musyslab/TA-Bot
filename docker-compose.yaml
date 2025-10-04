@@ -31,6 +31,7 @@ services:
       DB_PORT: "3306"
       FLASK_DEBUG: "True"
       TABOT_DIR: "/ta-bot"
+      SAML_PUBLIC_URL: "https://pioneer.cs.mu.edu"
     ports:
       - "5000:5000"
     volumes:

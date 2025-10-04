@@ -2,10 +2,10 @@ import React, { Component } from 'react'
 import 'semantic-ui-css/semantic.min.css'
 
 //Uncomment for Marquette
-import img from '../MUCS-tag.png'
+//import img from '../MUCS-tag.png'
 
 //Uncomment for Carroll
-//import img from '../Pioneer.png'
+import img from '../Pioneer.png'
 
 import axios from 'axios'
 import ErrorMessage from '../components/ErrorMessage'
@@ -24,6 +24,9 @@ interface LoginPageState {
   role: number;
   error_message: string;
   isLoading: boolean;
+  samlEmail?: string;
+  samlFirstName?: string;
+  samlLastName?: string;
 }
 
 class Login extends Component<{}, LoginPageState> {
@@ -43,6 +46,34 @@ class Login extends Component<{}, LoginPageState> {
     this.handleSubmit = this.handleSubmit.bind(this);
     this.handleUsernameChange = this.handleUsernameChange.bind(this);
     this.handlePasswordChange = this.handlePasswordChange.bind(this);
+    this.handleSAMLLogin = this.handleSAMLLogin.bind(this);
+  }
+
+  componentDidMount() {
+    // Check if SAML brought us here with a new user
+    const samlNewUser = localStorage.getItem('SAML_NEW_USER');
+    if (samlNewUser === 'true') {
+      const username = localStorage.getItem('SAML_USERNAME') || '';
+      const email = localStorage.getItem('SAML_EMAIL') || '';
+      const firstName = localStorage.getItem('SAML_FIRST_NAME') || '';
+      const lastName = localStorage.getItem('SAML_LAST_NAME') || '';
+
+      // Clear the flags
+      localStorage.removeItem('SAML_NEW_USER');
+
+      this.setState({
+        isNewUser: true,
+        username: username,
+        samlEmail: email,
+        samlFirstName: firstName,
+        samlLastName: lastName,
+      });
+    }
+  }
+
+  handleSAMLLogin() {
+    const baseUrl = import.meta.env.VITE_API_URL as string | undefined;
+    window.location.href = `${baseUrl}/auth/saml/login`;
   }
 
   handleUsernameChange(ev: React.ChangeEvent<HTMLInputElement>) {
@@ -100,17 +131,20 @@ class Login extends Component<{}, LoginPageState> {
           username={this.state.username}
           password={this.state.password}
           isOpen={this.state.isNewUser}
+          samlEmail={this.state.samlEmail}
+          samlFirstName={this.state.samlFirstName}
+          samlLastName={this.state.samlLastName}
         />
         <Grid textAlign="center" verticalAlign="middle" style={{ height: '100vh' }}>
           <Grid.Column style={{ maxWidth: 450 }}>
 
             {/* Uncomment for Marquette */}
-            <Header as="h2">Login to your MSCSNet account</Header>
+            {/* <Header as="h2">Login to your MSCSNet account</Header> */}
 
             {/* Uncomment for Carroll */}
-            {/* <Header as="h2">Login to your Pioneer account</Header> */}
+            <Header as="h2">Login to your Pioneer account</Header>
 
-            <Form onSubmit={this.handleSubmit}>
+            {/* <Form onSubmit={this.handleSubmit}>
               <Segment>
                 <Form.Input
                   icon="user"
@@ -127,24 +161,27 @@ class Login extends Component<{}, LoginPageState> {
                   type="password"
                   onChange={this.handlePasswordChange}
                 />
-                <Button type="submit" loading={this.state.isLoading} disabled={this.state.isLoading}>
+                <Button type="submit" loading={this.state.isLoading} disabled={this.state.isLoading} primary fluid>
                   Login
                 </Button>
               </Segment>
-            </Form>
+            </Form> */}
+
+            <div style={{ marginTop: '1em', marginBottom: '1em', textAlign: 'center' }}>
+              <span>or</span>
+            </div>
+
+            <Button
+              color="blue"
+              fluid
+              onClick={this.handleSAMLLogin}
+              style={{ marginBottom: '1em' }}
+            >
+              <i className="microsoft icon"></i>
+              Sign in with Microsoft
+            </Button>
 
             <ErrorMessage message={this.state.error_message} isHidden={this.state.isErrorMessageHidden} />
-            <Message>
-              Create an account{' '}
-              <a
-                href="https://docs.google.com/document/d/1QT--iGWE-y1Ix8GknsMAoiIKyZJcO_yEOhMBg0WFpyU/edit?usp=sharing"
-                target="_blank"
-                rel="noreferrer"
-              >
-                here
-              </a>
-              .
-            </Message>
             <div>
               <Image src={img} />
             </div>
