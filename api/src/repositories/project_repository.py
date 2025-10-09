@@ -101,8 +101,11 @@ class ProjectRepository():
 
         return levels
 
-    def create_project(self, name: str, start: datetime, end: datetime, language:str,class_id:int,file_path:str, description_path:str):    
-        project = Projects(Name = name, Start = start, End = end, Language = language,ClassId=class_id,solutionpath=file_path, AsnDescriptionPath = description_path)
+    def create_project(self, name: str, start: datetime, end: datetime, language:str, class_id:int, file_path:str, description_path:str, additional_file_path:str):
+        project = Projects(Name=name, Start=start, End=end, Language=language,
+                            ClassId=class_id, solutionpath=file_path,
+                            AsnDescriptionPath=description_path,
+                            AdditionalFilePath=additional_file_path)
         db.session.add(project)
         db.session.commit()
         return project.Id
@@ -118,10 +121,24 @@ class ProjectRepository():
         project_solutionFile = project_solutionFile.split("/")[-1]
         project_descriptionfile = project_data.AsnDescriptionPath
         project_descriptionfile = project_descriptionfile.split("/")[-1]
-        project[project_data.Id] = [str(project_data.Name),str(start_string),str(end_string), str(project_data.Language), str(project_solutionFile), str(project_descriptionfile)]
+        project_additionalfile = ""
+        try:
+            if getattr(project_data, "AdditionalFilePath", None):
+                project_additionalfile = project_data.AdditionalFilePath.split("/")[-1]
+        except Exception:
+            project_additionalfile = ""
+        project[project_data.Id] = [
+            str(project_data.Name),
+            str(start_string),
+            str(end_string),
+            str(project_data.Language),
+            str(project_solutionFile),
+            str(project_descriptionfile),
+            str(project_additionalfile),
+        ]
         return project
 
-    def edit_project(self, name: str, start: datetime, end: datetime, language:str, project_id:int, path:str, description_path:str):
+    def edit_project(self, name: str, start: datetime, end: datetime, language:str, project_id:int, path:str, description_path:str, additional_file_path:str):
         project = Projects.query.filter(Projects.Id == project_id).first()
         project.Name = name
         project.Start = start
@@ -129,39 +146,49 @@ class ProjectRepository():
         project.Language = language
         project.solutionpath = path
         project.AsnDescriptionPath = description_path
+        project.AdditionalFilePath = additional_file_path
         db.session.commit() 
         
-    def get_testcases(self, project_id:int) -> Dict[str,str]:
+    def get_testcases(self, project_id: int) -> Dict[int, list]:
         testcases = Testcases.query.filter(Testcases.ProjectId == project_id).all()
-        testcase_info = {}
+        testcase_info: Dict[int, list] = {}
         for test in testcases:
-            testcase_data=[]
+            testcase_data = []
             testcase_data.append(test.LevelId)
             testcase_data.append(test.Name)
             testcase_data.append(test.Description)
             testcase_data.append(test.input)
             testcase_data.append(test.Output)
             testcase_data.append(test.IsHidden)
-            if test.additionalfilepath != "":
-                testcase_data.append(test.additionalfilepath)
-            else:
-                testcase_data.append("")
             testcase_info[test.Id] = testcase_data
         return testcase_info
-    
-    def add_or_update_testcase(self, project_id: int, testcase_id: int, level_name: str, name: str,
-                              description: str, input_data: str, output: str, is_hidden: bool,
-                              additional_file_path: str, class_id: int):
+
+    def add_or_update_testcase(
+        self,
+        project_id: int,
+        testcase_id: int,
+        level_name: str,
+        name: str,
+        description: str,
+        input_data: str,
+        output: str,
+        is_hidden: bool,
+        class_id: int,
+    ):
         from flask import current_app
+
         # Fetch project and determine teacher directory base
         project = Projects.query.filter(Projects.Id == project_id).first()
-        teacher_base = current_app.config['TEACHER_FILES_DIR']
+        teacher_base = current_app.config["TEACHER_FILES_DIR"]
         # Ensure solutionpath points to the teacher project folder
         project_base = project.solutionpath  # e.g., /ta-bot/project-files/teacher-files/Project_XYZ
 
         # Run grading-script to compute default output if none provided
-        grading_script = os.path.join(current_app.root_path, '..', 'ta-bot', 'grading-scripts', 'tabot.py')
+        grading_script = os.path.join(
+            current_app.root_path, "..", "ta-bot", "grading-scripts", "tabot.py"
+        )
 
+        add_path = getattr(project, "AdditionalFilePath", "") or ""
         result = subprocess.run(
             [
                 "python",
@@ -171,12 +198,12 @@ class ProjectRepository():
                 project.Language,
                 input_data,
                 project_base,
-                additional_file_path,
+                add_path,
                 str(project_id),
-                str(class_id)
+                str(class_id),
             ],
             stdout=subprocess.PIPE,
-            text=True
+            text=True,
         )
 
         # If recompute came from API and provided an empty/whitespace output, still fall back.
@@ -190,18 +217,6 @@ class ProjectRepository():
         ).first()
         level_id = level.Id if level else None
 
-        # Ensure any uploaded additional file is saved under teacher project folder
-        if additional_file_path:
-            # Generate unique filename
-            filename = os.path.basename(additional_file_path)
-            save_path = os.path.join(project_base, filename)
-            counter = 1
-            while os.path.exists(save_path):
-                name, ext = os.path.splitext(filename)
-                save_path = os.path.join(project_base, f"{name}({counter}){ext}")
-                counter += 1
-            additional_file_path = save_path
-
         if testcase is None:
             testcase = Testcases(
                 ProjectId=project_id,
@@ -211,7 +226,6 @@ class ProjectRepository():
                 input=input_data,
                 Output=output,
                 IsHidden=is_hidden,
-                additionalfilepath=additional_file_path
             )
             db.session.add(testcase)
         else:
@@ -221,23 +235,22 @@ class ProjectRepository():
             testcase.input = input_data
             testcase.Output = output
             testcase.IsHidden = is_hidden
-            if additional_file_path:
-                testcase.additionalfilepath = additional_file_path
 
         db.session.commit()
 
-    def remove_testcase(self, testcase_id:int):
+    def remove_testcase(self, testcase_id: int):
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
         db.session.delete(testcase)
         db.session.commit()
-    
-    def get_testcase_input(self, testcase_id:int):
-         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
-         return testcase.input
-    
-    def get_testcase_project(self, testcase_id:int):
+
+    def get_testcase_input(self, testcase_id: int):
+        testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
+        return testcase.input
+
+    def get_testcase_project(self, testcase_id: int):
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
         return testcase.ProjectId
+
     def get_project_id_by_name(self, projectname:str):
         if(Projects.query.filter(Projects.Name==projectname).count() == 0):
             return 0
@@ -251,15 +264,28 @@ class ProjectRepository():
         db.session.add(level_2)
         db.session.add(level_3)
         db.session.commit()
-    def testcases_to_json(self,project_id:int):
-        testcase_holder={}
-        testcase = Testcases.query.filter(Testcases.ProjectId == project_id)
-        for test in testcase:
+
+    def testcases_to_json(self, project_id: int) -> str:
+        """Return testcases as JSON with project-level AdditionalFilePath in slot 7."""
+        testcase_holder: Dict[int, list] = {}
+        # use project-level AdditionalFilePath (keep 7-field shape for compatibility)
+        proj = Projects.query.filter(Projects.Id == project_id).first()
+        project_add_path = getattr(proj, "AdditionalFilePath", "") if proj else ""
+        tests = Testcases.query.filter(Testcases.ProjectId == project_id).all()
+        for test in tests:
             level = Levels.query.filter(Levels.Id == test.LevelId).first()
             level_name = level.Name if level else ""
-            testcase_holder[test.Id] = [test.Name, level_name, test.Description, test.input, test.Output, test.IsHidden, test.additionalfilepath]
+            testcase_holder[test.Id] = [
+                test.Name,
+                level_name,
+                test.Description,
+                test.input,
+                test.Output,
+                test.IsHidden,
+                project_add_path,
+            ]
         json_object = json.dumps(testcase_holder)
-        print(json_object,flush=True) 
+        print(json_object, flush=True)
         return json_object
     def wipe_submissions(self, project_id:int):
         submissions = Submissions.query.filter(Submissions.Project == project_id).all()
