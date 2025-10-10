@@ -44,8 +44,10 @@ body {
     margin-left: auto;
     margin-right: auto;
     text-align: center;
-    background: #d1d5db; /* darker gray, still readable with black text */
-    border: 1px solid #9ca3af; /* slightly darker border for balance */
+    background: #d1d5db;
+    /* darker gray, still readable with black text */
+    border: 1px solid #9ca3af;
+    /* slightly darker border for balance */
     border-radius: 12px;
     padding: 1.1rem 1.25rem;
     font-weight: 700;
@@ -382,16 +384,17 @@ body {
               outline: 2px solid #3498db;
               outline-offset: 2px;
             }
+
             @media (max-width: 1150px) {
               .file-section {
                 flex-direction: column;
               }
-            
+
               .info-segment {
                 flex: 1 1 auto;
                 min-width: 100%;
               }
-            
+
               .file-drop-area {
                 min-height: 180px;
                 padding: 60px 1rem;
@@ -422,6 +425,40 @@ body {
         }
       }
     }
+
+    .optional-file-toggle {
+      width: 100%;
+
+      .toggle-optional-file {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        margin-top: 20px;
+        margin-bottom: 10px;
+        border: 1px solid #cccccc;
+        border-radius: 6px;
+        font-size: 1rem;
+        color: #333333;
+        background-color: #ffffff;
+        background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8" fill="none"><path d="M1 1l5 5 5-5" stroke="%23777" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+        background-repeat: no-repeat;
+        background-position: right 1rem center;
+        appearance: none;
+        cursor: pointer;
+        transition: border-color 0.3s, box-shadow 0.3s;
+        text-align: left;
+
+        &:hover {
+          border-color: #aaa;
+        }
+
+        &:focus {
+          outline: none;
+          border-color: #3498db;
+          box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.15);
+        }
+      }
+    }
+
   }
 
 }

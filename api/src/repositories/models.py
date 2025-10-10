@@ -22,6 +22,7 @@ class Projects(db.Model):
     StudentUnlocks=relationship('StudentUnlocks') 
     solutionpath=Column(String)
     AsnDescriptionPath = Column(String)
+    AdditionalFilePath = Column(String)
 
 class Users(db.Model):
     __tablename__ = "Users"
@@ -129,7 +130,7 @@ class Testcases(db.Model):
     input = Column(String)
     Output = Column(String)
     IsHidden = Column(Boolean)
-    additionalfilepath = Column(String)
+    AdditionalFilePath = Column(String)
 
 class StudentQuestions(db.Model):
     __tablename__ = "StudentQuestions"

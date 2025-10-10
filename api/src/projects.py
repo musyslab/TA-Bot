@@ -343,9 +343,17 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     assignmentdesc_path = os.path.join(proj_dir_path, ad_name)
     ad.save(assignmentdesc_path)
 
+    add_path = ""
+    add_up = request.files.get('additionalFile')
+    if add_up and add_up.filename:
+        # Preserve the original filename for additional files (do NOT timestamp or rename)
+        orig_name = safe_name(add_up.filename)
+        add_path = os.path.join(proj_dir_path, orig_name)
+        add_up.save(add_path)
+
     # Use the just-uploaded path directly; avoid directory scan on create
     selected_path = path
-    new_project_id = project_repo.create_project(name, start_date, end_date, language, class_id, selected_path, assignmentdesc_path)
+    new_project_id = project_repo.create_project(name, start_date, end_date, language, class_id, selected_path, assignmentdesc_path, add_path)
     project_repo.levels_creator(new_project_id)
 
     return make_response(str(new_project_id), HTTPStatus.OK)
@@ -396,6 +404,8 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     # Default to existing paths if no new files are uploaded
     path = existing_path
     assignmentdesc_path = project_repo.get_project_desc_path(pid)
+    existing_proj = project_repo.get_selected_project(pid)
+    add_path = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
 
     # If a new solution/program file was uploaded, save with a unique name
     up = request.files.get('file')
@@ -430,21 +440,37 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
         assignmentdesc_path = os.path.join(proj_dir, f"{ts}__{ad_base}__{base_proj}{ad_ext}")
         ad.save(assignmentdesc_path)
 
+    up_add = request.files.get('additionalFile')
+    clear_add = (request.form.get('clearAdditionalFile', '').strip().lower() == 'true')
+    additional_file_changed = False
+    if up_add and up_add.filename:
+        # Preserve the original filename for additional files (do NOT timestamp or rename)
+        orig_name = safe_name(up_add.filename)
+        add_path = os.path.join(proj_dir, orig_name)
+        up_add.save(add_path)
+        additional_file_changed = True
+    elif clear_add:
+        # No new upload and user requested clear: remove DB reference
+        add_path = ""
+        additional_file_changed = True  
+
     # Always point the project at the newest solution inside its folder
     latest = pick_latest_solution(proj_dir, base_proj)
     if latest:
         path = latest
 
-    project_repo.edit_project(name, start_date, end_date, language, pid, path, assignmentdesc_path)
+    project_repo.edit_project(name, start_date, end_date, language, pid, path, assignmentdesc_path, add_path)
 
     # Recompute testcase outputs **against the path we just wrote**, so we don't depend on
     # any cached ORM objects or delayed reads.
     try:
-        if solution_changed and path:
+        # Recompute if either the solution OR the additional file changed.
+        # If only the additional file changed, let recompute pick up the project's saved solution.
+        if solution_changed or additional_file_changed:
             recompute_expected_outputs(
                 project_repo,
                 int(pid),
-                solution_override_path=path,
+                solution_override_path=(path if solution_changed else None),
                 language_override=language,
             )
     except Exception as e:
@@ -458,7 +484,7 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
 def has_allowed_ext(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in ALLOWED_SOURCE_EXTS
 
-def run_solution_for_input(solution_root: str, language: str, input_text: str, project_id: int, class_id: int) -> str:
+def run_solution_for_input(solution_root: str, language: str, input_text: str, project_id: int, class_id: int, additional_file_path: str = "") -> str:
     """
     Execute code strictly via /ta-bot/grading-scripts/tabot.py (ADMIN path).
     Returns stdout (or stderr) with normalized newlines, or "" on failure.
@@ -473,7 +499,7 @@ def run_solution_for_input(solution_root: str, language: str, input_text: str, p
         language or "python", # language as tabot expects
         input_text or "",     # goes to admin_run(user_input)
         solution_root,        # file or directory
-        "",                   # additional_file_path
+        additional_file_path or "",  # additional_file_path
         str(project_id or 0),
         str(class_id or 0),
     ]
@@ -573,10 +599,11 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
             class_id = 0
 
     for tc_id, vals in cases.items():
-        if not isinstance(vals, list) or len(vals) < 7:
+        # repo.get_testcases() returns 6 items; API may append a 7th (level name). Handle both.
+        if not isinstance(vals, list) or len(vals) < 6:
             continue
-        levelid, name, desc, inp, _old_out, is_hidden, addpath = vals[:7]
-        existing_levelname = vals[7] if len(vals) > 7 else ""
+        levelid, name, desc, inp, _old_out, is_hidden = vals[:6]
+        existing_levelname = vals[6] if len(vals) > 6 else ""
         # Resolve level name from id if missing
         try:
             lid = int(levelid)
@@ -584,7 +611,8 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
             lid = None
         resolved_levelname = existing_levelname or id_to_levelname.get(lid, "")
 
-        new_out = run_solution_for_input(solution_root, lang, inp, project_id, class_id)
+        add_path = getattr(proj_obj, "AdditionalFilePath", "") if proj_obj else ""
+        new_out = run_solution_for_input(solution_root, lang, inp, project_id, class_id, add_path)
         try:
             project_repo.add_or_update_testcase(
                 int(project_id),
@@ -595,7 +623,6 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
                 inp or "",
                 new_out,
                 bool(is_hidden),
-                (addpath or "").strip(),
                 int(class_id),
             )
         except Exception:
@@ -764,7 +791,6 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
                 testcase["input"],
                 testcase["output"],
                 bool(testcase["isHidden"]),
-                testcase.get("additionalfilepath", ""),
                 class_id
             )
 
@@ -774,7 +800,6 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
 @jwt_required()
 @inject   
 def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    path = ""
     if current_user.Role != ADMIN_ROLE:
         message = {
             'message': 'Access Denied'
@@ -790,19 +815,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     project_id = request.form.get('project_id', '').strip()
     isHidden = request.form.get('isHidden', '').strip()
     description = request.form.get('description', '').strip()
-    path = request.form.get('additionalfilepath', '').strip()
     class_id = request.form.get('class_id', '').strip()
-
-    if 'additionalFile' in request.files:
-        additionalFile = request.files['additionalFile']
-        counter = 1
-        path = os.path.join("/ta-bot/project-files", f"duplicatenum({counter}){additionalFile.filename}")
-        while os.path.isfile(path):
-            path = os.path.join("/ta-bot/project-files", f"duplicatenum({counter}){additionalFile.filename}")
-            counter += 1
-        additionalFile.save(path)
-    else:
-        additionalFile = None
     
     if id_val == '' or name == '' or input_data == '' or project_id == '' or isHidden == '' or description == '' or class_id == '' or level_name == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
@@ -833,12 +846,13 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         project = project_repo.get_selected_project(int(project_id))
         language = (getattr(project, "Language", "") or "")
         solution_root = (getattr(project, "solutionpath", "") or "")
-        output = run_solution_for_input(solution_root, language, input_data, int(project_id), int(class_id_int))
+        add_path = getattr(project, "AdditionalFilePath", "") if project else ""
+        output = run_solution_for_input(solution_root, language, input_data, int(project_id), int(class_id_int), add_path)
     except Exception:
         # Fall back to the submitted output if recomputation fails
         pass
 
-    project_repo.add_or_update_testcase(project_id, id_val, level_name, name, description, input_data, output, isHidden, path, class_id_int)
+    project_repo.add_or_update_testcase(project_id, id_val, level_name, name, description, input_data, output, isHidden, class_id_int)
 
     return make_response("Testcase Added", HTTPStatus.OK)
     

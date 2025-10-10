@@ -22,7 +22,6 @@ class Testcase {
         this.output = "";
         this.isHidden = false;
         this.levelname = "";
-        this.additionalfilepath = "";
     }
 
     id: number;
@@ -33,7 +32,6 @@ class Testcase {
     output: string;
     isHidden: boolean;
     levelname: string;
-    additionalfilepath: string;
 }
 
 const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
@@ -62,6 +60,8 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [previewTitle, setPreviewTitle] = useState("");
     const [previewText, setPreviewText] = useState("");
     const [serverFiles, setServerFiles] = useState<string[] | null>(null);
+    const [showAdditionalFile, setShowAdditionalFile] = useState<boolean>(false);
+    const [additionalFileName, setAdditionalFileName] = useState<string>("");
 
     const API = import.meta.env.VITE_API_URL;
     const authHeader = { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` };
@@ -136,8 +136,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                     testcase.input = values[3];
                     testcase.output = values[4];
                     testcase.isHidden = !!values[5];
-                    testcase.additionalfilepath = values[6];
-                    testcase.levelname = values[7]
+                    testcase.levelname = values[6]
 
 
                     rows.push(testcase);
@@ -153,9 +152,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                 testcase.input = "";
                 testcase.output = "";
                 testcase.isHidden = false;
-                testcase.additionalfilepath = "None";
                 testcase.levelname = "";
-
 
                 rows.push(testcase);
 
@@ -180,6 +177,9 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                         setProjectLanguage(data[props.id][3]);
                         setSolutionFileName(data[props.id][4]);
                         setDescFileName(data[props.id][5]);
+                        const addName = (data[props.id][6] || "") as string;
+                        setAdditionalFileName(addName);
+                        setShowAdditionalFile(!!addName);
                         setEdit(true);
                         setSubmitButton("Submit changes");
                     }
@@ -298,8 +298,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                     testcase.input = values[3];
                     testcase.output = values[4];
                     testcase.isHidden = !!values[5];
-                    testcase.additionalfilepath = values[6];
-                    testcase.levelname = values[7];
+                    testcase.levelname = values[6];
                     rows.push(testcase);
 
                     return testcase;
@@ -314,7 +313,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                 testcase.output = "";
                 testcase.isHidden = false;
                 testcase.levelname = "";
-                testcase.additionalfilepath = "None";
 
                 rows.push(testcase);
 
@@ -395,6 +393,12 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             const formData = new FormData();
             formData.append("file", File);
             formData.append("assignmentdesc", AssignmentDesc);
+            if (selectedAddFile) {
+                formData.append("additionalFile", selectedAddFile);
+            } else if (!additionalFileName.trim()) {
+                // only clear when user explicitly removed via exchange icon (name emptied)
+                formData.append("clearAdditionalFile", "true");
+            }
             formData.append("name", ProjectName);
             formData.append("start_date", formatDateTimeLocal(ProjectStartDate));
             formData.append("end_date", formatDateTimeLocal(ProjectEndDate));
@@ -449,6 +453,9 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             formData.append("id", props.id.toString());
             if (File) formData.append("file", File);
             if (AssignmentDesc) formData.append("assignmentdesc", AssignmentDesc);
+            if (selectedAddFile) {
+                formData.append("additionalFile", selectedAddFile);
+            }
             formData.append("name", ProjectName);
             formData.append("start_date", formatDateTimeLocal(ProjectStartDate!));
             formData.append("end_date", formatDateTimeLocal(ProjectEndDate!));
@@ -485,7 +492,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             t.input = "";
             t.output = "";
             t.isHidden = false;
-            t.additionalfilepath = "None";
             t.levelname = "";
             setModalDraft(t);
         } else {
@@ -607,15 +613,12 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         formData.append('output', modalDraft.output.toString());
         formData.append('isHidden', modalDraft.isHidden.toString());
         formData.append('description', modalDraft.description.toString());
-        if (selectedAddFile !== undefined) {
-            formData.append('additionalFile', selectedAddFile!);
-        }
 
         if (modalDraft.name === "" || modalDraft.levelname === "" || modalDraft.input === "" || modalDraft.description === "") {
             window.alert("Please fill out all fields");
             return;
         }
-        
+
         if (!VALID_LEVELS.has(modalDraft.levelname)) {
             window.alert("Please select a level (Level 1, Level 2, or Level 3).");
             return;
@@ -661,8 +664,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                     testcase.input = values[3];
                     testcase.output = values[4];
                     testcase.isHidden = !!values[5];
-                    testcase.levelname = values[7];
-                    testcase.additionalfilepath = values[6];
+                    testcase.levelname = values[6];
                     rows.push(testcase);
 
                     return testcase;
@@ -928,6 +930,82 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                 )}
                                             </div>
                                         </div>
+
+                                        <div className="optional-file-toggle">
+                                            <button
+                                                type="button"
+                                                className={`toggle-optional-file ${showAdditionalFile ? 'on' : 'off'}`}
+                                                aria-pressed={showAdditionalFile}
+                                                onClick={() => {
+                                                    setShowAdditionalFile(prev => !prev);
+                                                }}
+                                            >
+                                                {showAdditionalFile ? 'Optional additional file: On' : 'Optional additional file: Off'}
+                                            </button>
+                                        </div>
+
+                                        {showAdditionalFile && (
+                                            <div className="info-segment optional-additional-file-segment">
+                                                <h1 className="info-title">Optional Additional File</h1>
+                                                <div
+                                                    className="file-drop-area optional-additional-file-drop"
+                                                    onDragOver={e => e.preventDefault()}
+                                                    onDrop={e => {
+                                                        e.preventDefault();
+                                                        const files = e.dataTransfer.files;
+                                                        if (files && files.length === 1) {
+                                                            handleAdditionalFileChange({ target: { files } } as any);
+                                                        }
+                                                    }}
+                                                >
+                                                    {selectedAddFile ? (
+                                                        <div className="file-preview optional-additional-file-preview">
+                                                            <span className="file-name">{selectedAddFile.name}</span>
+                                                            <button
+                                                                type="button"
+                                                                className="exchange-icon"
+                                                                onClick={() => setSelectedAddFile(undefined)}
+                                                                title="Remove file"
+                                                            >
+                                                                <i className="exchange icon"></i>
+                                                            </button>
+                                                        </div>
+                                                    ) : additionalFileName ? (
+                                                        <div className="file-preview optional-additional-file-preview">
+                                                            <button
+                                                                type="button"
+                                                                className="file-name"
+                                                                title="(Server) additional file"
+                                                                onClick={(e) => e.preventDefault()}
+                                                            >
+                                                                {additionalFileName}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="exchange-icon"
+                                                                onClick={() => setAdditionalFileName("")}
+                                                                title="Clear (choose another)"
+                                                            >
+                                                                <i className="exchange icon"></i>
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <input
+                                                                type="file"
+                                                                className="file-input optional-additional-file-input"
+                                                                onChange={handleAdditionalFileChange}
+                                                            />
+                                                            <div className="file-drop-message">
+                                                                Drag &amp; drop your file here or&nbsp;
+                                                                <span className="browse-text">browse</span>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
                                     </div>
 
                                     {/* Submit */}
@@ -1271,11 +1349,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                             </label>
                                         </div>
                                     ))}
-                                </div>
-
-                                <div className="form-field modal-file-popup">
-                                    <button type="button">Select optional additional file</button>
-                                    <input type="file" hidden onChange={handleAdditionalFileChange} />
                                 </div>
 
                                 <div className="modal-action-buttons">
