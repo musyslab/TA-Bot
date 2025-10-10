@@ -206,9 +206,11 @@ class ProjectRepository():
             text=True,
         )
 
-        # If recompute came from API and provided an empty/whitespace output, still fall back.
-        if (not output) or (isinstance(output, str) and not output.strip()):
-            output = result.stdout.strip()
+        # Always prefer recomputed output (includes AdditionalFilePath);
+        # fall back to provided output only if recompute failed/empty.
+        recomputed = (result.stdout or "").strip()
+        if recomputed:
+            output = recomputed
 
         # Handle creation or update of the testcase record
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
