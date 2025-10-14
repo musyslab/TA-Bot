@@ -68,6 +68,13 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i;
     const VALID_LEVELS = new Set(['Level 1', 'Level 2', 'Level 3']);
 
+    function fileIconFor(filename: string): string {
+        const lower = filename.toLowerCase();
+        if (/\.(py|c|cpp|h|java|rkt|scm)$/.test(lower)) return "file code outline icon";
+        if (/\.(pdf|docx?|md|txt)$/.test(lower)) return "file alternate outline icon";
+        return "file outline icon";
+    }
+
     async function openLocalPreview(file: File) {
         if (!SUPPORTED_RE.test(file.name)) { window.alert("Preview supports .py .c .h .java .rkt .scm (.cpp optional)"); return; }
         const text = await file.text();
@@ -82,6 +89,10 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         const res = await fetch(url, { headers: authHeader }); if (!res.ok) return; const text = await res.text();
         setPreviewTitle(relpath || solutionfileName || "source"); setPreviewText(text); setPreviewOpen(true);
     }
+
+    useEffect(() => {
+        if (showAdditionalFile && edit) { fetchServerFileList(); }
+    }, [showAdditionalFile, edit]);
 
 
     const navigate = useNavigate();
@@ -686,6 +697,14 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     }
 
     const selectedTestCase = modalDraft;
+    const directoryEntries = Array.from(new Set([
+        ...(serverFiles ?? []),
+        ...(solutionfileName ? [solutionfileName] : []),
+        ...(selectedAddFile ? [selectedAddFile.name] : []),
+        ...(additionalFileName ? [additionalFileName] : []),
+    ].map(p => p.split(/[\\/]/).pop()!)))
+        .filter(Boolean)
+        .sort();
 
     return (
         <>
@@ -946,6 +965,23 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
 
                                         {showAdditionalFile && (
                                             <div className="info-segment optional-additional-file-segment">
+                                                <h1 className="info-title">File Structure</h1>
+                                                {/* Directory-like listing shown above the drop zone */}
+                                                {directoryEntries.length > 0 && (
+                                                    <div className="directory-tree" role="tree" aria-label="Current directory">
+                                                        <div className="tree-rail" aria-hidden="true"></div>
+                                                        <ul className="tree-list">
+                                                            {directoryEntries.map((name) => (
+                                                                <li className="tree-row" role="treeitem" key={name}>
+                                                                    <span className="tree-icon" aria-hidden="true">
+                                                                        <i className={fileIconFor(name)} />
+                                                                    </span>
+                                                                    <span className="tree-name">{name}</span>
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                )}
                                                 <h1 className="info-title">Optional Additional File</h1>
                                                 <div
                                                     className="file-drop-area optional-additional-file-drop"
