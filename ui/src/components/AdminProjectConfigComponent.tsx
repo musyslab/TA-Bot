@@ -192,7 +192,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                         setDescFileName(data[props.id][5]);
                         const addNames = (data[props.id][6] || []) as string[];
                         setAdditionalFileNames(addNames);
-                        setShowAdditionalFile(true);
+                        setShowAdditionalFile(addNames.length > 0);
                         setEdit(true);
                         setSubmitButton("Submit changes");
                     }
@@ -1049,7 +1049,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                         onChange={handleAdditionalFileChange}
                                                     />
                                                     <div className="file-drop-message">
-                                                        Drag &amp; drop your file here or&nbsp;
+                                                        Drag &amp; drop your file(s) here or&nbsp;
                                                         <span className="browse-text">browse</span>
                                                     </div>
                                                 </div>
