@@ -100,7 +100,7 @@ def end_tap_file(output_file, number_of_tests):
         file.write(f"1..{str(number_of_tests)}\n")
     return output_file
 
-def call_piston_api(student_file: str, testcase_in: str, language, additional_file_path: str):
+def call_piston_api(student_file: str, testcase_in: str, language, additional_files):
         files = []
         # Build a deterministic file list
         if os.path.isdir(student_file):
@@ -133,11 +133,25 @@ def call_piston_api(student_file: str, testcase_in: str, language, additional_fi
             with open(student_file, "r", errors="ignore") as fh:
                 files.append({"name": os.path.basename(student_file), "content": fh.read()})
 
-        if additional_file_path:
-            ap = additional_file_path.strip()
+        # Append additional files (string, JSON string, or list)
+        extras = []
+        if additional_files:
+            try:
+                if isinstance(additional_files, str):
+                    s = additional_files.strip()
+                    extras = json.loads(s) if s.startswith('[') else ([s] if s else [])
+                else:
+                    extras = list(additional_files)
+            except Exception:
+                extras = []
+        for ap in extras:
+            ap = (ap or "").strip()
             if os.path.isfile(ap):
-                with open(ap, "r", errors="ignore") as fh:
-                    files.append({"name": os.path.basename(ap), "content": fh.read()})
+                bn = os.path.basename(ap)
+                # avoid duplicates already included from solution directory
+                if not any(f.get("name") == bn for f in files):
+                    with open(ap, "r", errors="ignore") as fh:
+                        files.append({"name": bn, "content": fh.read()})
 
         payload = {
             "language": language,
@@ -177,8 +191,8 @@ def call_piston_api(student_file: str, testcase_in: str, language, additional_fi
             time.sleep(0.2 * (attempt + 1))
         return ""
 
-def execute_test(filename, testcase_in, language, additional_file_path):
-        response = call_piston_api(filename, testcase_in.replace('\r', ''), language, additional_file_path)
+def execute_test(filename, testcase_in, language, additional_files):
+        response = call_piston_api(filename, testcase_in.replace('\r', ''), language, additional_files)
         if response is None:
             return ""
         return response
@@ -216,8 +230,8 @@ def run_liter(myroot, output_dir, student_name, filename, language):
             file.write(output)
 
 
-def admin_run(language, user_input, path, additional_file_path):
-    piston_response = execute_test(path, user_input, language, additional_file_path)
+def admin_run(language, user_input, path, additional_files):
+    piston_response = execute_test(path, user_input, language, additional_files)
     #TODO: Debug why this print statement is needed, if you remove this print statement, the subprocess call doesn't work(returns null value for result.sdout). 
     print(piston_response.replace("\r", "\n"))
     return piston_response.replace("\r", "\n")
@@ -267,8 +281,8 @@ def run(student_name, research_group, language, testcases, path, myroot):
         test_description=value[2]
         testcase_in = value[3]
         testcase_expected = value[4]
-        testcase_additional_file_path = value[6]
-        piston_response = execute_test(filename, testcase_in, language, testcase_additional_file_path)
+        testcase_additional_files = value[6]
+        piston_response = execute_test(filename, testcase_in, language, testcase_additional_files)
         result = assess_test(piston_response.replace("\r", "\n"), testcase_expected)
         #name suite description
         write_to_tap(output_file, result,test_name, test_level,test_description)

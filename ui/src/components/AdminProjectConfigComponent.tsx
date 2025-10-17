@@ -45,7 +45,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [File, setFile] = useState<File>();
     const [AssignmentDesc, setDesc] = useState<File>();
     const [edit, setEdit] = useState<boolean>(false);
-    const [selectedAddFile, setSelectedAddFile] = useState<File>();
+    const [selectedAddFiles, setSelectedAddFiles] = useState<File[]>([]);
     const [modalOpen, setModalOpen] = useState<boolean>(false);
     const [selectedTestCaseId, setSelectedTestCaseId] = useState<number>(-4);
     const [solutionfileName, setSolutionFileName] = useState<string>("");
@@ -61,12 +61,21 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [previewText, setPreviewText] = useState("");
     const [serverFiles, setServerFiles] = useState<string[] | null>(null);
     const [showAdditionalFile, setShowAdditionalFile] = useState<boolean>(false);
-    const [additionalFileName, setAdditionalFileName] = useState<string>("");
+    const [additionalFileNames, setAdditionalFileNames] = useState<string[]>([]);
+    const [removedAdditionalFiles, setRemovedAdditionalFiles] = useState<string[]>([]);
+
 
     const API = import.meta.env.VITE_API_URL;
     const authHeader = { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` };
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i;
     const VALID_LEVELS = new Set(['Level 1', 'Level 2', 'Level 3']);
+
+    function fileIconFor(filename: string): string {
+        const lower = filename.toLowerCase();
+        if (/\.(py|c|cpp|h|java|rkt|scm)$/.test(lower)) return "file code outline icon";
+        if (/\.(pdf|docx?|md|txt)$/.test(lower)) return "file alternate outline icon";
+        return "file outline icon";
+    }
 
     async function openLocalPreview(file: File) {
         if (!SUPPORTED_RE.test(file.name)) { window.alert("Preview supports .py .c .h .java .rkt .scm (.cpp optional)"); return; }
@@ -82,6 +91,10 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         const res = await fetch(url, { headers: authHeader }); if (!res.ok) return; const text = await res.text();
         setPreviewTitle(relpath || solutionfileName || "source"); setPreviewText(text); setPreviewOpen(true);
     }
+
+    useEffect(() => {
+        if (showAdditionalFile && edit) { fetchServerFileList(); }
+    }, [showAdditionalFile, edit]);
 
 
     const navigate = useNavigate();
@@ -177,9 +190,9 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                         setProjectLanguage(data[props.id][3]);
                         setSolutionFileName(data[props.id][4]);
                         setDescFileName(data[props.id][5]);
-                        const addName = (data[props.id][6] || "") as string;
-                        setAdditionalFileName(addName);
-                        setShowAdditionalFile(!!addName);
+                        const addNames = (data[props.id][6] || []) as string[];
+                        setAdditionalFileNames(addNames);
+                        setShowAdditionalFile(addNames.length > 0);
                         setEdit(true);
                         setSubmitButton("Submit changes");
                     }
@@ -393,11 +406,9 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             const formData = new FormData();
             formData.append("file", File);
             formData.append("assignmentdesc", AssignmentDesc);
-            if (selectedAddFile) {
-                formData.append("additionalFile", selectedAddFile);
-            } else if (!additionalFileName.trim()) {
-                // only clear when user explicitly removed via exchange icon (name emptied)
-                formData.append("clearAdditionalFile", "true");
+            selectedAddFiles.forEach(f => formData.append("additionalFiles", f));
+            if (selectedAddFiles.length === 0 && additionalFileNames.length === 0) {
+                formData.append("clearAdditionalFiles", "true");
             }
             formData.append("name", ProjectName);
             formData.append("start_date", formatDateTimeLocal(ProjectStartDate));
@@ -453,8 +464,12 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             formData.append("id", props.id.toString());
             if (File) formData.append("file", File);
             if (AssignmentDesc) formData.append("assignmentdesc", AssignmentDesc);
-            if (selectedAddFile) {
-                formData.append("additionalFile", selectedAddFile);
+            selectedAddFiles.forEach(f => formData.append("additionalFiles", f));
+            if (removedAdditionalFiles.length > 0) {
+                formData.append("removeAdditionalFiles", JSON.stringify(removedAdditionalFiles));
+            }
+            if (selectedAddFiles.length === 0 && additionalFileNames.length === 0) {
+                formData.append("clearAdditionalFiles", "true");
             }
             formData.append("name", ProjectName);
             formData.append("start_date", formatDateTimeLocal(ProjectStartDate!));
@@ -573,17 +588,29 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     }
 
     function handleAdditionalFileChange(event: React.FormEvent) {
-
         const target = event.target as HTMLInputElement;
         const files = target.files;
-
-        if (files != null && files.length === 1) {
-            // Update the state
-            setSelectedAddFile(files[0]);
-        } else {
-            setSelectedAddFile(undefined);
-        }
+        if (!files || files.length === 0) return;
+        setSelectedAddFiles(prev => {
+            const existing = new Set(prev.map(f => f.name));
+            const merged = [...prev];
+            Array.from(files).forEach(f => {
+                if (!existing.has(f.name)) merged.push(f);
+            });
+            return merged;
+        });
     };
+
+    function removeSelectedAdditional(name: string) {
+        // Remove a newly added (not yet uploaded) file by name
+        setSelectedAddFiles(prev => prev.filter(f => f.name !== name));
+    }
+
+    function removeServerAdditional(name: string) {
+        // Mark an existing server additional file for removal
+        setRemovedAdditionalFiles(prev => (prev.includes(name) ? prev : [...prev, name]));
+        setAdditionalFileNames(prev => prev.filter(n => n !== name));
+    }
 
     function formatDateTimeLocal(date: Date): string {
         const pad = (n: number) => n.toString().padStart(2, '0');
@@ -686,6 +713,15 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     }
 
     const selectedTestCase = modalDraft;
+    const directoryEntries = Array.from(new Set([
+        ...(serverFiles ?? []),
+        ...(solutionfileName ? [solutionfileName] : []),
+        ...selectedAddFiles.map(f => f.name),
+        ...additionalFileNames,
+        ...removedAdditionalFiles,
+    ].map(p => p.split(/[\\/]/).pop()!)))
+        .filter(Boolean)
+        .sort();
 
     return (
         <>
@@ -946,62 +982,76 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
 
                                         {showAdditionalFile && (
                                             <div className="info-segment optional-additional-file-segment">
-                                                <h1 className="info-title">Optional Additional File</h1>
+                                                <h1 className="info-title">Project Filesystem View</h1>
+                                                {/* Directory-like listing shown above the drop zone */}
+                                                {directoryEntries.length > 0 && (
+                                                    <div className="directory-tree" role="tree" aria-label="Current directory">
+                                                        <div className="tree-rail" aria-hidden="true"></div>
+                                                        <ul className="tree-list">
+                                                            {directoryEntries.map((name) => {
+                                                                const isAdded = !!selectedAddFiles.find(f => f.name === name);
+                                                                const isRemoved = removedAdditionalFiles.includes(name);
+                                                                const isServer = additionalFileNames.includes(name);
+                                                                return (
+                                                                    <li className="tree-row" role="treeitem" key={name}>
+                                                                        <span className="tree-icon" aria-hidden="true">
+                                                                            <i className={fileIconFor(name)} />
+                                                                        </span>
+                                                                        <span className="tree-name">{name}</span>
+                                                                        {(isAdded || isRemoved) && (
+                                                                            <span
+                                                                                className={`file-status ${isRemoved ? 'removed' : 'added'}`}
+                                                                            >
+                                                                                {isRemoved ? 'Submit changes to remove' : 'Submit changes to add'}
+                                                                            </span>
+                                                                        )}
+                                                                        {/* Per-file remove */}
+                                                                        {isServer ? (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="tree-remove-button from-server"
+                                                                                onClick={() => removeServerAdditional(name)}
+                                                                            >
+                                                                                Remove
+                                                                            </button>
+                                                                        ) : isAdded ? (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="tree-remove-button from-selected"
+                                                                                onClick={() => removeSelectedAdditional(name)}
+                                                                            >
+                                                                                Remove
+                                                                            </button>
+                                                                        ) : null}
+                                                                    </li>
+                                                                );
+                                                            })}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                                <h1 className="info-title">Optional Additional Files</h1>
                                                 <div
                                                     className="file-drop-area optional-additional-file-drop"
                                                     onDragOver={e => e.preventDefault()}
                                                     onDrop={e => {
                                                         e.preventDefault();
                                                         const files = e.dataTransfer.files;
-                                                        if (files && files.length === 1) {
+                                                        if (files && files.length > 0) {
                                                             handleAdditionalFileChange({ target: { files } } as any);
                                                         }
                                                     }}
                                                 >
-                                                    {selectedAddFile ? (
-                                                        <div className="file-preview optional-additional-file-preview">
-                                                            <span className="file-name">{selectedAddFile.name}</span>
-                                                            <button
-                                                                type="button"
-                                                                className="exchange-icon"
-                                                                onClick={() => setSelectedAddFile(undefined)}
-                                                                title="Remove file"
-                                                            >
-                                                                <i className="exchange icon"></i>
-                                                            </button>
-                                                        </div>
-                                                    ) : additionalFileName ? (
-                                                        <div className="file-preview optional-additional-file-preview">
-                                                            <button
-                                                                type="button"
-                                                                className="file-name"
-                                                                title="(Server) additional file"
-                                                                onClick={(e) => e.preventDefault()}
-                                                            >
-                                                                {additionalFileName}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="exchange-icon"
-                                                                onClick={() => setAdditionalFileName("")}
-                                                                title="Clear (choose another)"
-                                                            >
-                                                                <i className="exchange icon"></i>
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <input
-                                                                type="file"
-                                                                className="file-input optional-additional-file-input"
-                                                                onChange={handleAdditionalFileChange}
-                                                            />
-                                                            <div className="file-drop-message">
-                                                                Drag &amp; drop your file here or&nbsp;
-                                                                <span className="browse-text">browse</span>
-                                                            </div>
-                                                        </>
-                                                    )}
+                                                    {/* Always show drop/browse */}
+                                                    <input
+                                                        type="file"
+                                                        className="file-input optional-additional-file-input"
+                                                        multiple
+                                                        onChange={handleAdditionalFileChange}
+                                                    />
+                                                    <div className="file-drop-message">
+                                                        Drag &amp; drop your file(s) here or&nbsp;
+                                                        <span className="browse-text">browse</span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}

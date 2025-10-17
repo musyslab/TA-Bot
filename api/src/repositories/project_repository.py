@@ -121,12 +121,12 @@ class ProjectRepository():
         project_solutionFile = project_solutionFile.split("/")[-1]
         project_descriptionfile = project_data.AsnDescriptionPath
         project_descriptionfile = project_descriptionfile.split("/")[-1]
-        project_additionalfile = ""
+        add_field = getattr(project_data, "AdditionalFilePath", "") or ""
         try:
-            if getattr(project_data, "AdditionalFilePath", None):
-                project_additionalfile = project_data.AdditionalFilePath.split("/")[-1]
+            add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
         except Exception:
-            project_additionalfile = ""
+            add_list = []
+        project_additionalfiles = [os.path.basename(p) for p in add_list if p]
         project[project_data.Id] = [
             str(project_data.Name),
             str(start_string),
@@ -134,7 +134,7 @@ class ProjectRepository():
             str(project_data.Language),
             str(project_solutionFile),
             str(project_descriptionfile),
-            str(project_additionalfile),
+            project_additionalfiles,
         ]
         return project
 
@@ -270,9 +270,12 @@ class ProjectRepository():
     def testcases_to_json(self, project_id: int) -> str:
         """Return testcases as JSON with project-level AdditionalFilePath in slot 7."""
         testcase_holder: Dict[int, list] = {}
-        # use project-level AdditionalFilePath (keep 7-field shape for compatibility)
         proj = Projects.query.filter(Projects.Id == project_id).first()
-        project_add_path = getattr(proj, "AdditionalFilePath", "") if proj else ""
+        add_field = getattr(proj, "AdditionalFilePath", "") if proj else ""
+        try:
+            add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
+        except Exception:
+            add_list = []
         tests = Testcases.query.filter(Testcases.ProjectId == project_id).all()
         for test in tests:
             level = Levels.query.filter(Levels.Id == test.LevelId).first()
@@ -284,7 +287,7 @@ class ProjectRepository():
                 test.input,
                 test.Output,
                 test.IsHidden,
-                project_add_path,
+                add_list,
             ]
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)

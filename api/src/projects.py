@@ -343,17 +343,20 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     assignmentdesc_path = os.path.join(proj_dir_path, ad_name)
     ad.save(assignmentdesc_path)
 
-    add_path = ""
-    add_up = request.files.get('additionalFile')
-    if add_up and add_up.filename:
-        # Preserve the original filename for additional files (do NOT timestamp or rename)
-        orig_name = safe_name(add_up.filename)
-        add_path = os.path.join(proj_dir_path, orig_name)
-        add_up.save(add_path)
-
+    # Multiple additional files (preserve original filenames; no renaming)
+    add_paths = []
+    for add_up in request.files.getlist('additionalFiles'):
+        if add_up and add_up.filename:
+            orig_name = safe_name(add_up.filename)
+            dst = os.path.join(proj_dir_path, orig_name)
+            add_up.save(dst)
+            add_paths.append(dst)
     # Use the just-uploaded path directly; avoid directory scan on create
     selected_path = path
-    new_project_id = project_repo.create_project(name, start_date, end_date, language, class_id, selected_path, assignmentdesc_path, add_path)
+    new_project_id = project_repo.create_project(
+        name, start_date, end_date, language, class_id,
+        selected_path, assignmentdesc_path, json.dumps(add_paths)
+    )
     project_repo.levels_creator(new_project_id)
 
     return make_response(str(new_project_id), HTTPStatus.OK)
@@ -440,26 +443,60 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
         assignmentdesc_path = os.path.join(proj_dir, f"{ts}__{ad_base}__{base_proj}{ad_ext}")
         ad.save(assignmentdesc_path)
 
-    up_add = request.files.get('additionalFile')
-    clear_add = (request.form.get('clearAdditionalFile', '').strip().lower() == 'true')
+    # Multiple additional files: load current list, remove/clear, then append new uploads
+    existing_add = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
+    try:
+        add_paths = json.loads(existing_add) if (existing_add or "").startswith('[') else ([existing_add] if existing_add else [])
+    except Exception:
+        add_paths = []
+    clear_add = (request.form.get('clearAdditionalFiles', '').strip().lower() == 'true')
+    remove_add = request.form.get('removeAdditionalFiles', '').strip()
+    try:
+        to_remove = json.loads(remove_add) if remove_add else []
+    except Exception:
+        to_remove = []
     additional_file_changed = False
-    if up_add and up_add.filename:
-        # Preserve the original filename for additional files (do NOT timestamp or rename)
-        orig_name = safe_name(up_add.filename)
-        add_path = os.path.join(proj_dir, orig_name)
-        up_add.save(add_path)
+    # Remove selected files (match by basename)
+    if to_remove:
+        keep = []
+        for p in add_paths:
+            bn = os.path.basename(p)
+            if bn in to_remove:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+                additional_file_changed = True
+            else:
+                keep.append(p)
+        add_paths = keep
+    # Clear all
+    if clear_add and add_paths:
+        for p in add_paths:
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+        add_paths = []
         additional_file_changed = True
-    elif clear_add:
-        # No new upload and user requested clear: remove DB reference
-        add_path = ""
-        additional_file_changed = True  
+    # Append newly uploaded additional files
+    for add_up in request.files.getlist('additionalFiles'):
+        if add_up and add_up.filename:
+            orig_name = safe_name(add_up.filename)
+            dst = os.path.join(proj_dir, orig_name)
+            add_up.save(dst)
+            add_paths.append(dst)
+            additional_file_changed = True
 
     # Always point the project at the newest solution inside its folder
     latest = pick_latest_solution(proj_dir, base_proj)
     if latest:
         path = latest
 
-    project_repo.edit_project(name, start_date, end_date, language, pid, path, assignmentdesc_path, add_path)
+    project_repo.edit_project(
+        name, start_date, end_date, language, pid,
+        path, assignmentdesc_path, json.dumps(add_paths)
+    )
 
     # Recompute testcase outputs **against the path we just wrote**, so we don't depend on
     # any cached ORM objects or delayed reads.
