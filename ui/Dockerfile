@@ -1,5 +1,5 @@
 # ui/Dockerfile.dev
-FROM node:20.11.1
+FROM node:20.18.0
 
 # if you still need legacy OpenSSL…
 ENV NODE_OPTIONS=--openssl-legacy-provider
