@@ -130,7 +130,6 @@ class Testcases(db.Model):
     input = Column(String)
     Output = Column(String)
     IsHidden = Column(Boolean)
-    AdditionalFilePath = Column(String)
 
 class StudentQuestions(db.Model):
     __tablename__ = "StudentQuestions"
