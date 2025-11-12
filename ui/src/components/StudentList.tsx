@@ -777,12 +777,24 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                             onChange={(e) => this.handleGradeChange(e, row)}
                                                             disabled
                                                         />
+                                                        {/*
                                                         <button
                                                             className="btn grade-btn"
                                                             onClick={() => this.openGradingModule(row.id)}
                                                         >
                                                             Grade
                                                         </button>
+                                                        */}
+                                                        
+                                                        <Link
+                                                            to={`/admin/project/${this.props.project_id}/${row.classId}/${row.subid}`}
+                                                            className="btn grade-btn"
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                        >
+                                                            Grade
+                                                        </Link>
+                                                        
                                                     </td>
                                                 </tr>
                                             );
@@ -842,12 +854,23 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                         onChange={(e) => this.handleGradeChange(e, row)}
                                                         disabled
                                                     />
+                                                    {/*
                                                     <button
                                                         className="btn grade-btn"
                                                         onClick={() => this.openGradingModule(row.id)}
                                                     >
                                                         Grade
                                                     </button>
+                                                    */}
+                                                    <Link
+                                                            to={`/admin/project/${this.props.project_id}/${row.classId}/${row.subid}`}
+                                                            //state={{studentName: `${row.Fname} ${row.Lname}`}}
+                                                            className="btn grade-btn"
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                        >
+                                                            Grade
+                                                    </Link>
                                                 </td>
                                             </tr>
                                         );

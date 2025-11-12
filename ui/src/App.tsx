@@ -21,6 +21,7 @@ import TaLanding from './AdminPages/TaLanding';
 import OfficeHoursPage from './pages/OfficeHoursPage';
 import ProjectAnalytics from './AdminPages/ProjectAnalitics';
 import PlagiarismCompare from "./pages/PlagiarismCompare";
+import GradingPage from './AdminPages/Grading';
 
 class App extends Component {
 
@@ -81,6 +82,11 @@ class App extends Component {
                     <Route path="/admin/project/:id" element={
                         <ProtectedRoute>
                             <ProjectBreakdown />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/project/:project_id/:class_id/:id" element={
+                        <ProtectedRoute>
+                            <GradingPage />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/upload" element={
