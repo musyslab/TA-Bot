@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
 import axios from 'axios'
-import { useParams, useLocation } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
 import '../css/CodeViews.scss'
@@ -39,12 +39,10 @@ type DiffEntry = {
 };
 
 const GradingPage = () => {
-    const location = useLocation();
-    const { studentName } = location.state || {};
-
-    const { id, class_id } = useParams<{ id: string; class_id: string }>();
+    const { id, class_id, project_id } = useParams<{ id: string; class_id: string; project_id: string }>();
     const submissionId = id !== undefined ? parseInt(id) : defaultpagenumber;
     const cid = class_id !== undefined ? parseInt(class_id) : -1;
+    const pid = project_id !== undefined ? parseInt(project_id) : -1;
 
     const copyBlockHandlers = {
         onCopy: (e: React.ClipboardEvent) => e.preventDefault(),
@@ -55,6 +53,7 @@ const GradingPage = () => {
     const [json, setJson] = useState<JsonResponse>({ results: [] });
     const [testsLoaded, setTestsLoaded] = useState<boolean>(false);
     const [code, setCode] = useState<string>('');
+    const [studentName, setStudentName] = useState<string>('');
     const [score] = useState<number>(0);
     const [hasScoreEnabled] = useState<boolean>(false);
 
@@ -109,7 +108,26 @@ const GradingPage = () => {
             })
             .then(res => setCode(res.data as string))
             .catch(err => console.log(err));
-    }, [submissionId, cid]);
+
+        axios
+            .post(`${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
+                { project_id: pid},
+                {
+                    headers: { 
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            .then(res => {
+                const data = res.data;
+                const entry = Object.entries(data).find(([_, value]) => parseInt((value as Array<string>)[8]) === submissionId);
+                if (entry) {
+                    const studentData = entry[1] as Array<string>;
+                    setStudentName(`${studentData[1]} ${studentData[0]}`);
+                }
+            })
+            .catch(err => console.log(err));
+    }, [submissionId, cid, pid]);
 
     // Log initial UI state on first load (and when navigating to a different submission/class)
     useEffect(() => {
