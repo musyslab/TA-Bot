@@ -3,7 +3,7 @@ import axios from 'axios'
 import { useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
-import '../css/CodeViews.scss'
+import '../css/Grading.scss'
 import { Icon } from 'semantic-ui-react'
 import { diffChars } from 'diff'
 
@@ -43,6 +43,7 @@ const GradingPage = () => {
     const submissionId = id !== undefined ? parseInt(id) : defaultpagenumber;
     const cid = class_id !== undefined ? parseInt(class_id) : -1;
     const pid = project_id !== undefined ? parseInt(project_id) : -1;
+    const userID = useRef<number | null>(null);
 
     const copyBlockHandlers = {
         onCopy: (e: React.ClipboardEvent) => e.preventDefault(),
@@ -113,7 +114,7 @@ const GradingPage = () => {
             .post(`${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
                 { project_id: pid},
                 {
-                    headers: { 
+                    headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
                     },
                 }
@@ -123,6 +124,7 @@ const GradingPage = () => {
                 const entry = Object.entries(data).find(([_, value]) => parseInt((value as Array<string>)[8]) === submissionId);
                 if (entry) {
                     const studentData = entry[1] as Array<string>;
+                    userID.current = parseInt(entry[0]);
                     setStudentName(`${studentData[1]} ${studentData[0]}`);
                 }
             })
@@ -364,6 +366,19 @@ const GradingPage = () => {
             });
         });
     });
+
+    const [errorMenu, setErrorMenu] = useState<{
+        active: boolean;
+        line: number | null;
+        x: number;
+        y: number;
+    }>({
+        active: false,
+        line: null,
+        x: 0,
+        y: 0,
+    });
+
     return (
      <div className="page-container" id="code-page">
             <Helmet>
@@ -646,7 +661,16 @@ const GradingPage = () => {
                             {codeLines.map((text, idx) => {
                                 const lineNo = idx + 1;
                                 return (
-                                    <li key={lineNo} className="code-line">
+                                    <li key={lineNo} className="code-line"
+                                        onClick={(e) =>
+                                            setErrorMenu({
+                                                active: true,
+                                                line: lineNo,
+                                                x: e.clientX + window.scrollX,
+                                                y: e.clientY + window.scrollY,
+                                            })
+                                        }
+                                    >
                                         <span className="gutter">
                                             <span className="line-number">{lineNo}</span>
                                         </span>
@@ -655,6 +679,27 @@ const GradingPage = () => {
                                 );
                             })}
                         </ol>
+                        {/* Popup Error Menu */}
+                        {errorMenu.active && (
+                            <div
+                            className="error-menu"
+                            style={{
+                                top: errorMenu.y,
+                                left: errorMenu.x,
+                            }}
+                            >
+                            <div>Line: {errorMenu.line}</div>
+                            <button>Add Error</button>
+                            <button onClick={() =>
+                                setErrorMenu({
+                                    active: false,
+                                    line: null,
+                                    x: 0,
+                                    y: 0,
+                                })
+                            }>Close</button>
+                            </div>
+                        )}
                     </div>
                 )}
             </section>
