@@ -26,6 +26,19 @@ interface JsonResponse {
     results: Array<JsonResponseBody>;
 }
 
+interface ErrorDef {
+    id: string;
+    label: string;
+    description: string;
+    points: number;
+}
+
+interface ObservedError {
+    line: number;
+    errorId: string;
+    points: number;
+}
+
 type DiffEntry = {
     id: string;
     suite: string;
@@ -57,6 +70,7 @@ const GradingPage = () => {
     const [studentName, setStudentName] = useState<string>('');
     const [score] = useState<number>(0);
     const [hasScoreEnabled] = useState<boolean>(false);
+    const [grade, setGrade] = useState<number | null>(null);
 
     // UI
     const [activeView, setActiveView] = useState<'table' | 'diff'>('table');
@@ -67,6 +81,42 @@ const GradingPage = () => {
     // Intra-line highlight toggle
     const initialIntraRef = useRef<boolean>(Math.random() < 0.5);
     const [intraEnabled, setIntraEnabled] = useState<boolean>(initialIntraRef.current);
+
+    // Error data
+    const ERRORS: Record<string, ErrorDef> = {
+        ERROR1: {
+            id: "ERROR1",
+            label: "Error 1",
+            description: "Error 1 description.",
+            points: 1
+        },
+        ERROR2: {
+            id: "ERROR2",
+            label: "Error 2",
+            description: "Error 2 description.",
+            points: 2
+        },
+        ERROR3: {
+            id: "ERROR3",
+            label: "Error 3",
+            description: "Error 3 description.",
+            points: 3
+        }
+    };
+    const [observedErrors, setObservedErrors] = useState<ObservedError[]>([]);
+
+    // Error UI toggle
+    const [errorMenu, setErrorMenu] = useState<{
+        active: boolean;
+        line: number | null;
+        x: number;
+        y: number;
+    }>({
+        active: false,
+        line: null,
+        x: 0,
+        y: 0,
+    });
 
     // Track which (submissionId,cid) we've already logged to avoid duplicate logs (e.g., React StrictMode)
     const initLogKeyRef = useRef<string | null>(null);
@@ -367,17 +417,35 @@ const GradingPage = () => {
         });
     });
 
-    const [errorMenu, setErrorMenu] = useState<{
-        active: boolean;
-        line: number | null;
-        x: number;
-        y: number;
-    }>({
-        active: false,
-        line: null,
-        x: 0,
-        y: 0,
-    });
+    // Automatically calculates grade
+    useEffect(() => {
+        const total = observedErrors.reduce((sum, e) => sum - e.points, 100);
+        setGrade(total);
+    }, [observedErrors]);
+
+    // ===== Error helpers =====
+    const addObservedError = (lineNo: number, error: string) => {
+        setObservedErrors(prev => {
+            const exists = prev.some(
+                e => e.line === lineNo && e.errorId === error);
+            if (exists) return prev;
+            const table = ERRORS[error];
+            return [
+                ...prev,
+                {
+                    line: lineNo,
+                    errorId: error,
+                    points: table.points
+                }
+            ];
+        });
+    };
+
+    const removeObservedError = (lineNo: number, error: string) => {
+        setObservedErrors(prev =>
+            prev.filter(e => e.line !== lineNo && e.errorId !== error)
+        );
+    };
 
     return (
      <div className="page-container" id="code-page">
