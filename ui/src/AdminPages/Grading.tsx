@@ -119,6 +119,11 @@ const GradingPage = () => {
     });
 
     const [showSubMenu, setShowSubMenu] = useState(false);
+    const [showRemoveMenu, setShowRemoveMenu] = useState(false);
+
+    const getErrorForLine = (lineNumber: number) => {
+        return observedErrors.find(e => e.line === lineNumber);
+    };
     // Track which (submissionId,cid) we've already logged to avoid duplicate logs (e.g., React StrictMode)
     const initLogKeyRef = useRef<string | null>(null);
 
@@ -449,7 +454,7 @@ const GradingPage = () => {
     };
 
     return (
-     </><div className="page-container" id="code-page">
+     <div className="page-container" id="code-page">
             <Helmet>
                 <title>TA-Bot</title>
             </Helmet>
@@ -729,8 +734,18 @@ const GradingPage = () => {
                         <ol className="code-list">
                             {codeLines.map((text, idx) => {
                                 const lineNo = idx + 1;
+
+                                const errorsOnLine = observedErrors.filter(e => e.line === lineNo); // checks if there is a recorded error for this line
+
+                                const tooltipText = errorsOnLine.length > 0 
+                                    ? errorsOnLine.map(e => {
+                                        const def = ERRORS[e.errorId];
+                                        return `${def?.label || e.errorId}`;
+                                    }).join('\n') 
+                                    : undefined;
                                 return (
-                                    <li key={lineNo} className="code-line"
+                                    <li key={lineNo} className="code-line" title ={tooltipText} 
+                                        style={{ backgroundColor: errorsOnLine.length > 0 ? 'rgba(255, 0, 0, 0.2)' : 'transparent' }}
                                         onClick={(e) =>
                                             setErrorMenu({
                                                 active: true,
@@ -795,6 +810,48 @@ const GradingPage = () => {
                                 </div>
                             )}
                             </div>
+                            {observedErrors.some(e => e.line === errorMenu.line) && (
+                                <div 
+                                    style={{ position: 'relative', marginTop: '5px' }} 
+                                    onMouseEnter={() => setShowRemoveMenu(true)}
+                                    onMouseLeave={() => setShowRemoveMenu(false)}
+                                >
+                                    <button style={{width:'100%', textAlign:'left', cursor:'pointer', color: 'red'}}>
+                                        Remove Error -{'>'}
+                                    </button>
+                                    {showRemoveMenu && (
+                                        <div style={{
+                                            position: 'absolute',
+                                            left: '100%', 
+                                            top: 0,
+                                            backgroundColor: 'white',
+                                            width: '150px' 
+                                        }}>
+                                            {observedErrors
+                                                .filter(e => e.line === errorMenu.line)
+                                                .map((obsError, idx) => {
+                                                    const errorLabel = ERRORS[obsError.errorId]?.label || obsError.errorId;
+                                                    
+                                                    return (
+                                                        <button
+                                                            key={idx}
+                                                            style={{ display: 'block', width: '100%', textAlign: 'left', color: 'red', cursor: 'pointer' }}
+                                                            onClick={() => {
+                                                                if (errorMenu.line !== null) {
+                                                                    removeObservedError(errorMenu.line, obsError.errorId);
+                                                                    setShowRemoveMenu(false);
+                                                                    setErrorMenu(prev => ({ ...prev, active: false }));
+                                                                }
+                                                            }}
+                                                        >
+                                                            {errorLabel}
+                                                        </button>
+                                                    );
+                                                })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             <button onClick={() => setErrorMenu(prev => ({ ...prev, active: false }))}>
                                 Close
