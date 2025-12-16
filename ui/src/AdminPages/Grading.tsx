@@ -118,6 +118,7 @@ const GradingPage = () => {
         y: 0,
     });
 
+    const [showSubMenu, setShowSubMenu] = useState(false);
     // Track which (submissionId,cid) we've already logged to avoid duplicate logs (e.g., React StrictMode)
     const initLogKeyRef = useRef<string | null>(null);
 
@@ -448,7 +449,7 @@ const GradingPage = () => {
     };
 
     return (
-     <div className="page-container" id="code-page">
+     </><div className="page-container" id="code-page">
             <Helmet>
                 <title>TA-Bot</title>
             </Helmet>
@@ -756,23 +757,75 @@ const GradingPage = () => {
                                 left: errorMenu.x,
                             }}
                             >
-                            <div>Line: {errorMenu.line}</div>
-                            <button>Add Error</button>
-                            <button onClick={() =>
-                                setErrorMenu({
-                                    active: false,
-                                    line: null,
-                                    x: 0,
-                                    y: 0,
-                                })
-                            }>Close</button>
+                            <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>
+                                Line: {errorMenu.line}
+                            </div>
+
+                            <div 
+                                style={{ position: 'relative' }} 
+                                onMouseEnter={() => setShowSubMenu(true)}
+                                onMouseLeave={() => setShowSubMenu(false)}
+                            >
+                            <button>Add Error -{'>'}</button>
+                            {showSubMenu && (
+                                <div style={{
+                                    position: 'absolute',
+                                    left: '100%', 
+                                    top: 0,
+                                    backgroundColor: 'white',
+                                    border: '1px solid black',
+                                    width: '150px' 
+                                }}>
+                                    {Object.values(ERRORS).map((err) => (
+                                        <button
+                                            key={err.id}
+                                            style={{ display: 'block', width: '100%', textAlign: 'left' }}
+                                            onClick={() => {
+                                                if (errorMenu.line !== null) {
+                                                    addObservedError(errorMenu.line, err.id);
+                                                    
+                                                    setShowSubMenu(false);
+                                                    setErrorMenu(prev => ({ ...prev, active: false }));
+                                                }
+                                            }}
+                                        >
+                                            {err.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            </div>
+
+                            <button onClick={() => setErrorMenu(prev => ({ ...prev, active: false }))}>
+                                Close
+                            </button>
                             </div>
                         )}
                     </div>
                 )}
             </section>
+            <div>
+                <h3>Current Observed Errors:</h3>
+                
+                {observedErrors.length === 0 && <p>No errors added yet.</p>}
+
+                <ul>
+                    {observedErrors.map((err, index) => (
+                        <li key={index}>
+                            <strong>Line {err.line}:</strong> {err.errorId} ({err.points} point(s))
+                        </li>
+                    ))}
+                </ul>
+
+                {/* Raw Data View (good for checking technical details) */}
+                <pre>
+                    {JSON.stringify(observedErrors, null, 2)}
+                </pre>
+            </div>
         </div>
+        
     );
 }
+
 
 export default GradingPage;
