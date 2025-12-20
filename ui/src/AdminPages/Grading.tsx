@@ -34,10 +34,12 @@ interface ErrorDef {
 }
 
 interface ObservedError {
-    line: number;
     errorId: string;
-    points: number;
 }
+
+type ErrorsByLine = {
+    [line: number]: ObservedError[];
+};
 
 type DiffEntry = {
     id: string;
@@ -70,7 +72,7 @@ const GradingPage = () => {
     const [studentName, setStudentName] = useState<string>('');
     const [score] = useState<number>(0);
     const [hasScoreEnabled] = useState<boolean>(false);
-    const [grade, setGrade] = useState<number | null>(null);
+    const [grade, setGrade] = useState<number>(100);
 
     // UI
     const [activeView, setActiveView] = useState<'table' | 'diff'>('table');
@@ -103,27 +105,15 @@ const GradingPage = () => {
             points: 3
         }
     };
-    const [observedErrors, setObservedErrors] = useState<ObservedError[]>([]);
+    const [observedErrors, setObservedErrors] = useState<ErrorsByLine>({});
+    const hasErrors = Object.keys(observedErrors).length > 0;
 
     // Error UI toggle
-    const [errorMenu, setErrorMenu] = useState<{
-        active: boolean;
-        line: number | null;
-        x: number;
-        y: number;
-    }>({
-        active: false,
-        line: null,
-        x: 0,
-        y: 0,
-    });
+    const [errorMenu, setErrorMenu] = useState({active: false, line: -1, x: 0, y: 0});
 
-    const [showSubMenu, setShowSubMenu] = useState(false);
-    const [showRemoveMenu, setShowRemoveMenu] = useState(false);
+    const [showSubMenu, setShowSubMenu] = useState<boolean>(false);
+    const [showRemoveMenu, setShowRemoveMenu] = useState<boolean>(false);
 
-    const getErrorForLine = (lineNumber: number) => {
-        return observedErrors.find(e => e.line === lineNumber);
-    };
     // Track which (submissionId,cid) we've already logged to avoid duplicate logs (e.g., React StrictMode)
     const initLogKeyRef = useRef<string | null>(null);
 
@@ -424,34 +414,50 @@ const GradingPage = () => {
     });
 
     // Automatically calculates grade
-    useEffect(() => {
-        const total = observedErrors.reduce((sum, e) => sum - e.points, 100);
-        setGrade(total);
-    }, [observedErrors]);
+    // TODO: Add automatic grade calc w/ grade const
 
     // ===== Error helpers =====
-    const addObservedError = (lineNo: number, error: string) => {
-        setObservedErrors(prev => {
-            const exists = prev.some(
-                e => e.line === lineNo && e.errorId === error);
-            if (exists) return prev;
-            const table = ERRORS[error];
-            return [
-                ...prev,
-                {
-                    line: lineNo,
-                    errorId: error,
-                    points: table.points
-                }
-            ];
+    function showErrorMenu(lineNo: number, e: any) {
+        setErrorMenu({
+            active: true,
+            line: lineNo,
+            x: e.clientX + window.scrollX,
+            y: e.clientY + window.scrollY,
         });
-    };
+    }
+    function hideErrorMenu() {
+        setErrorMenu(prev => ({ ...prev, active: false }));
+    }
 
-    const removeObservedError = (lineNo: number, error: string) => {
-        setObservedErrors(prev =>
-            prev.filter(e => e.line !== lineNo && e.errorId !== error)
-        );
-    };
+    function addObservedError(line: number, errorId: string) {
+        setObservedErrors(prev => {
+            const errors = prev[line] ?? [];
+
+            // Don't add if error exists
+            if (errors.some(e => e.errorId === errorId)) {
+            return prev;
+            }
+
+            return { ...prev, [
+                line]: [...errors, { errorId }],
+            };
+        });
+    }
+
+    function removeObservedError(line: number, errorId: string) {
+        setObservedErrors(prev => {
+            const remaining = prev[line]?.filter(e => e.errorId !== errorId) ?? [];
+
+            // Delete key if no errors are left
+            if (remaining.length === 0) {
+                const { [line]: _, ...rest } = prev;
+                return rest;
+            }
+
+            return { ...prev, [line]: remaining };
+        });
+    }
+
 
     return (
      <div className="page-container" id="code-page">
@@ -730,78 +736,73 @@ const GradingPage = () => {
                 <h2 className="section-title">Submitted Code</h2>
                 {!code && <div className="no-data-message">Fetching submitted code…</div>}
                 {!!code && (
-                    <div className="code-block code-viewer" role="region" aria-label="Submitted source code">
-                        <ol className="code-list">
-                            {codeLines.map((text, idx) => {
-                                const lineNo = idx + 1;
-
-                                const errorsOnLine = observedErrors.filter(e => e.line === lineNo); // checks if there is a recorded error for this line
-
-                                const tooltipText = errorsOnLine.length > 0 
-                                    ? errorsOnLine.map(e => {
-                                        const def = ERRORS[e.errorId];
-                                        return `${def?.label || e.errorId}`;
-                                    }).join('\n') 
-                                    : undefined;
-                                return (
-                                    <li key={lineNo} className="code-line" title ={tooltipText} 
-                                        style={{ backgroundColor: errorsOnLine.length > 0 ? 'rgba(255, 0, 0, 0.2)' : 'transparent' }}
-                                        onClick={(e) =>
-                                            setErrorMenu({
-                                                active: true,
-                                                line: lineNo,
-                                                x: e.clientX + window.scrollX,
-                                                y: e.clientY + window.scrollY,
-                                            })
-                                        }
-                                    >
-                                        <span className="gutter">
-                                            <span className="line-number">{lineNo}</span>
-                                        </span>
-                                        <span className="code-text">{text || '\u00A0'}</span>
-                                    </li>
-                                );
-                            })}
-                        </ol>
-                        {/* Popup Error Menu */}
-                        {errorMenu.active && (
-                            <div
-                            className="error-menu"
-                            style={{
-                                top: errorMenu.y,
-                                left: errorMenu.x,
-                            }}
-                            >
-                            <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>
-                                Line: {errorMenu.line}
-                            </div>
-
-                            <div 
-                                style={{ position: 'relative' }} 
-                                onMouseEnter={() => setShowSubMenu(true)}
-                                onMouseLeave={() => setShowSubMenu(false)}
-                            >
-                            <button>Add Error -{'>'}</button>
+                    <div className="code-and-errors">
+                        <div className="code-block code-viewer" role="region" aria-label="Submitted source code">
+                            <ol className="code-list">
+                                {codeLines.map((text, idx) => {
+                                    const lineNo = idx + 1;
+                                    const errors = observedErrors[lineNo] ?? [];
+                                    return (
+                                        <li key={lineNo} className={`code-line ${errors.length > 0 ? "has-error" : ""}`}
+                                            onClick={(e) => showErrorMenu(lineNo, e)}
+                                        >
+                                            <span className="gutter">
+                                                <span className="line-number">{lineNo}</span>
+                                            </span>
+                                            <span className="code-text">
+                                                {text || '\u00A0'}
+                                            </span>
+                                        </li>
+                                    );
+                                })}
+                            </ol>
+                        </div>
+                        <div className="code-viewer">
+                            <ol className="code-list">
+                                {hasErrors && codeLines.map((_, idx) => {
+                                    const lineNo = idx + 1;
+                                    const errors = observedErrors[lineNo] ?? [];
+                                    return (
+                                        <li key={lineNo} className="error-line">
+                                            {errors.length > 0 && (
+                                                <div class="error-block error-tag">
+                                                    <div class="error-text">{ERRORS[errors[0].errorId].label}</div>
+                                                    <div class="error-points">-{ERRORS[errors[0].errorId].points}</div>
+                                                    <button class="error-close"
+                                                        onClick={() => removeObservedError(lineNo, errors[0].errorId)}
+                                                    >X</button>
+                                                </div>
+                                            )}
+                                            {errors.length === 0 && (
+                                                <div>{'\u00A0'}</div>
+                                            )}
+                                        </li>
+                                    );
+                                })}
+                            </ol>
+                        </div>
+                    </div>
+                )}
+                {/* Error Menus */}
+                {errorMenu.active && (
+                    <div className="error-menu" style={{ top: errorMenu.y, left: errorMenu.x, }}>
+                        <div className="menu-line">Line: {errorMenu.line}</div>
+                        
+                        <div className="menu-add"
+                            onMouseEnter={() => setShowSubMenu(true)}
+                            onMouseLeave={() => setShowSubMenu(false)}
+                        >
+                            <button className="menu-add-button">Add Error &#9656;</button>
+                            {/* Sub menu */}
                             {showSubMenu && (
-                                <div style={{
-                                    position: 'absolute',
-                                    left: '100%', 
-                                    top: 0,
-                                    backgroundColor: 'white',
-                                    border: '1px solid black',
-                                    width: '150px' 
-                                }}>
+                                <div className="sub-menu">
                                     {Object.values(ERRORS).map((err) => (
                                         <button
                                             key={err.id}
-                                            style={{ display: 'block', width: '100%', textAlign: 'left' }}
                                             onClick={() => {
-                                                if (errorMenu.line !== null) {
-                                                    addObservedError(errorMenu.line, err.id);
-                                                    
-                                                    setShowSubMenu(false);
-                                                    setErrorMenu(prev => ({ ...prev, active: false }));
-                                                }
+                                                addObservedError(errorMenu.line, err.id);
+                                                setShowSubMenu(false);
+                                                hideErrorMenu();
                                             }}
                                         >
                                             {err.label}
@@ -809,68 +810,55 @@ const GradingPage = () => {
                                     ))}
                                 </div>
                             )}
-                            </div>
-                            {observedErrors.some(e => e.line === errorMenu.line) && (
-                                <div 
-                                    style={{ position: 'relative', marginTop: '5px' }} 
-                                    onMouseEnter={() => setShowRemoveMenu(true)}
-                                    onMouseLeave={() => setShowRemoveMenu(false)}
-                                >
-                                    <button style={{width:'100%', textAlign:'left', cursor:'pointer', color: 'red'}}>
-                                        Remove Error -{'>'}
-                                    </button>
-                                    {showRemoveMenu && (
-                                        <div style={{
-                                            position: 'absolute',
-                                            left: '100%', 
-                                            top: 0,
-                                            backgroundColor: 'white',
-                                            width: '150px' 
-                                        }}>
-                                            {observedErrors
-                                                .filter(e => e.line === errorMenu.line)
-                                                .map((obsError, idx) => {
-                                                    const errorLabel = ERRORS[obsError.errorId]?.label || obsError.errorId;
-                                                    
-                                                    return (
-                                                        <button
-                                                            key={idx}
-                                                            style={{ display: 'block', width: '100%', textAlign: 'left', color: 'red', cursor: 'pointer' }}
-                                                            onClick={() => {
-                                                                if (errorMenu.line !== null) {
-                                                                    removeObservedError(errorMenu.line, obsError.errorId);
-                                                                    setShowRemoveMenu(false);
-                                                                    setErrorMenu(prev => ({ ...prev, active: false }));
-                                                                }
-                                                            }}
-                                                        >
-                                                            {errorLabel}
-                                                        </button>
-                                                    );
-                                                })}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            <button onClick={() => setErrorMenu(prev => ({ ...prev, active: false }))}>
-                                Close
-                            </button>
+                        </div>
+                        {/* Remove Menu */}
+                        {!!observedErrors[errorMenu.line]?.length && (
+                            <div className="remove-error"
+                                onMouseEnter={() => setShowRemoveMenu(true)}
+                                onMouseLeave={() => setShowRemoveMenu(false)}
+                            >
+                                <button className="remove-button">Remove Error &#9656;</button>
+                                {showRemoveMenu && (
+                                    <div className="remove-menu">
+                                        {observedErrors[errorMenu.line].map((error, idx) => (
+                                            <button
+                                                key={idx}
+                                                className="remove-menu-item"
+                                                onClick={() => {
+                                                    removeObservedError(errorMenu.line, error.errorId);
+                                                    setShowRemoveMenu(false);
+                                                    hideErrorMenu();
+                                                }}
+                                            >
+                                                {ERRORS[error.errorId].label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
+
+                        <button className="menu-close" onClick={hideErrorMenu}>Close</button>
                     </div>
                 )}
             </section>
+
             <div>
                 <h3>Current Observed Errors:</h3>
+                {Object.keys(observedErrors).length === 0 && <p>No errors added yet.</p>}
                 
-                {observedErrors.length === 0 && <p>No errors added yet.</p>}
-
                 <ul>
-                    {observedErrors.map((err, index) => (
-                        <li key={index}>
-                            <strong>Line {err.line}:</strong> {err.errorId} ({err.points} point(s))
-                        </li>
+                    {Object.entries(observedErrors).map(([line, errors]) => (
+                    <li key={line}>
+                        <strong>Line {line}:</strong>
+                        <ul>
+                        {errors.map((err, index) => (
+                            <li key={index}>
+                            {err.errorId} ({err.points} point(s))
+                            </li>
+                        ))}
+                        </ul>
+                    </li>
                     ))}
                 </ul>
 
