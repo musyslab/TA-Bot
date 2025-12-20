@@ -1,13 +1,136 @@
 @import "CodeViews";
 
+.code-and-errors {
+    display: grid;
+    grid-template-columns: 1fr auto;
+
+    .code-viewer {
+        .code-line {
+            cursor: pointer;
+        }
+
+        .has-error {
+            background-color: #fff1f1;
+
+            &:hover {
+                background-color: #fdcbcb;
+            }
+        }
+
+        .error-line {
+            gap: 0.75rem;
+            padding: 0.15rem 0.75rem;
+            border-bottom: 1px solid transparent;
+            white-space: pre;
+        }
+    }
+}
+
 .error-menu {
     position: absolute;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
     background: #fff;
     border: 1px solid #ccc;
     padding: 8px;
     border-radius: 4px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-    z-index: 100;
-    display: flex;
-    flex-direction: column;
+    
+    .menu-line {
+        margin-bottom: 8px;
+        font-weight: bold;
+    }
+
+    .menu-add {
+        position: relative;
+    }
+}
+
+.sub-menu {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    background: white;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.remove-error {
+    position: relative;
+    margin-top: 5px;
+
+    .remove-button {
+        width: 100%;
+        cursor: pointer;
+        color: red;
+    }
+
+    .remove-menu {
+        position: absolute;
+        left: 100%;
+        top: 0;
+        background: white;
+        width: 150px;
+    }
+
+    .remove-menu-item {
+        display: block;
+        width: 100%;
+        color: red;
+        cursor: pointer;
+    }
+}
+
+.error-block {
+    display: grid;
+    grid-template-columns: 1fr 2rem 1rem;
+    min-width: max-content;
+
+    padding: 0 1rem;
+    background: #ffffff;
+    border-radius: 8px;
+    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.12));
+
+    /* Creates the arrow for the error */
+    &::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: -5px;
+        transform: translateY(-50%);
+        width: 0;
+        height: 0;
+
+        border-top: 7px solid transparent;
+        border-bottom: 7px solid transparent;
+        border-right: 7px solid #ffffff;
+    }
+}
+
+.error-tag {
+    .error-text, .error-points, .error-close {
+        font-size: 0.95em;
+    }
+
+    .error-text {
+        padding-right: 1rem;
+    }
+
+    .error-points {
+        color: #B91C1C;
+        font-weight: 500;
+    }
+
+    .error-close {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: #9CA3AF;
+        font-weight: bold;
+
+        &:hover {
+            color: #EF4444;
+        }
+    }
 }
