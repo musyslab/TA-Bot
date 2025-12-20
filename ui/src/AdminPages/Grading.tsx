@@ -879,6 +879,9 @@ const GradingPage = () => {
                     {JSON.stringify(observedErrors, null, 2)}
                 </pre>
             </div>
+            <div>
+                <h3>Grade: {grade}</h3>
+            </div>
         </div>
         
     );
