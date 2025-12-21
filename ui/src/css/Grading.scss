@@ -45,20 +45,40 @@
     .menu-add {
         position: relative;
     }
+
+    .menu-add-button{
+        width: 100%;
+        cursor: pointer;
+    }
+    .add-menu-item{
+        width: 100%;
+        cursor: pointer;
+    }
+    .menu-close{
+        width: 100%;
+        cursor: pointer;
+    }
 }
 
 .sub-menu {
     position: absolute;
     left: 100%;
     top: 0;
+    width: 100px;
     background: white;
     border-radius: 4px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.2);
 }
 
+.menu-actions {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid #ccc; 
+  margin-bottom: 5px;
+}
 .remove-error {
     position: relative;
-    margin-top: 5px;
+    
 
     .remove-button {
         width: 100%;
@@ -71,7 +91,7 @@
         left: 100%;
         top: 0;
         background: white;
-        width: 150px;
+        width: 100px;
     }
 
     .remove-menu-item {

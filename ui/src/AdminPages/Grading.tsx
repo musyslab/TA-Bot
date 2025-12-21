@@ -442,6 +442,7 @@ const GradingPage = () => {
                 line]: [...errors, { errorId }],
             };
         });
+        setGrade(prev => prev - ERRORS[errorId].points);
     }
 
     function removeObservedError(line: number, errorId: string) {
@@ -456,6 +457,7 @@ const GradingPage = () => {
 
             return { ...prev, [line]: remaining };
         });
+        setGrade(prev => prev + ERRORS[errorId].points);
     }
 
 
@@ -788,56 +790,57 @@ const GradingPage = () => {
                     <div className="error-menu" style={{ top: errorMenu.y, left: errorMenu.x, }}>
                         <div className="menu-line">Line: {errorMenu.line}</div>
                         
-                        <div className="menu-add"
-                            onMouseEnter={() => setShowSubMenu(true)}
-                            onMouseLeave={() => setShowSubMenu(false)}
-                        >
-                            <button className="menu-add-button">Add Error &#9656;</button>
-                            {/* Sub menu */}
-                            {showSubMenu && (
-                                <div className="sub-menu">
-                                    {Object.values(ERRORS).map((err) => (
-                                        <button
-                                            key={err.id}
-                                            onClick={() => {
-                                                addObservedError(errorMenu.line, err.id);
-                                                setShowSubMenu(false);
-                                                hideErrorMenu();
-                                            }}
-                                        >
-                                            {err.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                        {/* Remove Menu */}
-                        {!!observedErrors[errorMenu.line]?.length && (
-                            <div className="remove-error"
-                                onMouseEnter={() => setShowRemoveMenu(true)}
-                                onMouseLeave={() => setShowRemoveMenu(false)}
+                        <div className="menu-actions">
+                            <div className="menu-add"
+                                onMouseEnter={() => setShowSubMenu(true)}
+                                onMouseLeave={() => setShowSubMenu(false)}
                             >
-                                <button className="remove-button">Remove Error &#9656;</button>
-                                {showRemoveMenu && (
-                                    <div className="remove-menu">
-                                        {observedErrors[errorMenu.line].map((error, idx) => (
-                                            <button
-                                                key={idx}
-                                                className="remove-menu-item"
+                                <button className="menu-add-button">Add Error &#9656;</button>
+                                {/* Sub menu */}
+                                {showSubMenu && (
+                                    <div className="sub-menu">
+                                        {Object.values(ERRORS).map((err) => (
+                                            <button className="add-menu-item"
+                                                key={err.id}
                                                 onClick={() => {
-                                                    removeObservedError(errorMenu.line, error.errorId);
-                                                    setShowRemoveMenu(false);
+                                                    addObservedError(errorMenu.line, err.id);
+                                                    setShowSubMenu(false);
                                                     hideErrorMenu();
                                                 }}
                                             >
-                                                {ERRORS[error.errorId].label}
+                                                {err.label}
                                             </button>
                                         ))}
                                     </div>
                                 )}
                             </div>
-                        )}
-
+                            {/* Remove Menu */}
+                            {!!observedErrors[errorMenu.line]?.length && (
+                                <div className="remove-error"
+                                    onMouseEnter={() => setShowRemoveMenu(true)}
+                                    onMouseLeave={() => setShowRemoveMenu(false)}
+                                >
+                                    <button className="remove-button">Remove Error &#9656;</button>
+                                    {showRemoveMenu && (
+                                        <div className="remove-menu">
+                                            {observedErrors[errorMenu.line].map((error, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    className="remove-menu-item"
+                                                    onClick={() => {
+                                                        removeObservedError(errorMenu.line, error.errorId);
+                                                        setShowRemoveMenu(false);
+                                                        hideErrorMenu();
+                                                    }}
+                                                >
+                                                    {ERRORS[error.errorId].label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                         <button className="menu-close" onClick={hideErrorMenu}>Close</button>
                     </div>
                 )}
