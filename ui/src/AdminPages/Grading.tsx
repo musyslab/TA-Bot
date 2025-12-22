@@ -32,14 +32,21 @@ interface ErrorDef {
     description: string;
     points: number;
 }
-
 interface ObservedError {
-    errorId: string;
+    errorId: string; // ex: "ERROR1", "ERROR2"
 }
 
-type ErrorsByLine = {
-    [line: number]: ObservedError[];
-};
+// object keys are really strings once stored in JS
+type ErrorsByLine = Record<string, ObservedError[]>;
+
+// OLD TYPES
+//interface ObservedError {
+//    errorId: string;
+//}
+
+//type ErrorsByLine = {
+//    [line: number]: ObservedError[];
+//};
 
 type DiffEntry = {
     id: string;
@@ -109,7 +116,7 @@ const GradingPage = () => {
     const hasErrors = Object.keys(observedErrors).length > 0;
 
     // Error UI toggle
-    const [errorMenu, setErrorMenu] = useState({active: false, line: -1, x: 0, y: 0});
+    const [errorMenu, setErrorMenu] = useState({ active: false, line: -1, x: 0, y: 0 });
 
     const [showSubMenu, setShowSubMenu] = useState<boolean>(false);
     const [showRemoveMenu, setShowRemoveMenu] = useState<boolean>(false);
@@ -158,7 +165,7 @@ const GradingPage = () => {
 
         axios
             .post(`${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
-                { project_id: pid},
+                { project_id: pid },
                 {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -435,11 +442,12 @@ const GradingPage = () => {
 
             // Don't add if error exists
             if (errors.some(e => e.errorId === errorId)) {
-            return prev;
+                return prev;
             }
 
-            return { ...prev, [
-                line]: [...errors, { errorId }],
+            return {
+                ...prev, [
+                    line]: [...errors, { errorId }],
             };
         });
         setGrade(prev => prev - ERRORS[errorId].points);
@@ -462,7 +470,7 @@ const GradingPage = () => {
 
 
     return (
-     <div className="page-container" id="code-page">
+        <div className="page-container" id="code-page">
             <Helmet>
                 <title>TA-Bot</title>
             </Helmet>
@@ -789,7 +797,7 @@ const GradingPage = () => {
                 {errorMenu.active && (
                     <div className="error-menu" style={{ top: errorMenu.y, left: errorMenu.x, }}>
                         <div className="menu-line">Line: {errorMenu.line}</div>
-                        
+
                         <div className="menu-actions">
                             <div className="menu-add"
                                 onMouseEnter={() => setShowSubMenu(true)}
@@ -845,36 +853,81 @@ const GradingPage = () => {
                     </div>
                 )}
             </section>
-
             <div>
                 <h3>Current Observed Errors:</h3>
+
+                {/* Show message when empty */}
                 {Object.keys(observedErrors).length === 0 && <p>No errors added yet.</p>}
-                
-                <ul>
-                    {Object.entries(observedErrors).map(([line, errors]) => (
-                    <li key={line}>
-                        <strong>Line {line}:</strong>
-                        <ul>
-                        {errors.map((err, index) => (
-                            <li key={index}>
-                            {err.errorId} ({err.points} point(s))
-                            </li>
-                        ))}
-                        </ul>
-                    </li>
-                    ))}
-                </ul>
+
+                {/* NEW: Error Table View */}
+                {Object.keys(observedErrors).length > 0 && (
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                            <tr>
+                                <th style={{ border: "1px solid #ddd", padding: "8px" }}>Line</th>
+                                <th style={{ border: "1px solid #ddd", padding: "8px" }}>Error</th>
+                                <th style={{ border: "1px solid #ddd", padding: "8px" }}>Points</th>
+                                <th style={{ border: "1px solid #ddd", padding: "8px" }}>Action</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            {Object.entries(observedErrors)
+                                .sort(([a], [b]) => Number(a) - Number(b))
+                                .flatMap(([line, errors]) =>
+                                    errors.map((err, idx) => (
+                                        <tr key={`${line}-${err.errorId}-${idx}`}>
+                                            <td style={{ border: "1px solid #ddd", padding: "8px" }}>{line}</td>
+
+                                            <td style={{ border: "1px solid #ddd", padding: "8px" }}>
+                                                {ERRORS[err.errorId]?.label ?? err.errorId}
+                                            </td>
+
+                                            <td style={{ border: "1px solid #ddd", padding: "8px" }}>
+                                                {ERRORS[err.errorId]?.points ?? 0}
+                                            </td>
+
+                                            <td style={{ border: "1px solid #ddd", padding: "8px" }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeObservedError(Number(line), err.errorId)}
+                                                >
+                                                    Remove
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                        </tbody>
+                    </table>
+                )}
+
+                {/* OLD LIST VERSION (kept for backup)
+  <ul>
+    {Object.entries(observedErrors).map(([line, errors]) => (
+      <li key={line}>
+        <strong>Line {line}:</strong>
+        <ul>
+          {errors.map((err, index) => (
+            <li key={index}>
+              {err.errorId}
+            </li>
+          ))}
+        </ul>
+      </li>
+    ))}
+  </ul>
+  */}
 
                 {/* Raw Data View (good for checking technical details) */}
-                <pre>
-                    {JSON.stringify(observedErrors, null, 2)}
-                </pre>
+                <pre>{JSON.stringify(observedErrors, null, 2)}</pre>
             </div>
+
             <div>
                 <h3>Grade: {grade}</h3>
             </div>
         </div>
-        
+
     );
 }
 
