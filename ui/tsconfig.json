@@ -20,9 +20,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "types": [
-      "vite/client",
-      "react",
-      "react-dom"
+      "vite/client"
     ]
   },
   "include": [
