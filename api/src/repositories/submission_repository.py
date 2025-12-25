@@ -1,7 +1,7 @@
 from collections import defaultdict
 import os
 from src.repositories.database import db
-from .models import SnippetRuns, StudentGrades, StudentQuestions, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, StudentProgress, Users
+from .models import SnippetRuns, StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users
 from sqlalchemy import desc, and_
 from typing import Dict, List, Tuple
 from src.repositories.config_repository import ConfigRepository
@@ -29,7 +29,7 @@ class SubmissionRepository():
         Returns:
             Submissions: The latest submission object made by the user for the given project.
         """
-        submission = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User == user_id, Submissions.visible== 1)).order_by(desc("Time")).first()
+        submission = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User == user_id)).order_by(desc("Time")).first()
         return submission
 
     def get_submission_by_submission_id(self, submission_id: int) -> Submissions:
@@ -118,7 +118,7 @@ class SubmissionRepository():
         submission = self.get_submission_by_user_and_projectid(user_id,project_id)
         return submission.PylintFilepath
     
-    def create_submission(self, user_id: int, output: str, codepath: str, pylintpath: str, time: str, project_id: int,status: bool, errorcount: int, level: str, score: int, is_visible: int, testcase_results: str, linting_results: str):
+    def create_submission(self, user_id: int, output: str, codepath: str, pylintpath: str, time: str, project_id: int, status: bool, errorcount: int, testcase_results: str, linting_results: str):
         """Creates a new submission record in the database.
 
         Args:
@@ -130,14 +130,23 @@ class SubmissionRepository():
             project_id (int): The ID of the project for which the code was submitted.
             status (bool): Whether the submission passed or failed.
             errorcount (int): The number of pylint errors in the code.
-            level (str): The level of the submission (e.g. beginner, intermediate, advanced).
             score (int): The score awarded to the submission.
-            is_visible (int): Whether the submission is visible to the student, or locked due to TBS.
 
         Returns:
             int: The ID of the newly created submission record.
         """
-        submission = Submissions(OutputFilepath=output, CodeFilepath=codepath, PylintFilepath=pylintpath, Time=time, User=user_id, Project=project_id,IsPassing=status,NumberOfPylintErrors=errorcount,SubmissionLevel=level,Points=score, visible=is_visible, TestCaseResults=str(testcase_results), LintingResults=str(linting_results))
+        submission = Submissions(
+            OutputFilepath=output,
+            CodeFilepath=codepath,
+            PylintFilepath=pylintpath,
+            Time=time,
+            User=user_id,
+            Project=project_id,
+            IsPassing=status,
+            NumberOfPylintErrors=errorcount,
+            TestCaseResults=str(testcase_results),
+            LintingResults=str(linting_results),
+        )        
         db.session.add(submission)
         db.session.commit()
         created_id = submission.Id  # Assuming the auto-incremented ID field is named "ID"
@@ -179,48 +188,6 @@ class SubmissionRepository():
             else:
                 bucket[obj.User] = obj
         return bucket
-        
-
-    def get_current_level(self, project_id: int, user_ids: int) -> str:
-        """
-        Returns the latest level of a given project for a given user.
-
-        Args:
-        - project_id (int): The ID of the project.
-        - user_ids (int): The ID of the user.
-
-        Returns:
-        - str: The latest level of the project for the user. Returns an empty string if the user has not made any progress.
-        """
-        highest_level = StudentProgress.query.filter(and_(StudentProgress.ProjectId == project_id, StudentProgress.UserId == user_ids)).first()
-        if highest_level == None:
-            return ""
-        return highest_level.LatestLevel
-
-    def modifying_level(self, project_id: int, user_id: int, submission_id: str, current_level: str) -> bool:
-        """
-        Modifies the level of a student's progress in a project.
-
-        Args:
-            project_id (int): The ID of the project.
-            user_id (int): The ID of the user.
-            submission_id (str): The ID of the submission.
-            current_level (str): The current level of the student's progress.
-
-        Returns:
-            bool: True if the level was successfully modified
-        """
-        level = StudentProgress.query.filter(and_(StudentProgress.ProjectId == project_id, StudentProgress.UserId == user_id)).first()
-
-        if level == None:
-            Level_submission = StudentProgress(UserId=user_id,ProjectId=project_id,SubmissionId=submission_id,LatestLevel=current_level)
-            db.session.add(Level_submission)
-            db.session.commit()
-            return True
-        level.LatestLevel = current_level
-        level.SubmissionId = submission_id
-        db.session.commit()
-        return True
 
     def get_project_by_submission_id(self, submission_id: int) -> int:
         """Returns the project ID associated with a given submission ID.
@@ -256,12 +223,12 @@ class SubmissionRepository():
 
     def Submit_Student_OH_question(self, question, user_id, project_id):
         dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        student_question = StudentQuestions(StudentQuestionscol=question, StudentId=user_id, dismissed=0, ruling=-1, TimeSubmitted=dt_string, projectId=project_id)
+        student_question = OHVisits(StudentQuestionscol=question, StudentId=user_id, dismissed=0, ruling=-1, TimeSubmitted=dt_string, projectId=project_id)
         db.session.add(student_question)
         db.session.commit()
         return str(student_question.Sqid)
     def Submit_OH_ruling(self, question_id, ruling):
-        question = StudentQuestions.query.filter(StudentQuestions.Sqid == question_id).first()
+        question = OHVisits.query.filter(OHVisits.Sqid == question_id).first()
         question.ruling = int(ruling)
         if(int(ruling) == 0):
             question.dismissed = int(1)
@@ -270,7 +237,7 @@ class SubmissionRepository():
         db.session.commit()
         return "ok"
     def Submit_OH_dismiss(self, question_id):
-        question = StudentQuestions.query.filter(StudentQuestions.Sqid == question_id).first()
+        question = OHVisits.query.filter(OHVisits.Sqid == question_id).first()
         #Get classId based on the projectID
         project = Projects.query.filter(Projects.Id == question.projectId).first()
         classId = project.ClassId
@@ -280,7 +247,7 @@ class SubmissionRepository():
         return [question.StudentId, classId]
     def Get_all_OH_questions(self):
         #get all questions that have not been dismissed
-        questions = StudentQuestions.query.filter(StudentQuestions.dismissed == 0).all()
+        questions = OHVisits.query.filter(OHVisits.dismissed == 0).all()
         return questions
 
     def get_active_question(self, user_id, accepted_only: bool = False):
@@ -290,14 +257,14 @@ class SubmissionRepository():
         When True: only accepted questions (ruling == 1 AND TimeAccepted is not null) count as active
         (used by Upload page to show the banner only after acceptance).
         """
-        base_query = StudentQuestions.query.filter(
-            and_(StudentQuestions.StudentId == user_id, StudentQuestions.dismissed == 0)
+        base_query = OHVisits.query.filter(
+            and_(OHVisits.StudentId == user_id, OHVisits.dismissed == 0)
         )
         if accepted_only:
             base_query = base_query.filter(
-                and_(StudentQuestions.ruling == 1, StudentQuestions.TimeAccepted.isnot(None))
+                and_(OHVisits.ruling == 1, OHVisits.TimeAccepted.isnot(None))
             )
-        question = base_query.order_by(StudentQuestions.Sqid.desc()).first()
+        question = base_query.order_by(OHVisits.Sqid.desc()).first()
         if question is None:
             return -1
         return question.Sqid
@@ -309,23 +276,23 @@ class SubmissionRepository():
         If class_id is None or there is no current project match, fall back to any class.
         """
         # Base: accepted & not dismissed for this user
-        q = StudentQuestions.query.filter(
-            and_(StudentQuestions.StudentId == user_id,
-                 StudentQuestions.dismissed == 0,
-                 StudentQuestions.ruling == 1,
-                 StudentQuestions.TimeAccepted.isnot(None))
+        q = OHVisits.query.filter(
+            and_(OHVisits.StudentId == user_id,
+                 OHVisits.dismissed == 0,
+                 OHVisits.ruling == 1,
+                 OHVisits.TimeAccepted.isnot(None))
         )
         # If a class_id is provided, scope to projects from that class
         if class_id is not None:
-            q = (q.join(Projects, Projects.Id == StudentQuestions.projectId)
+            q = (q.join(Projects, Projects.Id == OHVisits.projectId)
                    .filter(Projects.ClassId == class_id))
-        result = q.order_by(StudentQuestions.Sqid.desc()).first()
+        result = q.order_by(OHVisits.Sqid.desc()).first()
         return result.Sqid if result else -1
 
     def check_timeout(self, user_id, project_id):
         tbs_settings = [5, 15, 45, 60, 90, 120, 120, 120]
         #get the two most recent submissions for a given projectID
-        submissions = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User == user_id, Submissions.visible ==1)).order_by(desc(Submissions.Time)).first()
+        submissions = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User == user_id)).order_by(desc(Submissions.Time)).first()
         #get the time of the most recent submission
         if submissions == None:
             return [1, "None"]
@@ -338,7 +305,7 @@ class SubmissionRepository():
         # get current time
         current_time = datetime.now()
         #given the student ID and project, query to see if there was a question asked for this project, get the most recent question
-        question = StudentQuestions.query.filter(and_(StudentQuestions.StudentId == user_id, StudentQuestions.projectId == project_id)).order_by(desc(StudentQuestions.TimeSubmitted)).first()
+        question = OHVisits.query.filter(and_(OHVisits.StudentId == user_id, OHVisits.projectId == project_id)).order_by(desc(OHVisits.TimeSubmitted)).first()
         time_until_resubmission=""
         tbs_threshold = tbs_settings[days_passed]
         if question == None:
@@ -363,13 +330,12 @@ class SubmissionRepository():
         submission = Submissions.query.filter(and_(Submissions.User == user_id, Submissions.Project == project_id)).order_by(desc(Submissions.Time)).first()
         if submission == None:
             print("Error: No submission found", flush=True)
-        if submission.visible == 1:
             return True
         return False
     
     def get_remaining_OH_Time(self, user_id, project_id):
         #Get the most recent question asked by the student for the given project that is dismissed
-        question = StudentQuestions.query.filter(and_(StudentQuestions.StudentId == user_id, StudentQuestions.projectId == int(project_id), StudentQuestions.dismissed == 1)).order_by(desc(StudentQuestions.TimeSubmitted)).first()
+        question = OHVisits.query.filter(and_(OHVisits.StudentId == user_id, OHVisits.projectId == int(project_id), OHVisits.dismissed == 1)).order_by(desc(OHVisits.TimeSubmitted)).first()
         #Get how long until this time is the current time
         if question == None:
             return "Expired"
@@ -387,11 +353,11 @@ class SubmissionRepository():
         return formatted_time_remaining 
     
     def get_number_of_questions_asked(self, user_id, project_id):
-        number_of_questions = StudentQuestions.query.filter(and_(StudentQuestions.StudentId == user_id, StudentQuestions.projectId == int(project_id))).count()
+        number_of_questions = OHVisits.query.filter(and_(OHVisits.StudentId == user_id, OHVisits.projectId == int(project_id))).count()
         return number_of_questions
     
     def get_student_questions_asked(self, user_id, project_id):
-        questions = StudentQuestions.query.filter(and_(StudentQuestions.StudentId == user_id, StudentQuestions.projectId == int(project_id))).all()
+        questions = OHVisits.query.filter(and_(OHVisits.StudentId == user_id, OHVisits.projectId == int(project_id))).all()
         return questions
     
     def get_all_submissions_for_project(self, project_id):
@@ -556,28 +522,41 @@ class SubmissionRepository():
         try:
             charges = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
 
-            # If the charges are less than 3, pull most recent Charge Redemptions and award charges.
+            # If base charges are not full, we use a SINGLE cooldown timer.
+            # When the cooldown expires, ALL base charges refill to 3 at once.
             if charges.BaseCharge < 3:
-                # Get the 3 most recent charge redemptions for the student
-                
-                charge_redemptions = SubmissionChargeRedeptions.query.filter(and_(SubmissionChargeRedeptions.UserId == int(user_id), SubmissionChargeRedeptions.ClassId == int(class_id), SubmissionChargeRedeptions.projectId == int(project_id), SubmissionChargeRedeptions.Type=="base", SubmissionChargeRedeptions.Recouped==0)).order_by(desc(SubmissionChargeRedeptions.RedeemedTime)).all()
-                
-                for charge in charge_redemptions:
-                    #Idenify on what date the charge was redeemed
-                    charge_date = charge.RedeemedTime
-                    # Calculate days passed since project start and clamp to valid tbs_settings index
+                last_base = (SubmissionChargeRedeptions.query
+                    .filter(and_(
+                        SubmissionChargeRedeptions.UserId == int(user_id),
+                        SubmissionChargeRedeptions.ClassId == int(class_id),
+                        SubmissionChargeRedeptions.projectId == int(project_id),
+                        SubmissionChargeRedeptions.Type == "base",
+                        SubmissionChargeRedeptions.Recouped == 0
+                    ))
+                    .order_by(desc(SubmissionChargeRedeptions.RedeemedTime))
+                    .first())
+
+                if last_base is not None and last_base.RedeemedTime is not None:
+                    charge_date = last_base.RedeemedTime
                     days_passed = (charge_date - project_start_date).days
-                    # ensure days_passed is within [0, len(tbs_settings)-1]
                     days_passed = max(0, min(days_passed, len(tbs_settings) - 1))
-                    
-                    #Get the TBS threshold for the given day
                     tbs_threshold = tbs_settings[days_passed]
-                    #Identify the current time, and see if it's greater than the time the charge was redeemed + the TBS threshold for the given day
-                    if datetime.now() > charge.RedeemedTime + timedelta(minutes=tbs_threshold):
-                        #Award the student a charge
-                        charges.BaseCharge += 1
-                        #Recoup the charge
-                        charge.Recouped = 1
+
+                    if datetime.now() >= last_base.RedeemedTime + timedelta(minutes=tbs_threshold):
+                        # FULL recharge
+                        charges.BaseCharge = 3
+                        # Mark all un-recouped base redemptions for this project as handled
+                        pending = (SubmissionChargeRedeptions.query
+                            .filter(and_(
+                                SubmissionChargeRedeptions.UserId == int(user_id),
+                                SubmissionChargeRedeptions.ClassId == int(class_id),
+                                SubmissionChargeRedeptions.projectId == int(project_id),
+                                SubmissionChargeRedeptions.Type == "base",
+                                SubmissionChargeRedeptions.Recouped == 0
+                            ))
+                            .all())
+                        for r in pending:
+                            r.Recouped = 1
                         db.session.commit()
 
             # If this is a new project (no base redemptions yet) and carryover left the student < 3,
@@ -611,7 +590,7 @@ class SubmissionRepository():
                 SubmissionChargeRedeptions.Recouped == 0,
                 SubmissionChargeRedeptions.Type=="base"
             )
-        ).order_by(SubmissionChargeRedeptions.RedeemedTime).first()
+        ).order_by(desc(SubmissionChargeRedeptions.RedeemedTime)).first()
         #Idenify on what date the charge was redeemed
 
         if charge_redemptions is None:
@@ -628,6 +607,8 @@ class SubmissionRepository():
          
         # Get the time until the next recharge
         time_until_resubmission = charge_redemptions.RedeemedTime + timedelta(minutes=tbs_threshold) - datetime.now()
+        if time_until_resubmission.total_seconds() < 0:
+            return timedelta(seconds=0)
 
         return time_until_resubmission
   
@@ -644,18 +625,15 @@ class SubmissionRepository():
             db.session.commit()
 
         submission_charge = None
-        visible = 0
 
         # Determine if a user is in an active office hour session; if so, do not charge the student.
-        question = StudentQuestions.query.filter(
-            and_(StudentQuestions.StudentId == user_id, StudentQuestions.dismissed == 0)
+        question = OHVisits.query.filter(
+            and_(OHVisits.StudentId == user_id, OHVisits.dismissed == 0)
         ).first()
         print("Question is: ", question, flush=True)
 
         if question is not None and question.ruling == 1:
-            visible = 1
             submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-            submission.visible = visible
             db.session.commit()
             return "ok"
 
@@ -678,9 +656,7 @@ class SubmissionRepository():
                     reward.submissionId = submission_id
                     reward.Recouped = 1
                     db.session.commit()
-                    visible = 1
                     submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-                    submission.visible = visible
                     db.session.commit()
                     return "ok"
 
@@ -699,22 +675,10 @@ class SubmissionRepository():
             )
             db.session.add(submission_charge)
             db.session.commit()
-            visible = 1
 
         # Update the visibility of the submission
         submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-        submission.visible = visible
         db.session.commit()
-        return "ok"
-
-    # --- submission_repository.py (added helper) ---
-
-    def set_submission_visibility(self, submission_id: int, visible: int = 1):
-        """Set the visibility flag for a submission (1 = visible, 0 = hidden)."""
-        submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-        if submission is not None:
-            submission.visible = int(visible)
-            db.session.commit()
         return "ok"
 
     def Charge_use_accounting(self, submission_id, charge_id):

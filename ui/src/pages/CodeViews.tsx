@@ -14,7 +14,6 @@ interface JsonTestResponseBody {
     type: number;
     description: string;
     name: string;
-    suite: string;
     hidden: string;
 }
 interface JsonResponseBody {
@@ -28,7 +27,6 @@ interface JsonResponse {
 
 type DiffEntry = {
     id: string;
-    suite: string;
     test: string;
     status: string;
     passed: boolean;
@@ -36,6 +34,11 @@ type DiffEntry = {
     expected: string;
     actual: string;
     unified: string;
+};
+
+type CodeFile = {
+    name: string;
+    content: string;
 };
 
 export function CodePage() {
@@ -51,7 +54,8 @@ export function CodePage() {
     // Data
     const [json, setJson] = useState<JsonResponse>({ results: [] });
     const [testsLoaded, setTestsLoaded] = useState<boolean>(false);
-    const [code, setCode] = useState<string>('');
+    const [codeFiles, setCodeFiles] = useState<CodeFile[]>([]);
+    const [selectedCodeFile, setSelectedCodeFile] = useState<string>('');
     const [score] = useState<number>(0);
     const [hasScoreEnabled] = useState<boolean>(false);
 
@@ -104,7 +108,32 @@ export function CodePage() {
             .get(`${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${submissionId}&class_id=${cid}`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
-            .then(res => setCode(res.data as string))
+            .then(res => {
+                const data = res.data as any;
+
+                // New shape: { files: [{ name, content }, ...] }
+                if (data && typeof data === 'object' && Array.isArray(data.files)) {
+                    const files: CodeFile[] = data.files
+                        .filter((f: any) => f && typeof f.name === 'string')
+                        .map((f: any) => ({ name: String(f.name), content: String(f.content ?? '') }));
+
+                    setCodeFiles(files);
+                    setSelectedCodeFile(prev => (prev && files.some(ff => ff.name === prev)) ? prev : (files[0]?.name ?? ''));
+                    return;
+                }
+
+                // Backward compat: old endpoint returned a single string
+                if (typeof data === 'string') {
+                    const fallback: CodeFile[] = [{ name: 'Submission', content: data }];
+                    setCodeFiles(fallback);
+                    setSelectedCodeFile('Submission');
+                    return;
+                }
+
+                // Last-resort fallback
+                setCodeFiles([{ name: 'Submission', content: '' }]);
+                setSelectedCodeFile('Submission');
+            })
             .catch(err => console.log(err));
     }, [submissionId, cid]);
 
@@ -119,14 +148,15 @@ export function CodePage() {
         logUiClick('Diff Finder', initialIntraRef.current, initialIntraRef.current);
     }, [submissionId, cid]);
 
-    // Group tests by suite
-    const suites = Array.from(new Set(json.results.map(item => item.test.suite)));
-    const suiteGroups = suites.map(s => {
-        const suiteItems = json.results.filter(r => r.test.suite === s);
-        const visible = suiteItems.filter(r => r.test.hidden !== 'True');
-        const hiddenCount = suiteItems.length - visible.length;
-        return { suite: s, visible, hiddenCount };
-    });
+    // Filter out hidden tests (and keep a single summary count)
+    const visibleResults = useMemo(
+        () => json.results.filter(r => r.test.hidden !== 'True'),
+        [json.results]
+    );
+    const hiddenTestsCount = useMemo(
+        () => json.results.filter(r => r.test.hidden === 'True').length,
+        [json.results]
+    );
 
     // Helpers
     const labelFor = (r: JsonResponseBody) => (r.skipped ? 'Skipped' : r.passed ? 'Passed' : 'Failed');
@@ -239,28 +269,25 @@ export function CodePage() {
     // Build diff "files" for the Diff File View
     const diffFilesAll: DiffEntry[] = useMemo(() => {
         const entries: DiffEntry[] = [];
-        suiteGroups.forEach(g => {
-            g.visible.forEach(r => {
-                const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
-                const { expected, actual } = parseOutputs(rawOut);
-                const title = `${r.test.suite}/${r.test.name}`;
-                const unified = buildUnifiedDiff(expected, actual, title);
-                entries.push({
-                    id: `${r.test.suite}__${r.test.name}`,
-                    suite: r.test.suite,
-                    test: r.test.name,
-                    status: labelFor(r),
-                    passed: r.passed,
-                    skipped: r.skipped,
-                    expected,
-                    actual,
-                    unified,
-                });
+        visibleResults.forEach((r, idx) => {
+            const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
+            const { expected, actual } = parseOutputs(rawOut);
+            const title = `${r.test.name}`;
+            const unified = buildUnifiedDiff(expected, actual, title);
+            entries.push({
+                id: `${idx}__${r.test.name}`,
+                test: r.test.name,
+                status: labelFor(r),
+                passed: r.passed,
+                skipped: r.skipped,
+                expected,
+                actual,
+                unified,
             });
         });
         // Prefer failed first in sidebar ordering
-        return entries.sort((a, b) => Number(a.passed) - Number(b.passed) || a.suite.localeCompare(b.suite) || a.test.localeCompare(b.test));
-    }, [suiteGroups]);
+        return entries.sort((a, b) => Number(a.passed) - Number(b.passed) || a.test.localeCompare(b.test));
+    }, [visibleResults]);
 
     // Ensure there is a selected file
     useEffect(() => {
@@ -297,19 +324,23 @@ export function CodePage() {
         return false;
     }, [selectedFile]);
 
+    const selectedCode = useMemo(() => {
+        if (codeFiles.length === 0) return null;
+        return codeFiles.find(f => f.name === selectedCodeFile) ?? codeFiles[0];
+    }, [codeFiles, selectedCodeFile]);
+
+    const codeText = selectedCode?.content ?? '';
+
     const codeLines = useMemo(
-        () => (code ? code.replace(/\r\n/g, '\n').split('\n') : []),
-        [code]
+        () => (codeText ? codeText.replace(/\r\n/g, '\n').split('\n') : []),
+        [codeText]
     );
-
-
 
     // Flatten table rows for tests (table view)
     type TestRow =
-        | { kind: 'info'; suite: string; note?: string }
+        | { kind: 'info'; note?: string }
         | {
             kind: 'result';
-            suite: string;
             test: string;
             status: string;
             passed: boolean;
@@ -320,27 +351,25 @@ export function CodePage() {
         };
 
     const testRows: TestRow[] = [];
-    suiteGroups.forEach(g => {
-        if (g.hiddenCount > 0) {
-            testRows.push({ kind: 'info', suite: g.suite, note: `Hidden tests not shown: ${g.hiddenCount}` });
-        }
-        g.visible.forEach(r => {
-            const status = labelFor(r);
-            const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
-            const { expected, actual, hadDiff } = parseOutputs(rawOut);
-            const expTrunc = truncateLines(r.passed ? actual : expected);
-            const actTrunc = truncateLines(actual);
-            testRows.push({
-                kind: 'result',
-                suite: r.test.suite,
-                test: r.test.name,
-                status,
-                passed: r.passed,
-                description: r.test.description || '',
-                expectedExcerpt: r.passed ? expTrunc.text : (expTrunc.text || '—'),
-                outputExcerpt: actTrunc.text || '—',
-                note: !r.passed && !hadDiff ? 'Grader did not provide a separate expected block.' : undefined,
-            });
+
+    if (hiddenTestsCount > 0) {
+        testRows.push({ kind: 'info', note: `Hidden tests not shown: ${hiddenTestsCount}` });
+    }
+    visibleResults.forEach(r => {
+        const status = labelFor(r);
+        const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
+        const { expected, actual, hadDiff } = parseOutputs(rawOut);
+        const expTrunc = truncateLines(r.passed ? actual : expected);
+        const actTrunc = truncateLines(actual);
+        testRows.push({
+            kind: 'result',
+            test: r.test.name,
+            status,
+            passed: r.passed,
+            description: r.test.description || '',
+            expectedExcerpt: r.passed ? expTrunc.text : (expTrunc.text || '—'),
+            outputExcerpt: actTrunc.text || '—',
+            note: !r.passed && !hadDiff ? 'Grader did not provide a separate expected block.' : undefined,
         });
     });
 
@@ -402,7 +431,6 @@ export function CodePage() {
                             <table className="results-table">
                                 <thead>
                                     <tr>
-                                        <th>Difficulty Level</th>
                                         <th>Test Name</th>
                                         <th>Description</th>
                                         <th>Status</th>
@@ -413,27 +441,25 @@ export function CodePage() {
                                 <tbody>
                                     {!testsLoaded && (
                                         <tr>
-                                            <td className="no-data-message" colSpan={6}>Fetching tests…</td>
+                                            <td className="no-data-message" colSpan={5}>Fetching tests…</td>
                                         </tr>
                                     )}
                                     {testsLoaded && testRows.length === 0 && (
                                         <tr>
-                                            <td className="no-data-message" colSpan={6}>No tests were returned for this submission.</td>
+                                            <td className="no-data-message" colSpan={5}>No tests were returned for this submission.</td>
                                         </tr>
                                     )}
                                     {testsLoaded && testRows.map((row, i) => {
                                         if (row.kind === 'info') {
                                             return (
-                                                <tr className="info-row" key={`info-${row.suite}-${i}`}>
-                                                    <td>{row.suite}</td>
-                                                    <td colSpan={5}>—</td>
+                                                <tr className="info-row" key={`info-${i}`}>
+                                                    <td colSpan={5}>{row.note || '—'}</td>
                                                 </tr>
                                             );
                                         }
                                         const isPass = row.passed;
                                         return (
-                                            <tr key={`res-${row.suite}-${row.test}-${i}`}>
-                                                <td>{row.suite}</td>
+                                            <tr key={`res-${row.test}-${i}`}>
                                                 <td>{row.test}</td>
                                                 <td><pre className="cell-pre">{row.description || '—'}</pre></td>
                                                 <td
@@ -473,12 +499,12 @@ export function CodePage() {
                                             (f.passed ? 'passed' : 'failed')
                                         }
                                         onClick={() => setSelectedDiffId(f.id)}
-                                        title={`${f.suite} / ${f.test}`}
+                                        title={`${f.test}`}
                                     >
                                         <div className="file-name">{f.test}</div>
                                         <div className="file-sub">
                                             <span className={'status-dot ' + (f.passed ? 'is-pass' : 'is-fail')} />
-                                            {f.suite} • {f.status}
+                                            {f.status}
                                         </div>
                                     </li>
                                 ))}
@@ -489,7 +515,7 @@ export function CodePage() {
                             <div className="diff-toolbar">
                                 <div className="diff-title">
                                     {selectedFile
-                                        ? `Difficulty: ${selectedFile.suite} Testcase Name: ${selectedFile.test}`
+                                        ? `Testcase Name: ${selectedFile.test}`
                                         : 'No selection'}
                                 </div>
                                 <div className="spacer" />
@@ -619,23 +645,41 @@ export function CodePage() {
             {/* ==================== CODE SECTION (BELOW TABLES) ==================== */}
             <section className="code-section">
                 <h2 className="section-title">Submitted Code</h2>
-                {!code && <div className="no-data-message">Fetching submitted code…</div>}
-                {!!code && (
-                    <div className="code-block code-viewer" role="region" aria-label="Submitted source code">
-                        <ol className="code-list">
-                            {codeLines.map((text, idx) => {
-                                const lineNo = idx + 1;
-                                return (
-                                    <li key={lineNo} className="code-line">
-                                        <span className="gutter">
-                                            <span className="line-number">{lineNo}</span>
-                                        </span>
-                                        <span className="code-text">{text || '\u00A0'}</span>
-                                    </li>
-                                );
-                            })}
-                        </ol>
-                    </div>
+                {codeFiles.length === 0 && <div className="no-data-message">Fetching submitted code…</div>}
+
+                {codeFiles.length > 0 && (
+                    <>
+                        {codeFiles.length > 1 && (
+                            <div className="code-file-picker">
+                                <label className="section-label" htmlFor="codefile-select">File</label>
+                                <select
+                                    id="codefile-select"
+                                    className="select"
+                                    value={selectedCodeFile}
+                                    onChange={(e) => setSelectedCodeFile(e.target.value)}
+                                >
+                                    {codeFiles.map(f => (
+                                        <option key={f.name} value={f.name}>{f.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                        <div className="code-block code-viewer" role="region" aria-label="Submitted source code">
+                            <ol className="code-list">
+                                {codeLines.map((text, idx) => {
+                                    const lineNo = idx + 1;
+                                    return (
+                                        <li key={lineNo} className="code-line">
+                                            <span className="gutter">
+                                                <span className="line-number">{lineNo}</span>
+                                            </span>
+                                            <span className="code-text">{text || '\u00A0'}</span>
+                                        </li>
+                                    );
+                                })}
+                            </ol>
+                        </div>
+                    </>
                 )}
             </section>
         </div>

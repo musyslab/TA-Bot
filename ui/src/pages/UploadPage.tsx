@@ -65,6 +65,7 @@ const UploadPage = () => {
 
     // Allowed upload file extensions (frontend gate)
     const ALLOWED_EXTS = ['.py', '.java', '.c', '.rkt'];
+    const isJavaFile = (f: File) => f.name.toLowerCase().endsWith('.java');
     const isAllowedFileName = (name: string) => {
         const ext = '.' + (name.split('.').pop() || '').toLowerCase();
         return ALLOWED_EXTS.includes(ext);
@@ -123,6 +124,14 @@ const UploadPage = () => {
             setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
             setIsErrorMessageHidden(false);
         }
+        // Multi-file is only allowed for Java (.java)
+        if (valid.length > 1 && !valid.every(isJavaFile)) {
+            setFiles([]);
+            setError_Message("Multi-file upload is only available for Java (.java) files.");
+            setIsErrorMessageHidden(false);
+            return;
+        }
+        setIsErrorMessageHidden(true);
         setFiles(valid);
     };
 
@@ -242,11 +251,14 @@ const UploadPage = () => {
             return;
         }
 
-        // Grab the first file from your files state
-        const fileToUpload = files[0];
-
-        // Validate extension again at submit time (belt & suspenders)
-        if (!isAllowedFileName(fileToUpload.name)) {
+        // Enforce multi-file restriction at submit time too
+        if (files.length > 1 && !files.every(isJavaFile)) {
+            setError_Message("Multi-file upload is only available for Java (.java) files.");
+            setIsErrorMessageHidden(false);
+            return;
+        }
+        // Validate extensions again at submit time (belt & suspenders)
+        if (files.some(f => !isAllowedFileName(f.name))) {
             setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
             setIsErrorMessageHidden(false);
             return;
@@ -256,7 +268,7 @@ const UploadPage = () => {
         setIsLoading(true);
 
         const formData = new FormData();
-        formData.append("file", fileToUpload, fileToUpload.name);
+        files.forEach(f => formData.append("files", f, f.name));
         formData.append("class_id", cid.toString());
 
         axios.post(
@@ -446,6 +458,14 @@ const UploadPage = () => {
                                                     setIsErrorMessageHidden(false);
                                                     return;
                                                 }
+                                                // Multi-file is only allowed for Java (.java)
+                                                if (valid.length > 1 && !valid.every(isJavaFile)) {
+                                                    setFiles([]);
+                                                    setError_Message("Multi-file upload is only available for Java (.java) files.");
+                                                    setIsErrorMessageHidden(false);
+                                                    return;
+                                                }
+                                                setIsErrorMessageHidden(true);
                                                 setFiles(valid);
                                             }}
                                         >
@@ -550,7 +570,7 @@ const UploadPage = () => {
                                 renderer={({ hours, minutes, seconds, completed }) => (
                                     <div className={`countdown-display ${completed ? 'completed' : ''}`}>
                                         {`${hours} hours, ${minutes} minutes, ${seconds} seconds`} {' until '}
-                                        <span className="dot" /> next charge
+                                        <span className="dot" /> full recharge
                                     </div>
                                 )}
                             />
@@ -603,14 +623,15 @@ const UploadPage = () => {
                         {/* Info text stays above the button */}
                         <div className="info-text">
                             <span>
-                                Each submission uses an energy charge<span className="info-dot" />, these will regenerate
-                                over time, as shown in the table above.
+                                Each submission uses an energy charge<span className="info-dot" />.
+                                When the recharge timer hits zero, your energy refills to full (3 charges) all at once,
+                                as shown in the table above.
                             </span>
                             <span>
                                 <span className="highlight-red">Attending office hours</span> will award you{' '}
                                 <span className="highlight-red">two</span>
                                 <span className="info-dot purple" />"FastPass" charges which can be redeemed at any time to
-                                unlock test-case results.
+                                submit even when you are out of base energy.
                             </span>
                         </div>
                     </div>

@@ -171,20 +171,6 @@ class AdminComponent extends Component<AdminComponentProps, ProjectsState> {
                   <td className="project-start">{this.formatDate12h(project.Start)}</td>
                   <td className="project-end">{this.formatDate12h(project.End)}</td>
                   <td className="project-total-submissions">{project.TotalSubmissions}</td>
-                  {/* <td className="project-analytics">
-                    <Link className="button button-analytics" to={`/admin/AdminAnalytics/${project.Id}`}>
-                      <span className="button-text">Analytics</span>
-                    </Link>
-                  {/* <td className="project-analytics">
-                    <Link
-                      className="button button-analytics"
-                      to={`/admin/AdminAnalytics/${project.Id}`}
-                    >
-                      <Icon name="chart bar" />
-                      <span className="button-text">Analytics</span>
-                    </Link>
-                  </td> */}
-                  {/* <td className="project-analytics"> ... </td> */}
                   <td className="project-review">
                     <Link className="button button-review" to={`/admin/project/${project.Id}`}>
                       <Icon name="eye" />

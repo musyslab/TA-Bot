@@ -8,7 +8,7 @@ from typing import Optional, Dict
 from flask import send_file
 
 from sqlalchemy.sql.expression import asc
-from .models import ChatLogs, Projects, Levels, StudentGrades, StudentProgress, Submissions, Testcases, Classes
+from .models import ChatLogs, Projects, StudentGrades, Submissions, Testcases, Classes
 from src.repositories.database import db
 from sqlalchemy import desc, and_
 from datetime import datetime
@@ -79,28 +79,6 @@ class ProjectRepository():
         class_projects = Projects.query.filter(Projects.ClassId==class_id)
         return class_projects
     
-    def get_levels(self, project_id: int) -> Dict[str, int]:
-        """
-        Returns a dictionary of level names and their corresponding points for a given project.
-
-        Args:
-            project_id (int): The ID of the project to retrieve levels for.
-
-        Returns:
-            Dict[str, int]: A dictionary where the keys are level names and the values are the corresponding points.
-        """
-        levels = Levels.query.filter(Levels.ProjectId == project_id).all()
-        level_score = {}
-        for level in levels:
-            level_score[level.Name] = level.Points
-
-        return level_score
-
-    def get_levels_by_project(self, project_id: int) -> Dict[str, int]:
-        levels = Levels.query.filter(Levels.ProjectId == project_id).order_by(asc(Levels.Order)).all()
-
-        return levels
-
     def create_project(self, name: str, start: datetime, end: datetime, language:str, class_id:int, file_path:str, description_path:str, additional_file_path:str):
         project = Projects(Name=name, Start=start, End=end, Language=language,
                             ClassId=class_id, solutionpath=file_path,
@@ -109,6 +87,7 @@ class ProjectRepository():
         db.session.add(project)
         db.session.commit()
         return project.Id
+        
     def get_project(self, project_id:int) -> Projects:
         project_data = Projects.query.filter(Projects.Id == project_id).first()
         project ={}
@@ -154,12 +133,12 @@ class ProjectRepository():
         testcase_info: Dict[int, list] = {}
         for test in testcases:
             testcase_data = []
-            testcase_data.append(test.LevelId)
-            testcase_data.append(test.Name)
-            testcase_data.append(test.Description)
-            testcase_data.append(test.input)
-            testcase_data.append(test.Output)
-            testcase_data.append(test.IsHidden)
+            testcase_data.append(test.Id)          
+            testcase_data.append(test.Name)        
+            testcase_data.append(test.Description) 
+            testcase_data.append(test.input)       
+            testcase_data.append(test.Output)      
+            testcase_data.append(test.IsHidden)    
             testcase_info[test.Id] = testcase_data
         return testcase_info
 
@@ -167,7 +146,6 @@ class ProjectRepository():
         self,
         project_id: int,
         testcase_id: int,
-        level_name: str,
         name: str,
         description: str,
         input_data: str,
@@ -214,15 +192,10 @@ class ProjectRepository():
 
         # Handle creation or update of the testcase record
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
-        level = Levels.query.filter(
-            and_(Levels.ProjectId == project_id, Levels.Name == level_name)
-        ).first()
-        level_id = level.Id if level else None
 
         if testcase is None:
             testcase = Testcases(
                 ProjectId=project_id,
-                LevelId=level_id,
                 Name=name,
                 Description=description,
                 input=input_data,
@@ -231,7 +204,6 @@ class ProjectRepository():
             )
             db.session.add(testcase)
         else:
-            testcase.LevelId = level_id
             testcase.Name = name
             testcase.Description = description
             testcase.input = input_data
@@ -258,17 +230,8 @@ class ProjectRepository():
             return 0
         project = Projects.query.filter(Projects.Name==projectname).first()
         return project.Id
-    def levels_creator(self,project_id:int):
-        level_1=Levels(ProjectId=project_id,Name="Level 1",Points=20,Order=1)
-        level_2=Levels(ProjectId=project_id,Name="Level 2",Points=20,Order=2)
-        level_3=Levels(ProjectId=project_id,Name="Level 3",Points=20,Order=3)
-        db.session.add(level_1)
-        db.session.add(level_2)
-        db.session.add(level_3)
-        db.session.commit()
 
     def testcases_to_json(self, project_id: int) -> str:
-        """Return testcases as JSON with project-level AdditionalFilePath in slot 7."""
         testcase_holder: Dict[int, list] = {}
         proj = Projects.query.filter(Projects.Id == project_id).first()
         add_field = getattr(proj, "AdditionalFilePath", "") if proj else ""
@@ -278,11 +241,8 @@ class ProjectRepository():
             add_list = []
         tests = Testcases.query.filter(Testcases.ProjectId == project_id).all()
         for test in tests:
-            level = Levels.query.filter(Levels.Id == test.LevelId).first()
-            level_name = level.Name if level else ""
             testcase_holder[test.Id] = [
                 test.Name,
-                level_name,
                 test.Description,
                 test.input,
                 test.Output,
@@ -294,7 +254,6 @@ class ProjectRepository():
         return json_object
     def wipe_submissions(self, project_id:int):
         submissions = Submissions.query.filter(Submissions.Project == project_id).all()
-        student_progress = StudentProgress.query.filter(StudentProgress.ProjectId ==project_id).all()
         for student in student_progress:
             db.session.delete(student)
         db.session.commit()
@@ -320,13 +279,7 @@ class ProjectRepository():
         for test in testcases:
             db.session.delete(test)
             db.session.commit()
-        levels = Levels.query.filter(Levels.ProjectId==project_id).all()
-        for level in levels:
-            print(level, flush=True)
-            db.session.delete(level)
-            db.session.commit()
-        db.session.delete(project)
-        db.session.commit()
+    
     def get_className_by_projectId(self, project_id):
         project = Projects.query.filter(Projects.Id == project_id).first()
         class_obj = Classes.query.filter(Classes.Id ==project.ClassId).first()

@@ -113,11 +113,6 @@ class App extends Component {
                             <PlagiarismCompare />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/AdminAnalytics/:id" element={
-                        <ProtectedRoute>
-                            <ProjectAnalytics />
-                        </ProtectedRoute>
-                    } />
                     {/* Catch-all for 404 */}
                     <Route path="*" element={<NotFoundComponent />} />
                 </Routes>

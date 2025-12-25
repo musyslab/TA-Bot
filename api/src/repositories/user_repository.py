@@ -80,7 +80,7 @@ class UserRepository():
         Returns:
             None
         """
-        user = Users(Username=username,Firstname=first_name,Lastname=last_name,Email=email,StudentNumber=student_number,Role = 0,IsLocked=False,ResearchGroup=0)
+        user = Users(Username=username,Firstname=first_name,Lastname=last_name,Email=email,StudentNumber=student_number,Role = 0,IsLocked=False)
         db.session.add(user)
         db.session.commit()
     def get_all_users(self) -> List[Users]:
@@ -237,19 +237,7 @@ class UserRepository():
         query = Users.query.filter(Users.Id==userId).one()
         email = query.Email
         return email
-    def get_user_researchgroup(self, userId) -> int:
-        """
-        Retrieves the research group of a user with the given ID.
 
-        Args:
-            userId (int): The ID of the user to retrieve the research group for.
-
-        Returns:
-            str: The research group of the user as a string.
-        """
-        query = Users.query.filter(Users.Id==userId).one()
-        research_group = query.ResearchGroup
-        return str(research_group)
     def get_StudentNumber(self, user_id):
         """
         Returns the student number of a user with the given user_id.

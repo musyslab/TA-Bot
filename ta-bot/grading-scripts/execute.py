@@ -57,7 +57,7 @@ def find_submission(myroot: str, input_path: str, temp_path: str, student_name: 
 
     return filename
 
-def run(student_name, research_group, lang, myroot):
+def run(student_name, lang, myroot):
     tic = time.perf_counter()
     suites = []
     output_dir = os.path.join(myroot, OUTPUT_PATH_NAME)
@@ -100,7 +100,6 @@ def run(student_name, research_group, lang, myroot):
             if int(test_conf[TYPE_CONFIG_KEY]) == 1:
                 static_diff = StaticDiffTest(test, suite, test_input, test_conf, test_sol_file, temp_path)
                 static_diff.execute_test(os.path.join(temp_path, filename))
-                static_diff.assess_test(research_group)
                 static_diff.write_to_tap(output_file)
 
         files = glob.glob1(temp_path, f"*.{TEST_INPUT_EXT}") + glob.glob1(temp_path, f"*.{TEST_SOL_EXT}") + glob.glob1(temp_path, "comment")
@@ -151,14 +150,12 @@ def run_pylint(myroot, output_dir, student_name, filename, language):
 def main():
     parser = argparse.ArgumentParser(description='Runs student code against a set of test cases.')
     parser.add_argument('student_name', metavar='StudentName', type=str, help='the name of the student file in the input directory')
-    parser.add_argument('research_group', metavar='ResearchGroup', type=int, help='the number the student is for research')
     parser.add_argument('language', metavar='Language', type=str, help='the language of the student\'s code')
     parser.add_argument('-r', '--root', default=os.getcwd(), type=str, help='the root of the TA-Bot folder containing input, output, and tests directories.')
     args = parser.parse_args()
-    args.research_group = int(args.research_group)
 
     
-    return run(args.student_name, args.research_group, args.language, args.root)
+    return run(args.student_name, args.language, args.root)
 
 if __name__ == "__main__":
     main()

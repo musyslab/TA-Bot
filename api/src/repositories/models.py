@@ -17,8 +17,6 @@ class Projects(db.Model):
     Language = Column(String)
 
     Submissions=relationship('Submissions') 
-    Levels=relationship('Levels')
-    StudentProgress=relationship('StudentProgress')
     StudentUnlocks=relationship('StudentUnlocks') 
     solutionpath=Column(String)
     AsnDescriptionPath = Column(String)
@@ -34,11 +32,9 @@ class Users(db.Model):
     StudentNumber = Column(String)
     Role = Column(Integer)
     IsLocked = Column(Boolean)
-    ResearchGroup = Column(Integer)
     Submissions=relationship('Submissions')
     ClassAssignments=relationship('ClassAssignments')
     LoginAttempts=relationship('LoginAttempts')
-    StudentProgress=relationship('StudentProgress')
     StudentUnlocks=relationship('StudentUnlocks') 
 
 class Submissions(db.Model):
@@ -52,10 +48,6 @@ class Submissions(db.Model):
     Time = Column(Date)
     User = Column(Integer, ForeignKey('Users.Id'))
     Project = Column(Integer, ForeignKey('Projects.Id'))
-    SubmissionLevel =Column(String)
-    Points = Column(Integer)
-    StudentProgress=relationship('StudentProgress')
-    visible = Column(Integer)
     TestCaseResults=Column(String)
     LintingResults=Column(String)
 
@@ -94,13 +86,6 @@ class ClassAssignments(db.Model):
     LabId = Column(Integer, ForeignKey('Labs.Id'))
     LectureId = Column(Integer, ForeignKey('LectureSections.Id'))
 
-class StudentProgress(db.Model):
-    __tablename__ = "StudentProgress"
-    UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
-    ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
-    SubmissionId = Column(Integer, ForeignKey('Submissions.Id'), primary_key=True)
-    LatestLevel = Column(String)
-
 class StudentUnlocks(db.Model):
     __tablename__ = "StudentUnlocks"
     UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
@@ -112,27 +97,18 @@ class Config(db.Model):
     Name  = Column(String, primary_key=True)
     Value = Column(String)
 
-class Levels(db.Model):
-    __tablename__ = "Levels"
-    Id = Column(Integer, primary_key=True)
-    ProjectId = Column(Integer, ForeignKey('Projects.Id'))
-    Name=Column(String)
-    Order=Column(Integer)
-    Points=Column(Integer)
-
 class Testcases(db.Model):
     __tablename__ = "Testcases"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     ProjectId = Column(Integer, ForeignKey('Projects.Id'))
-    LevelId = Column(Integer, ForeignKey("Levels.Id"))
     Name = Column(String)
     Description = Column(String)
     input = Column(String)
     Output = Column(String)
     IsHidden = Column(Boolean)
 
-class StudentQuestions(db.Model):
-    __tablename__ = "StudentQuestions"
+class OHVisits(db.Model):
+    __tablename__ = "OHVisits"
     Sqid = Column(Integer, primary_key=True, autoincrement=True)
     StudentQuestionscol = Column(String)
     ruling = Column(Integer)

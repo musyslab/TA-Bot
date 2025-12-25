@@ -17,7 +17,7 @@ interface DropDownOption {
 }
 
 interface UploadPageState {
-    file?: File;
+    files: File[];
     isLoading: boolean;
     error_message: string;
     isErrorMessageHidden: boolean;
@@ -60,12 +60,13 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             studentList: [],
             projects: [],
             class_selected: false,
+            files: [],
         };
 
         this.handleSubmit = this.handleSubmit.bind(this);
         this.handleProjectIdChange = this.handleProjectIdChange.bind(this);
         this.handleStudentIdChange = this.handleStudentIdChange.bind(this);
-        this.handleFileChange = this.handleFileChange.bind(this);
+        this.handleFilesChange = this.handleFilesChange.bind(this);
         this.handleClassIdChange = this.handleClassIdChange.bind(this);
     }
 
@@ -75,7 +76,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         this.setState({
             student_id: isNaN(value) ? 0 : value,
             project_id: 0,
-            file: undefined,
+            files: [],
         });
     }
 
@@ -97,7 +98,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             project_id: 0,
             studentList: [],
             projects: [],
-            file: undefined,
+            files: [],
         });
 
         axios
@@ -200,13 +201,24 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             });
     }
 
-    handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    handleFilesChange(e: React.ChangeEvent<HTMLInputElement>) {
         const files = e.target.files;
-        if (files && files.length === 1) {
-            this.setState({ file: files[0] });
-        } else {
-            this.setState({ file: undefined });
+        const fileArr = files ? Array.from(files) : [];
+
+        const isJavaFile = (f: File) => f.name.toLowerCase().endsWith('.java');
+        if (fileArr.length > 1 && fileArr.every((f) => !isJavaFile(f))) {
+            this.setState({
+                files: [],
+                isErrorMessageHidden: false,
+                error_message: 'Multi-file upload is only available for Java (.java) files.',
+            });
+            return;
         }
+
+        this.setState({
+            files: fileArr,
+            isErrorMessageHidden: true,
+        });
     }
 
     handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -222,11 +234,21 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             return;
         }
 
-        if (this.state.file !== undefined) {
+        const isJavaFile = (f: File) => f.name.toLowerCase().endsWith('.java');
+        if (this.state.files.length > 1 && this.state.files.every((f) => !isJavaFile(f))) {
+            this.setState({
+                files: [],
+                isErrorMessageHidden: false,
+                error_message: 'Multi-file upload is only available for Java (.java) files.',
+            });
+            return;
+        }
+
+        if (this.state.files.length > 0) {
             this.setState({ isErrorMessageHidden: true, isLoading: true });
 
             const formData = new FormData();
-            formData.append('file', this.state.file, this.state.file.name);
+            this.state.files.forEach((f) => formData.append('files', f, f.name));
             formData.append('student_id', String(this.state.student_id));
             formData.append('project_id', String(this.state.project_id));
             formData.append('class_id', String(this.state.class_id));
@@ -250,7 +272,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         } else {
             this.setState({
                 isErrorMessageHidden: false,
-                error_message: 'Please choose a file to upload.',
+                error_message: 'Please choose one or more files to upload.',
             });
         }
     }
@@ -368,18 +390,19 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                 e.preventDefault();
                                                 if (disableUpload) return;
                                                 const files = e.dataTransfer.files;
-                                                if (files && files.length === 1) {
-                                                    this.handleFileChange({ target: { files } } as any);
+                                                if (files && files.length > 0) {
+                                                    this.handleFilesChange({ target: { files } } as any);
                                                 }
                                             }}
                                         >
-                                            {!this.state.file ? (
+                                            {this.state.files.length === 0 ? (
                                                 <>
                                                     <input
                                                         type="file"
                                                         className="file-input"
                                                         required
-                                                        onChange={this.handleFileChange}
+                                                        multiple
+                                                        onChange={this.handleFilesChange}
                                                         disabled={disableUpload}
                                                     />
                                                     <div className="file-drop-message">
@@ -391,22 +414,22 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                 <div className={`file-preview${disableUpload ? ' is-disabled' : ''}`}>
                                                     <button
                                                         type="button"
-                                                        className="file-name"
-                                                        title="Selected file"
-                                                        disabled={disableUpload}
-                                                    >
-                                                        {this.state.file.name}
-                                                    </button>
-                                                    <button
-                                                        type="button"
                                                         className="exchange-icon"
-                                                        onClick={() => this.setState({ file: undefined })}
-                                                        aria-label="Change file"
-                                                        title="Change file"
+                                                        onClick={() => this.setState({ files: [] })}
+                                                        aria-label="Clear selected files"
+                                                        title="Clear selected files"
                                                         disabled={disableUpload}
                                                     >
-                                                        <i className="exchange icon"></i>
+                                                        <i className="exchange icon" aria-hidden="true"></i>
                                                     </button>
+
+                                                    <div className="file-preview-list" title="Selected files">
+                                                        {this.state.files.map((f) => (
+                                                            <div key={f.name} className="file-preview-row solution-file-card">
+                                                                <span className="file-name">{f.name}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
@@ -430,8 +453,8 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                 </p>
                             )}
                         </div>
-                    </div>
-                </div>
+                    </div >
+                </div >
             </>
         );
     }

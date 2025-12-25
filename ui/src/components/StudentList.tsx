@@ -426,8 +426,6 @@ class StudentList extends Component<StudentListProps, StudentListState> {
     }
 
     render() {
-        const levels = ['Level 1', 'Level 2', 'Level 3']; // not strictly needed, kept in case of future use
-
         const rowsForView = (() => {
             const visible = this.state.rows.filter(r => !r.hidden);
             if (this.state.sortBy === 'lastsubmitted') {
@@ -471,19 +469,13 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                     output: s.split('\n'),
                     type: 0,
                     name: t.name || t.test || t.testCaseName || '',
-                    suite: t.level || t.suite || '',
                     hidden: t.hidden ? 'True' : 'False',
                 }
             };
         });
 
-        const suites = Array.from(new Set(results.map((r: any) => r.test.suite)));
-        const suiteGroups = suites.map(s => {
-            const suiteItems = results.filter((r: any) => r.test.suite === s);
-            const visible = suiteItems.filter((r: any) => r.test.hidden !== 'True');
-            const hiddenCount = suiteItems.length - visible.length;
-            return { suite: s, visible, hiddenCount };
-        });
+        const visibleResults = results.filter((r: any) => r.test.hidden !== 'True');
+        const hiddenCount = results.length - visibleResults.length;
 
         const labelFor = (r: any) => (r.skipped ? 'Skipped' : r.passed ? 'Passed' : 'Failed');
 
@@ -553,7 +545,6 @@ class StudentList extends Component<StudentListProps, StudentListState> {
 
         type DiffEntry = {
             id: string;
-            suite: string;
             test: string;
             status: string;
             passed: boolean;
@@ -565,30 +556,24 @@ class StudentList extends Component<StudentListProps, StudentListState> {
 
         const diffFilesAll: DiffEntry[] = (() => {
             const entries: DiffEntry[] = [];
-            suiteGroups.forEach(g => {
-                g.visible.forEach((r: any) => {
-                    const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
-                    const { expected, actual } = parseOutputs(rawOut);
-                    const title = `${r.test.suite}/${r.test.name}`;
-                    const unified = buildUnifiedDiff(expected, actual, title);
-                    entries.push({
-                        id: `${r.test.suite}__${r.test.name}`,
-                        suite: r.test.suite,
-                        test: r.test.name,
-                        status: labelFor(r),
-                        passed: r.passed,
-                        skipped: r.skipped,
-                        expected,
-                        actual,
-                        unified,
-                    });
+            visibleResults.forEach((r: any, idx: number) => {
+                const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
+                const { expected, actual } = parseOutputs(rawOut);
+                const title = `${r.test.name || 'test'}:${idx}`;
+                const unified = buildUnifiedDiff(expected, actual, title);
+                entries.push({
+                    id: `${idx}__${r.test.name || 'test'}`,
+                    test: r.test.name || '',
+                    status: labelFor(r),
+                    passed: r.passed,
+                    skipped: r.skipped,
+                    expected,
+                    actual,
+                    unified,
                 });
             });
             return entries.sort(
-                (a, b) =>
-                    Number(a.passed) - Number(b.passed) ||
-                    a.suite.localeCompare(b.suite) ||
-                    a.test.localeCompare(b.test)
+                (a, b) => Number(a.passed) - Number(b.passed) || a.test.localeCompare(b.test)
             );
         })();
 
@@ -598,10 +583,9 @@ class StudentList extends Component<StudentListProps, StudentListState> {
         const codeLines = (code ? code.replace(/\r\n/g, '\n').split('\n') : []);
 
         type TestRow =
-            | { kind: 'info'; suite: string; note?: string }
+            | { kind: 'info'; note?: string }
             | {
                 kind: 'result';
-                suite: string;
                 test: string;
                 status: string;
                 passed: boolean;
@@ -611,26 +595,23 @@ class StudentList extends Component<StudentListProps, StudentListState> {
             };
 
         const testRows: TestRow[] = [];
-        suiteGroups.forEach(g => {
-            if (g.hiddenCount > 0) {
-                testRows.push({ kind: 'info', suite: g.suite, note: `Hidden tests not shown: ${g.hiddenCount}` });
-            }
-            g.visible.forEach((r: any) => {
-                const status = labelFor(r);
-                const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
-                const { expected, actual, hadDiff } = parseOutputs(rawOut);
-                const expTrunc = truncateLines(r.passed ? actual : expected);
-                const actTrunc = truncateLines(actual);
-                testRows.push({
-                    kind: 'result',
-                    suite: r.test.suite,
-                    test: r.test.name,
-                    status,
-                    passed: r.passed,
-                    expectedExcerpt: r.passed ? expTrunc.text : (expTrunc.text || '—'),
-                    outputExcerpt: actTrunc.text || '—',
-                    note: !r.passed && !hadDiff ? 'Grader did not provide a separate expected block.' : undefined,
-                });
+        if (hiddenCount > 0) {
+            testRows.push({ kind: 'info', note: `Hidden tests not shown: ${hiddenCount}` });
+        }
+        visibleResults.forEach((r: any) => {
+            const status = labelFor(r);
+            const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
+            const { expected, actual, hadDiff } = parseOutputs(rawOut);
+            const expTrunc = truncateLines(r.passed ? actual : expected);
+            const actTrunc = truncateLines(actual);
+            testRows.push({
+                kind: 'result',
+                test: r.test.name || '',
+                status,
+                passed: r.passed,
+                expectedExcerpt: r.passed ? expTrunc.text : (expTrunc.text || '—'),
+                outputExcerpt: actTrunc.text || '—',
+                note: !r.passed && !hadDiff ? 'Grader did not provide a separate expected block.' : undefined,
             });
         });
 
@@ -920,14 +901,14 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                             <td className={bucketClass(p.similarity_ast)}>{pct(p.similarity_ast)}</td>
                                                             <td>
                                                                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                                                <Link
-                                                                    className="view-link"
-                                                                    to={`/plagiarism/compare?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(p.a.name)}&bn=${encodeURIComponent(p.b.name)}`}
-                                                                    target="_blank"
-                                                                    rel="noreferrer"
-                                                                >
-                                                                    <Icon name="eye" /> View
-                                                                </Link>
+                                                                    <Link
+                                                                        className="view-link"
+                                                                        to={`/plagiarism/compare?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(p.a.name)}&bn=${encodeURIComponent(p.b.name)}`}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                    >
+                                                                        <Icon name="eye" /> View
+                                                                    </Link>
                                                                 </div>
                                                             </td>
                                                         </tr>
@@ -999,7 +980,6 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                     <table className="results-table">
                                                         <thead>
                                                             <tr>
-                                                                <th>Difficulty Level</th>
                                                                 <th>Test Name</th>
                                                                 <th>Status</th>
                                                                 <th>Your Program's Output</th>
@@ -1020,16 +1000,14 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                             {testsLoaded && testRows.map((row, i) => {
                                                                 if (row.kind === 'info') {
                                                                     return (
-                                                                        <tr className="info-row" key={`info-${row.suite}-${i}`}>
-                                                                            <td>{row.suite}</td>
-                                                                            <td colSpan={4}>—</td>
+                                                                        <tr className="info-row" key={`info-${i}`}>
+                                                                            <td colSpan={4}>{row.note}</td>
                                                                         </tr>
                                                                     );
                                                                 }
                                                                 const isPass = row.passed;
                                                                 return (
-                                                                    <tr key={`res-${row.suite}-${row.test}-${i}`}>
-                                                                        <td>{row.suite}</td>
+                                                                    <tr key={`res-${row.test}-${i}`}>
                                                                         <td>{row.test}</td>
                                                                         <td
                                                                             className={`status-cell status ${/^(pass|passed|ok|success)$/i.test(row.status) ? 'passed' : 'failed'}`}
@@ -1066,12 +1044,12 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                                     (f.passed ? 'passed' : 'failed')
                                                                 }
                                                                 onClick={() => this.setState({ selectedDiffId: f.id })}
-                                                                title={`${f.suite} / ${f.test}`}
+                                                                title={f.test}
                                                             >
                                                                 <div className="file-name">{f.test}</div>
                                                                 <div className="file-sub">
                                                                     <span className={'status-dot ' + (f.passed ? 'is-pass' : 'is-fail')} />
-                                                                    {f.suite} • {f.status}
+                                                                    {f.status}
                                                                 </div>
                                                             </li>
                                                         ))}
@@ -1082,7 +1060,7 @@ class StudentList extends Component<StudentListProps, StudentListState> {
                                                     <div className="diff-toolbar">
                                                         <div className="diff-title">
                                                             {selectedFile
-                                                                ? `Difficulty: ${selectedFile.suite} Testcase Name: ${selectedFile.test}`
+                                                                ? `Testcase Name: ${selectedFile.test}`
                                                                 : 'No selection'}
                                                         </div>
                                                         <div className="spacer" />

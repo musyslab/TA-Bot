@@ -35,7 +35,7 @@ def parseTestConfig(test_path):
         for line in test_file:
             m = re.match("([a-zA-Z]+)=(.*)", line)
             if m:
-                config[m.group(1)] = m.group(2)
+                config[m.group(1)] = m.group(2).rstrip("\r\n")
             else:
                 return -1
     return config

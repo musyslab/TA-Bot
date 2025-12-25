@@ -87,7 +87,6 @@ class AdminSettingsPageComponent extends Component<{}, AdminSettingsPageState> {
                         <div><Checkbox name='extraday' toggle label='Enable unlocking extra day' checked={this.state.hasUnlockEnabled} onChange={this.handleExtraDay} /></div>
                         <div><Checkbox name='submissionscore' toggle label='Enable student submission score' checked={this.state.hasScoreEnabled} onChange={this.handleScoreEnabled} /></div>
                         <div><Checkbox name='cooldown' toggle label='Enable submission cooldown' checked={this.state.hasTbsEnabled} onChange={this.handleTbsEnabled} /></div>
-                        <div><Checkbox name='LVLSYS' toggle label='Enable test case levels' checked={this.state.hasLVLSYSEnabled} onChange={this.handleLVLSYSEnabled} /></div>
                     </Segment>
                     <Button type='submit' onClick={this.handleClick}>Apply</Button>
                 </Form>

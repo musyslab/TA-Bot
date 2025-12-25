@@ -7,13 +7,13 @@ import time
 from pyston import PystonClient,File
 import requests
 from output import *
-from tests import StaticDiffTest
 import asyncio
 import ast
 import subprocess
 import tempfile
 import re
 import CompilerRunner
+from typing import List, Tuple
 
 PISTON_URL ="https://emkc.org/api/v2/piston/execute"
 # PISTON_URL ="https://piston.tabot.sh/api/v2/execute"
@@ -65,14 +65,14 @@ def assess_test(student_output , expected_output):
         output = result.stdout
         diff_status = result.returncode
         return [output,diff_status]
-def write_to_tap(tap_file, result, test_name, test_level,test_description):
+def write_to_tap(tap_file, result, test_name ,test_description, hidden=False):
     print("In write to tap", flush=True)
     with open(tap_file, "a") as file:
         if result[1] == 0:
             file.write("ok" + "\n")
         else:
             file.write("not ok" + "\n")
-        add_yaml(file, test_name, test_level,test_description, result)
+        add_yaml(file, test_name, test_description, result, hidden=hidden)
 
 def add_output(tap_file, result):
         tap_file.write("    output:\n")
@@ -82,16 +82,25 @@ def add_output(tap_file, result):
             line = line.replace("'", "''")
             tap_file.write("      - '" + line + "'\n")
 
+def yaml_sq(s):
+        """
+        Safe single-quoted YAML scalar:
+        - doubles single quotes
+        - converts real newlines into literal \\n so YAML stays one-line
+        """
+        if s is None:
+            return ""
+        s = str(s).replace("'", "''")
+        s = s.replace("\r\n", "\n").replace("\r", "\n")
+        s = s.replace("\n", "\\n")
+        return s            
 
-def add_yaml(tap_file, test_name, test_level,test_description, result):
-        #TODO: add hidden field, which is currently hardcoded to False
-        hidden = False
+def add_yaml(tap_file, test_name ,test_description, result, hidden=False):
         tap_file.write("  ---\n")
-        tap_file.write("    name: '" + test_name + "'\n")
-        tap_file.write("    suite: '" + test_level + "'\n")
+        tap_file.write("    name: '" + yaml_sq(test_name) + "'\n")
         tap_file.write("    type: " + "1" + "\n")
-        tap_file.write("    description: '" + test_description + "'\n")
-        tap_file.write("    hidden: '" + str(hidden) + "'\n")
+        tap_file.write("    description: '" + yaml_sq(test_description) + "'\n")
+        tap_file.write("    hidden: '" + yaml_sq(str(hidden)) + "'\n")
         add_output(tap_file, result)
         tap_file.write("  ...\n")
 
@@ -102,56 +111,185 @@ def end_tap_file(output_file, number_of_tests):
 
 def call_piston_api(student_file: str, testcase_in: str, language, additional_files):
         files = []
-        # Build a deterministic file list
+
+        def _strip_java_package(src: str) -> str:
+            return "".join(line for line in src.splitlines(True) if not line.lstrip().startswith("package"))
+
+        def _extract_main_class_name(src: str) -> str:
+            # Find a class that contains a main method
+            if "public static void main(" not in src:
+                return ""
+            # Heuristic: first "class X" in the file
+            m = re.search(r'\bclass\s+([A-Za-z_]\w*)\b', src)
+            return m.group(1) if m else ""
+
+        def _demote_public_types(src: str) -> str:
+            # Demote only top-level public type declarations (line-start)
+            src = re.sub(r'^\s*public\s+(class|interface|enum)\s+', r'\1 ', src, flags=re.M)
+            return src
+
+        def _bundle_java_into_main(java_sources: List[Tuple[str, str]]) -> str:
+            """
+            Bundle multiple Java files into a single Main.java:
+              - strip package lines
+              - hoist imports
+              - demote public top-level types
+              - add public class Main wrapper that calls the detected main class
+            """
+            imports = set()
+            bodies: List[str] = []
+            main_class = ""
+
+            for (name, raw) in java_sources:
+                src = _strip_java_package(raw)
+                # collect imports and remove them from body
+                kept_lines = []
+                for line in src.splitlines():
+                    if line.lstrip().startswith("import "):
+                        imports.add(line.strip())
+                    else:
+                        kept_lines.append(line)
+                body = "\n".join(kept_lines).strip()
+                # detect main class (first file that has main)
+                if not main_class:
+                    mc = _extract_main_class_name(body)
+                    if mc:
+                        main_class = mc
+                bodies.append(body)
+
+            if not main_class:
+                # fallback: try to pick the first class name
+                m = re.search(r'\bclass\s+([A-Za-z_]\w*)\b', "\n".join(bodies))
+                main_class = m.group(1) if m else "Main"
+
+            # demote all public types so we can have exactly one public class (Main)
+            bodies = [_demote_public_types(b) for b in bodies if b]
+
+            import_block = "\n".join(sorted(imports)).strip()
+
+            if main_class == "Main":
+                # If the student's entry class is already Main, do not wrap.
+                # Just ensure imports are at top and keep only one public Main.
+                # (We demoted publics above; restore 'public class Main' if present.)
+                joined = "\n\n".join(bodies)
+                joined = re.sub(r'^\s*class\s+Main\b', 'public class Main', joined, flags=re.M)
+                if import_block:
+                    return import_block + "\n\n" + joined + "\n"
+                return joined + "\n"
+
+            wrapper = (
+                "public class Main {\n"
+                "  public static void main(String[] args) throws Exception {\n"
+                f"    {main_class}.main(args);\n"
+                "  }\n"
+                "}\n"
+            )
+
+            if import_block:
+                return import_block + "\n\n" + wrapper + "\n" + "\n\n".join(bodies) + "\n"
+            return wrapper + "\n" + "\n\n".join(bodies) + "\n"
+
+
+        def normalize_double_ext(name: str) -> str:
+            # Guard against accidental "Foo.java.java"
+            if not name:
+                return name
+            low = name.lower()
+            if low.endswith(".java.java"):
+                return name[:-5]  # drop last ".java"
+            if low.endswith(".py.py"):
+                return name[:-3]
+            if low.endswith(".c.c"):
+                return name[:-2]
+            if low.endswith(".rkt.rkt"):
+                return name[:-4]
+            return name
+
         if os.path.isdir(student_file):
             if language == "java":
-                java_files = [f for f in os.listdir(student_file) if f.endswith(".java")]
-                java_files.sort()  # stable order
-                mains = []
-                others = []
-                for fn in java_files:
-                    full = os.path.join(student_file, fn)
-                    with open(full, "r", errors="ignore") as fh:
-                        src = "".join(line for line in fh if not line.lstrip().startswith("package"))
-                    if "public static void main(" in src:
-                        mains.append((fn, src))
-                    else:
-                        others.append((fn, src))
-                # Put Main.java first if present, then other mains by filename, then the rest
-                mains.sort(key=lambda t: (t[0] != "Main.java", t[0]))
-                for fn, src in mains:
-                    files.append({"name": os.path.basename(fn), "content": src})
-                for fn, src in others:
-                    files.append({"name": os.path.basename(fn), "content": src})
-            else:
+                # Piston java runtime often compiles only a single entry file.
+                # Bundle all .java files into Main.java so dependencies resolve.
+                java_sources: List[Tuple[str, str]] = []
                 for fn in sorted(os.listdir(student_file)):
-                    full = os.path.join(student_file, fn)
-                    if os.path.isfile(full):
-                        with open(full, "r", errors="ignore") as fh:
-                            files.append({"name": os.path.basename(fn), "content": fh.read()})
+                    if fn.endswith(".java"):
+                        full = os.path.join(student_file, fn)
+                        if os.path.isfile(full):
+                            with open(full, "r", errors="ignore") as fh:
+                                java_sources.append((fn, fh.read()))
+                # include additional java files too (if any)
+                extras = []
+                if additional_files:
+                    try:
+                        if isinstance(additional_files, str):
+                            s = additional_files.strip()
+                            extras = json.loads(s) if s.startswith('[') else ([s] if s else [])
+                        else:
+                            extras = list(additional_files)
+                    except Exception:
+                        extras = []
+                for ap in extras:
+                    ap = (ap or "").strip()
+                    if os.path.isfile(ap) and ap.endswith(".java"):
+                        with open(ap, "r", errors="ignore") as fh:
+                            java_sources.append((os.path.basename(ap), fh.read()))
+                bundled = _bundle_java_into_main(java_sources)
+                files.append({"name": "Main.java", "content": bundled})
+            else:
+                for root, _, fns in os.walk(student_file):
+                    for fn in sorted(fns):
+                        full = os.path.join(root, fn)
+                        if os.path.isfile(full):
+                            with open(full, "r", errors="ignore") as fh:
+                                files.append({"name": normalize_double_ext(os.path.basename(fn)), "content": fh.read()})
         else:
             with open(student_file, "r", errors="ignore") as fh:
-                files.append({"name": os.path.basename(student_file), "content": fh.read()})
-
-        # Append additional files (string, JSON string, or list)
-        extras = []
-        if additional_files:
-            try:
-                if isinstance(additional_files, str):
-                    s = additional_files.strip()
-                    extras = json.loads(s) if s.startswith('[') else ([s] if s else [])
+                if language == "java":
+                    # Single-file java can still depend on additional java files.
+                    # Bundle into Main.java (wrapper) for consistent compilation.
+                    base_src = fh.read()
+                    java_sources: List[Tuple[str, str]] = [(os.path.basename(student_file), base_src)]
+                    extras = []
+                    if additional_files:
+                        try:
+                            if isinstance(additional_files, str):
+                                s = additional_files.strip()
+                                extras = json.loads(s) if s.startswith('[') else ([s] if s else [])
+                            else:
+                                extras = list(additional_files)
+                        except Exception:
+                            extras = []
+                    for ap in extras:
+                        ap = (ap or "").strip()
+                        if os.path.isfile(ap) and ap.endswith(".java"):
+                            with open(ap, "r", errors="ignore") as efh:
+                                java_sources.append((os.path.basename(ap), efh.read()))
+                    bundled = _bundle_java_into_main(java_sources)
+                    files.append({"name": "Main.java", "content": bundled})
                 else:
-                    extras = list(additional_files)
-            except Exception:
-                extras = []
-        for ap in extras:
-            ap = (ap or "").strip()
-            if os.path.isfile(ap):
-                bn = os.path.basename(ap)
-                # avoid duplicates already included from solution directory
-                if not any(f.get("name") == bn for f in files):
-                    with open(ap, "r", errors="ignore") as fh:
-                        files.append({"name": bn, "content": fh.read()})
+                    files.append({"name": os.path.basename(student_file), "content": fh.read()})
+
+        # Append additional files for ALL languages.
+        # For Java, we already bundled any .java extras into Main.java above, so skip .java here.
+
+            extras = []
+            if additional_files:
+                try:
+                    if isinstance(additional_files, str):
+                        s = additional_files.strip()
+                        extras = json.loads(s) if s.startswith('[') else ([s] if s else [])
+                    else:
+                        extras = list(additional_files)
+                except Exception:
+                    extras = []
+            for ap in extras:
+                ap = (ap or "").strip()
+                if os.path.isfile(ap):
+                    bn = os.path.basename(ap)
+                    if language == "java" and bn.lower().endswith(".java"):
+                        continue
+                    if not any(f.get("name") == bn for f in files):
+                        with open(ap, "r", errors="ignore") as fh:
+                            files.append({"name": bn, "content": fh.read()})
 
         payload = {
             "language": language,
@@ -240,7 +378,7 @@ def admin_run(language, user_input, path, additional_files):
 
 
 
-def run(student_name, research_group, language, testcases, path, myroot):
+def run(student_name, language, testcases, path, myroot):
     tic = time.perf_counter()
     suites = []
     print("In run", flush=True) 
@@ -276,16 +414,16 @@ def run(student_name, research_group, language, testcases, path, myroot):
     createTapFile(output_file)
     testcases = json.loads(testcases)
     for key, value in testcases.items():
-        test_name=value[0]
-        test_level=value[1]
-        test_description=value[2]
-        testcase_in = value[3]
-        testcase_expected = value[4]
-        testcase_additional_files = value[6]
+        test_name = value[0]
+        test_description = value[1] if len(value) > 1 else ""       
+        testcase_in = value[2]
+        testcase_expected = value[3]
+        hidden = value[4] if len(value) > 4 else False
+        testcase_additional_files = value[5]
         piston_response = execute_test(filename, testcase_in, language, testcase_additional_files)
         result = assess_test(piston_response.replace("\r", "\n"), testcase_expected)
         #name suite description
-        write_to_tap(output_file, result,test_name, test_level,test_description)
+        write_to_tap(output_file, result, test_name, test_description, hidden)
         
     
     end_tap_file(output_file, len(testcases))
@@ -302,9 +440,17 @@ def run(student_name, research_group, language, testcases, path, myroot):
 
 
 def main():
+    if len(sys.argv) >= 8 and sys.argv[1] == "ADMIN":
+        # argv layout:
+        #   tabot.py ADMIN <language> <testcase_json...> <paths> <additional_file_path> <project_id> <class_id>
+        language = sys.argv[2]
+        paths = sys.argv[-4]
+        additional_file_path = sys.argv[-3]
+        testcase_json = " ".join(sys.argv[3:-4])
+        return admin_run(language, testcase_json, paths, additional_file_path)
+
     parser = argparse.ArgumentParser(description='Runs student code against a set of test cases.')
     parser.add_argument('student_name', metavar='StudentName', type=str, help='the name of the student file in the input directory')
-    parser.add_argument('research_group', metavar='ResearchGroup', type=int, help='the number the student is for research')
     parser.add_argument('language', metavar='Language', type=str, help='the language of the student\'s code')
     parser.add_argument('testcase_json', metavar='testcase_json', type=str , help='testcase json input')
     parser.add_argument('paths', metavar='paths', type=str, help='student path files')
@@ -313,23 +459,14 @@ def main():
     parser.add_argument('class_id', metavar='class_id_name', type=str, help='name of the current project')
     parser.add_argument('-r', '--root', default=os.getcwd(), type=str, help='the root of the TA-Bot folder containing input, output, and tests directories.')
     args = parser.parse_args()
-    args.research_group = int(args.research_group)
     paths = str(args.paths)
 
-    if args.student_name != "ADMIN" and args.research_group != 1:
-        return run(args.student_name, args.research_group, args.language, args.testcase_json, args.paths, args.root)
-
-    elif args.research_group == 1 and args.student_name != "ADMIN":
-        # Use the same piston-backed runner for RG1 too
-        return run(args.student_name, args.research_group, args.language, args.testcase_json, args.paths, args.root)
-
-    elif args.student_name == "ADMIN" and args.research_group == 1:
-        # Use piston-backed admin path instead of CompilerRunner.admin_run
+    if args.student_name == "ADMIN":
+        # Admin path uses piston-backed runner
         return admin_run(args.language, args.testcase_json, args.paths, args.additional_file_path)
-
-    else:
-        # admin non-RG1
-        return admin_run(args.language, args.testcase_json, args.paths, args.additional_file_path)
+ 
+    # Normal student path
+    return run(args.student_name, args.language, args.testcase_json, args.paths, args.root)
 
 if __name__ == "__main__":
     main()

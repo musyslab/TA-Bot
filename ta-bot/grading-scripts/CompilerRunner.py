@@ -7,7 +7,6 @@ import time
 from shutil import copyfile,copytree,rmtree
 from typing import Optional
 from output import *
-from tests import StaticDiffTest
 import argparse
 import tempfile
 import re
@@ -48,13 +47,13 @@ def assess_test(student_output , expected_output):
         return [output,diff_status]
 
 
-def write_to_tap(tap_file, result, test_name, test_level,test_description):
+def write_to_tap(tap_file, result, test_name, test_description):
     with open(tap_file, "a") as file:
         if result[1] == 0:
             file.write("ok" + "\n")
         else:
             file.write("not ok" + "\n")
-        add_yaml(file, test_name, test_level,test_description, result)
+        add_yaml(file, test_name ,test_description, result)
 
 def add_output(tap_file, result):
         tap_file.write("    output:\n")
@@ -64,16 +63,20 @@ def add_output(tap_file, result):
             line = line.replace("'", "''")
             tap_file.write("      - '" + line + "'\n")
 
+def yaml_sq(s):
+        if s is None:
+            return ""
+        s = str(s).replace("'", "''")
+        s = s.replace("\r\n", "\n").replace("\r", "\n")
+        s = s.replace("\n", "\\n")
+        return s
 
-def add_yaml(tap_file, test_name, test_level,test_description, result):
-        #TODO: add hidden field, which is currently hardcoded to False
-        hidden = False
+def add_yaml(tap_file, test_name ,test_description, result, hidden=False):
         tap_file.write("  ---\n")
-        tap_file.write("    name: '" + test_name + "'\n")
-        tap_file.write("    suite: '" + test_level + "'\n")
+        tap_file.write("    name: '" + yaml_sq(test_name) + "'\n")
         tap_file.write("    type: " + "1" + "\n")
-        tap_file.write("    description: '" + test_description + "'\n")
-        tap_file.write("    hidden: '" + str(hidden) + "'\n")
+        tap_file.write("    description: '" + yaml_sq(test_description) + "'\n")
+        tap_file.write("    hidden: '" + yaml_sq(str(hidden)) + "'\n")
         add_output(tap_file, result)
         tap_file.write("  ...\n")
 

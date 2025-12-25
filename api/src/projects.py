@@ -171,6 +171,36 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
     return jsonify(new_projects)
 
 
+@projects_api.route('/list_solution_files', methods=['GET'])
+@jwt_required()
+@inject
+def list_solution_files(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    pid_str = (request.args.get("id", "") or "").strip()
+    if not pid_str.isdigit():
+        return make_response([], HTTPStatus.OK)
+    pid = int(pid_str)
+
+    p = project_repo.get_project_path(pid)
+    if not p:
+        return make_response([], HTTPStatus.OK)
+
+    try:
+        if os.path.isdir(p):
+            names = []
+            for fn in sorted(os.listdir(p)):
+                full = os.path.join(p, fn)
+                if os.path.isfile(full):
+                    _, ext = os.path.splitext(fn)
+                    if ext.lower() in ALLOWED_SOURCE_EXTS:
+                        names.append(fn)
+            return make_response(names, HTTPStatus.OK)
+        return make_response([os.path.basename(p)], HTTPStatus.OK)
+    except Exception:
+        return make_response([], HTTPStatus.OK)
+
 @projects_api.route('/check_time_conflict', methods=['POST'])
 @jwt_required()
 @inject
@@ -260,8 +290,8 @@ def get_projects_by_user(project_repo: ProjectRepository = Provide[Container.pro
         class_name = project_repo.get_className_by_projectId(project.Id)
         if current_user.Id in subs: 
             sub = subs[current_user.Id]
-            student_submissions[project.Name]=[sub.Id, sub.Points, sub.Time.strftime("%x %X"), class_name, str(project.ClassId)]
-    return make_response(json.dumps(student_submissions), HTTPStatus.OK)
+            student_submissions[project.Name]=[sub.Id, 0, sub.Time.strftime("%x %X"), class_name, str(project.ClassId)]
+    return jsonify(student_submissions)
 
 @projects_api.route('/submission-by-user-most-recent-project', methods=['GET'])
 @jwt_required()
@@ -290,9 +320,11 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     if current_user.Role != ADMIN_ROLE:
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
-    # Validate files
-    if 'file' not in request.files or not request.files['file'].filename:
-        return make_response({'message': 'No selected file'}, HTTPStatus.BAD_REQUEST)
+    # Validate solution files (multi-file)
+    solution_uploads = request.files.getlist('solutionFiles')
+    solution_uploads = [f for f in solution_uploads if f and f.filename]
+    if not solution_uploads:
+        return make_response({'message': 'No selected solution files'}, HTTPStatus.BAD_REQUEST)
     if 'assignmentdesc' not in request.files or not request.files['assignmentdesc'].filename:
         return make_response({'message': 'No assignment description file'}, HTTPStatus.BAD_REQUEST)
 
@@ -305,34 +337,22 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     if name == '' or start_date == '' or end_date == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
-    up = request.files['file']
-    base_prog = os.path.splitext(safe_name(up.filename))[0]
     base_proj = safe_name(name)
     ts = ts_str()
     proj_dir_path = project_dir(base_proj, ts)
     os.makedirs(proj_dir_path, exist_ok=True)
 
-    # Save solution/program file
-    filename = up.filename
-    ext = os.path.splitext(filename)[1].lower()
-    if ext == ".zip":
-        # unique directory for extracted zip, inside the project folder
-        dir_name = f"{ts}__{base_prog}__{base_proj}"
-        path = os.path.join(proj_dir_path, dir_name)
-        os.makedirs(path, exist_ok=True)
-        try:
-            # Ensure we read the uploaded stream from the beginning
-            up.stream.seek(0)
-            with zipfile.ZipFile(up.stream) as zip_ref:
-                zip_ref.extractall(path)
-        except zipfile.BadZipFile:
-            return make_response({'message': 'Uploaded ZIP is invalid'}, HTTPStatus.BAD_REQUEST)
-    elif ext in ALLOWED_SOURCE_EXTS:
-        unique_name = f"{ts}__{base_prog}__{base_proj}{ext}"
-        path = os.path.join(proj_dir_path, unique_name)
-        up.save(path)
-    else:
-        return make_response({'message': f'Unsupported file type: {ext}'}, HTTPStatus.BAD_REQUEST)
+    # Save multi-file solution into a timestamped solution directory
+    sol_dir_name = f"{ts}__solution__{base_proj}"
+    path = os.path.join(proj_dir_path, sol_dir_name)
+    os.makedirs(path, exist_ok=True)
+    for up in solution_uploads:
+        orig = safe_name(up.filename)
+        ext = os.path.splitext(orig)[1].lower()
+        if ext not in ALLOWED_SOURCE_EXTS:
+            return make_response({'message': f'Unsupported file type: {ext}'}, HTTPStatus.BAD_REQUEST)
+        dst = os.path.join(path, orig)
+        up.save(dst)
 
     # Save assignment description using the same naming scheme as solutions:
     # "{ts}__{file}__{base_proj}[.ext]"
@@ -357,7 +377,6 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
         name, start_date, end_date, language, class_id,
         selected_path, assignmentdesc_path, json.dumps(add_paths)
     )
-    project_repo.levels_creator(new_project_id)
 
     return make_response(str(new_project_id), HTTPStatus.OK)
 
@@ -410,29 +429,22 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     existing_proj = project_repo.get_selected_project(pid)
     add_path = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
 
-    # If a new solution/program file was uploaded, save with a unique name
-    up = request.files.get('file')
+    # If new solution file(s) were uploaded, save as a new timestamped solution directory
+    solution_uploads = request.files.getlist('solutionFiles')
+    solution_uploads = [f for f in solution_uploads if f and f.filename]
     solution_changed = False
-    if up and up.filename:
-        base_prog = os.path.splitext(safe_name(up.filename))[0]
-        ext = os.path.splitext(up.filename)[1].lower()
-        if ext != ".zip":
-            unique_name = f"{ts}__{base_prog}__{base_proj}{ext}"
-            path = os.path.join(proj_dir, unique_name)
-            up.save(path)
-        else:
-            # Keep same "{ts}__{file}__{base_proj}" scheme as creation so pick_latest_solution works
-            dir_name = f"{ts}__{base_prog}__{base_proj}"
-            path = os.path.join(proj_dir, dir_name)
-            os.makedirs(path, exist_ok=True)
-            try:
-                up.stream.seek(0)
-            except Exception:
-                pass
-            with zipfile.ZipFile(up.stream) as zip_ref:
-                zip_ref.extractall(path)
-
-        # Note: we DO NOT delete the prior file/dir; this preserves history.
+    if solution_uploads:
+        sol_dir_name = f"{ts}__solution__{base_proj}"
+        path = os.path.join(proj_dir, sol_dir_name)
+        os.makedirs(path, exist_ok=True)
+        for up in solution_uploads:
+            orig = safe_name(up.filename)
+            ext = os.path.splitext(orig)[1].lower()
+            if ext not in ALLOWED_SOURCE_EXTS:
+                return make_response({'message': f'Unsupported file type: {ext}'}, HTTPStatus.BAD_REQUEST)
+            dst = os.path.join(path, orig)
+            up.save(dst)
+        # Note: we DO NOT delete the prior directory; this preserves history.
         solution_changed = True
 
     # If a new assignment description was uploaded, save with a unique name
@@ -532,7 +544,6 @@ def run_solution_for_input(solution_root: str, language: str, input_text: str, p
     args = [
         "python", script,
         "ADMIN",              # student_name triggers admin path
-        "1",                  # research_group == 1 -> admin_run
         language or "python", # language as tabot expects
         input_text or "",     # goes to admin_run(user_input)
         solution_root,        # file or directory
@@ -594,8 +605,6 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
     
     """
     For each testcase, run the (updated) solution and persist the new output.
-    IMPORTANT: preserve the testcase level by resolving level *name* from level *id*
-    when the name is not present in repository-returned data.
     """
 
     # Always fetch the project once (needed for class id, fallback language, etc.)
@@ -613,18 +622,7 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
         solution_root = getattr(proj_obj, "solutionpath", "")
         lang = getattr(proj_obj, "Language", "")
 
-    # Fetch testcases: { id: [levelid, name, desc, input, output, isHidden, addpath, (optional) levelname] }
     cases = project_repo.get_testcases(str(project_id))
-
-    # Build a level-id -> level-name map (repo.get_testcases() doesn't include names by default)
-    id_to_levelname = {}
-    try:
-        levels = project_repo.get_levels_by_project(str(project_id))
-        for lvl in levels or []:
-            # repo objects use .Id / .Name elsewhere in this file
-            id_to_levelname[getattr(lvl, "Id", None)] = getattr(lvl, "Name", "")
-    except Exception:
-        id_to_levelname = {}
 
     # Determine class id (needed by repo call)
     class_id = getattr(proj_obj, "ClassId", 0) if proj_obj else 0
@@ -636,25 +634,20 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
             class_id = 0
 
     for tc_id, vals in cases.items():
-        # repo.get_testcases() returns 6 items; API may append a 7th (level name). Handle both.
-        if not isinstance(vals, list) or len(vals) < 6:
-            continue
-        levelid, name, desc, inp, _old_out, is_hidden = vals[:6]
-        existing_levelname = vals[6] if len(vals) > 6 else ""
-        # Resolve level name from id if missing
-        try:
-            lid = int(levelid)
-        except Exception:
-            lid = None
-        resolved_levelname = existing_levelname or id_to_levelname.get(lid, "")
-
         add_path = getattr(proj_obj, "AdditionalFilePath", "") if proj_obj else ""
+        try:
+            name = vals[1] if len(vals) > 1 else ""
+            desc = vals[2] if len(vals) > 2 else ""
+            inp = vals[3] if len(vals) > 3 else ""
+            is_hidden = bool(vals[5]) if len(vals) > 5 else False
+        except Exception:
+            name, desc, inp, is_hidden = "", "", "", False
+
         new_out = run_solution_for_input(solution_root, lang, inp, project_id, class_id, add_path)
         try:
             project_repo.add_or_update_testcase(
                 int(project_id),
                 int(tc_id),
-                resolved_levelname,
                 name or "",
                 desc or "",
                 inp or "",
@@ -769,15 +762,8 @@ def get_testcases(project_repo: ProjectRepository = Provide[Container.project_re
 
     project_id = request.args.get('id')
     testcases = project_repo.get_testcases(project_id)
-    levels = project_repo.get_levels_by_project(project_id)
-    for key in testcases:
-        value = testcases[key]
-        for level in levels:
-            if level.Id==value[0]:
-                value.append(level.Name)
 
     return make_response(json.dumps(testcases), HTTPStatus.OK)
-
 
 
 @projects_api.route('/json_add_testcases', methods=['POST'])
@@ -806,23 +792,10 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
         }
          return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
     else:
-
-        # Validate level names against project's defined levels
-        try:
-            levels = project_repo.get_levels_by_project(int(project_id))
-            allowed_levels = {getattr(l, "Name", "") for l in levels}
-        except Exception:
-            allowed_levels = set()
-
         for testcase in json_obj:
-            lvl = str(testcase.get("levelname", "")).strip()
-            if not lvl or lvl not in allowed_levels:
-                return make_response({'message': f'Invalid or missing level name: "{lvl}"'}, HTTPStatus.BAD_REQUEST)
-            
             project_repo.add_or_update_testcase(
                 int(project_id),
                 -1,
-                testcase["levelname"],
                 testcase["name"],
                 testcase["description"],
                 testcase["input"],
@@ -846,7 +819,6 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     # Grab all fields safely (defaults prevent NameError)
     id_val = request.form.get('id', '').strip()
     name = request.form.get('name', '').strip()
-    level_name = request.form.get('levelName', '').strip()
     input_data = request.form.get('input', '')
     output = request.form.get('output', '')
     project_id = request.form.get('project_id', '').strip()
@@ -854,7 +826,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
     
-    if id_val == '' or name == '' or input_data == '' or project_id == '' or isHidden == '' or description == '' or class_id == '' or level_name == '':
+    if id_val == '' or name == '' or input_data == '' or project_id == '' or isHidden == '' or description == '' or class_id == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
 
     # Coerce types with validation
@@ -866,15 +838,6 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         return make_response("Invalid numeric id", HTTPStatus.BAD_REQUEST)
 
     isHidden = True if isHidden.lower() == "true" else False  
-
-    # Enforce level validity against project levels
-    try:
-        levels = project_repo.get_levels_by_project(project_id)
-        allowed_levels = {getattr(l, "Name", "") for l in levels}
-    except Exception:
-        allowed_levels = set()
-    if not level_name or level_name not in allowed_levels:
-        return make_response("Invalid level name", HTTPStatus.BAD_REQUEST)
 
     # Auto-recompute expected output when editing a testcase.
     # If the project's language is Python, run the saved solution with the new input
@@ -889,7 +852,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         # Fall back to the submitted output if recomputation fails
         pass
 
-    project_repo.add_or_update_testcase(project_id, id_val, level_name, name, description, input_data, output, isHidden, class_id_int)
+    project_repo.add_or_update_testcase(project_id, id_val, name, description, input_data, output, isHidden, class_id_int)
 
     return make_response("Testcase Added", HTTPStatus.OK)
     
@@ -909,8 +872,6 @@ def remove_testcase(project_repo: ProjectRepository = Provide[Container.project_
         id_val=request.form['id']
     project_repo.remove_testcase(id_val)
     return make_response("Testcase Removed", HTTPStatus.OK)
-
-    
     
 @projects_api.route('/get_projects_by_class_id', methods=['GET'])
 @jwt_required()
@@ -1020,7 +981,6 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
 
         Q = r"([^']*(?:''[^']*)*)"
         name_re = re.compile(rf"name:\s*'{Q}'")
-        suite_re = re.compile(rf"suite:\s*'{Q}'")
         output_item_re = re.compile(rf"^-\s*'{Q}'\s*$")
 
         for raw_line in student_output.splitlines():
@@ -1041,7 +1001,6 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
                 output_lines = []
                 current_test = {
                     'name': None,
-                    'level': None,
                     'passed': s.startswith('ok'),
                     'State': s.startswith('ok'),  
                     'output': []  
@@ -1073,10 +1032,6 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
                 if m and current_test is not None:
                     current_test['name'] = m.group(1).replace("''", "'")
                     continue
-                m = suite_re.search(s)
-                if m and current_test is not None:
-                    current_test['level'] = m.group(1).replace("''", "'")
-                    continue
                 if s.startswith('output:'):
                     in_output = True
                     output_lines = []
@@ -1092,322 +1047,6 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
         grading_data[user_id] = ["", ""]
 
     return make_response(json.dumps({"Code": student_code, "TestResults": test_info, "Language": project_language}), HTTPStatus.OK)
-
-
-#@projects_api.route('/export_project_submissions', methods=['GET'])
-#@jwt_required()
-#@inject
-#def export_project_submissions(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-#    if current_user.Role != ADMIN_ROLE:
-#        message = {
-#            'message': 'Access Denied'
-#        }
-#        return make_response(message, HTTPStatus.UNAUTHORIZED)
-
-#    project_id = request.args.get('id')
-#    project = project_repo.get_selected_project(int(project_id))
-#    # Use the project's folder; pick newest out folder inside it, then remove after zipping
-#    proj_dir = os.path.dirname(project.solutionpath) if project and getattr(project, "solutionpath", None) else None
-#    if not proj_dir or not os.path.isdir(proj_dir):
-#        return make_response({'message': 'Project folder not found'}, HTTPStatus.NOT_FOUND)
-#    candidates = []
-#    for d in os.listdir(proj_dir):
-#        full = os.path.join(proj_dir, d)
-#        if os.path.isdir(full) and ("-out" in d):
-#            candidates.append((os.path.getmtime(full), full))
-#    if not candidates:
-#        return make_response({'message': 'No exportable submissions found'}, HTTPStatus.NOT_FOUND)
-#    candidates.sort(reverse=True)
-#    submission_path = candidates[0][1]
-#    zip_path = shutil.make_archive(submission_path, 'zip', submission_path)
-#    try:
-#        shutil.rmtree(submission_path)
-#    except Exception:
-#        pass
-#    return send_file(zip_path, as_attachment=True)
-
-#TODO: Complete this call
-@projects_api.route('/getSubmissionSummary', methods=['GET'])
-@jwt_required()
-@inject
-def getSubmissionSummary(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo], class_repo: ClassRepository = Provide[Container.class_repo], user_repo: UserRepository = Provide[Container.user_repo], link_service: LinkService = Provide[Container.link_service]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
-    """
-    Endpoint to fetch unique submissions for a specific project.
-    The returned object is a list where the first element is the number of total unique submissions 
-    and the second element is the total number of students in the course.
-
-    :param submission_repo: SubmissionRepository instance provided by Dependency Injector
-    :return: JSON response containing the list of unique submissions and HTTPStatus.OK
-    """
-    # Extract 'project_id' from the request arguments
-    project_id = request.args.get('id')
-
-
-    # Get list of users in the course
-
-    class_Name = project_repo.get_className_by_projectId(project_id)
-    class_Id = project_repo.get_class_id_by_name(class_Name)
-    users=user_repo.get_all_users_by_cid(class_Id)
-    user_ids = []
-    for user in users:
-        user_ids.append(user.Id)
-    # Fetch unique submissions for the project from the repository
-    user_submissions = submission_repo.get_most_recent_submission_by_project(project_id, user_ids)
-
-
-
-    total_students = class_repo.get_studentcount(class_Id)
-    holder = [len(user_submissions), total_students]
-
-
-
-    testcase_results = {"Passed": {}, "Failed": {}}
-    testcase_links = {}
-    linting_results = {}
-
-    # Get the Linting results for each submission, aggregate them, and return them as a dictionary with the key being the linting error and the value being the number of times it occurred
-    for user in user_submissions:
-        user = user_submissions[user]
-        linting_results_user =""
-        if user.LintingResults is None:
-            continue
-        try:
-            linting_results_user = ast.literal_eval(user.LintingResults)
-        except Exception as e:
-            print("Error parsing linting results: ", str(e), flush=True)
-            continue
-        for key in linting_results_user:
-            if key not in linting_results:
-                linting_results[key] = linting_results_user[key]
-            else:
-                linting_results[key] += linting_results_user[key]
-    # Get the Testcase Results for each submission, aggregate them, with the key being "passed" or "failed" and the value being a dictionary with the key being the testcase name and the value being the number of times it occurred
-        testcase_results_user =""
-        if user.TestCaseResults is None:
-            continue
-        try:
-            testcase_results_user = ast.literal_eval(user.TestCaseResults)
-        except Exception as e:
-            print("Error parsing testcase results: ", str(e), flush=True)
-            continue
-        for status in ['Passed', 'Failed']:
-            if status in testcase_results_user:
-                for test_case in testcase_results_user[status]:
-                    for test_name, level in test_case.items():
-                        if test_name not in testcase_results[status]:
-                            testcase_results[status][test_name] = 1
-                        else:
-                            testcase_results[status][test_name] += 1
-    pass_averages = {}
-
-    # Generates pass averages for each test case
-    for test_case in set(testcase_results['Passed'].keys()).union(testcase_results['Failed'].keys()):
-        pass_count = testcase_results['Passed'].get(test_case, 0)
-        fail_count = testcase_results['Failed'].get(test_case, 0)
-        total = pass_count + fail_count
-        pass_averages[test_case] = (pass_count / total) * 100 if total != 0 else 0
-
-    dates, passed, failed, no_submission = submission_repo.day_to_day_visualizer(project_id, user_ids)
-    submission_heatmap, potential_students_list = submission_repo.get_all_submission_times(project_id)
-
-    ## Sort Linting results based on the number of times they occurred, only send top 6 most common linting errors
-    linting_results = {k: v for k, v in itertools.islice(sorted(linting_results.items(), key=lambda item: item[1], reverse=True), 6)}
-
-    # Sort Testcase results based on the number of times they occurred, only send the worst 6 averages
-    pass_averages = {k: v for k, v in itertools.islice(sorted(pass_averages.items(), key=lambda item: item[1], reverse=False), 6)}
-    return make_response(json.dumps({"LintData":linting_results, "UniqueSubmissions": holder, "TestCaseResults": pass_averages, "dates": dates, "passed": passed, "failed": failed, "noSubmission": no_submission, "submissionHeatmap": submission_heatmap, "PotentialAtRisk": potential_students_list }), HTTPStatus.OK)
-
-@projects_api.route('/AtRiskStudents', methods=['GET'])
-@jwt_required()
-@inject
-def AtRiskStudents(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo], class_repo: ClassRepository = Provide[Container.class_repo], user_repo: UserRepository = Provide[Container.user_repo], link_service: LinkService = Provide[Container.link_service]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'You do not have permission to do this!'
-        }
-        return make_response(message, HTTPStatus.FORBIDDEN)
-    project_id = request.args.get('id')
-    no_submission_prior_assignment = []
-    failing_two_out_of_three = []
-    high_failing_rate = []
-
-    class_Name = project_repo.get_className_by_projectId(project_id)
-    class_Id = project_repo.get_class_id_by_name(class_Name)
-    users=user_repo.get_all_users_by_cid(class_Id)
-    user_ids = [user.Id for user in users]
-
-    projects = project_repo.get_projects_by_class_id(class_Id)
-    projects = sorted(projects, key=lambda project: project.End)
-    
-    if len(projects) == 0 or len(projects)==1:
-        return make_response(json.dumps({"noSubmission": no_submission_prior_assignment, "TwoOutThree": failing_two_out_of_three, "HighFailRate" : high_failing_rate}), HTTPStatus.OK) 
-    no_submission_prior_assignment = list(user_ids)
-    
-    current_asn_index = 0
-    for project in projects:
-        if project.Id == int(project_id):
-            break
-        current_asn_index += 1
-    """
-    These next two parts of this function identifies students who may be at risk based on two criteria:
-
-    1. Students who did not submit anything for the previous assignment.
-    2. Students who submitted more than 10 times for the previous assignment but did not achieve a passing grade.
-
-    This is considered the first level of risk assessment for students.
-    """
-    # Get students who did not submit anything for the previous assignment
-    try:
-        holder = submission_repo.get_most_recent_submission_by_project(projects[current_asn_index - 1].Id, user_ids) # TODO: get all submissions for the previous assignment
-        for key in holder:
-            if key in no_submission_prior_assignment:
-                no_submission_prior_assignment.remove(key)
-    except Exception as e:
-        no_submission_prior_assignment = []
-        print("An error occurred or no prior submissions: ", str(e), flush=True)
-
-    # Get students who submitted more than 10 times for the previous assignment but did not achieve a passing result
-    try:
-        high_subs_failing={}
-        holder = submission_repo.get_all_submissions_for_project(projects[current_asn_index - 1].Id) #TODO: get all submissions for the previous assignment
-        temp = {}
-        for submission in holder:
-            if submission.User not in temp:
-                temp[submission.User] = [1, submission.IsPassing]
-            else:
-                if submission.IsPassing==1:
-                    temp[submission.User][0] += 1
-                    temp[submission.User][1] = submission.IsPassing
-                else:
-                    temp[submission.User][0] += 1
-                    if temp[submission.User][1] == 0:
-                        temp[submission.User][1] = submission.IsPassing
-        for key in temp:
-            if temp[key][1] == 0 and temp[key][0] >= 10:
-                high_subs_failing[key] = [temp[key][0], project.Id]
-    except Exception as e:
-        high_subs_failing = {}
-        print("An error occurred or no prior asn High_subs_failing: ", str(e), flush=True)
-
-    # Go through the prior assignments and get users who have failed two out of three most recent assignments
-    failing_two_out_of_three = {}
-
-    if current_asn_index >=3 and projects[current_asn_index-1] is not None and projects[current_asn_index-2] is not None and projects[current_asn_index-3] is not None:
-        temp = [projects[current_asn_index-1].Id, projects[current_asn_index-2].Id, projects[current_asn_index-3].Id]
-        for project_id in temp:
-            submissions  = submission_repo.get_most_recent_submission_by_project(project_id, user_ids)
-            for user_id in user_ids:
-                passed_flag = False
-                made_submission = False
-                for submission in submissions:
-                    if submissions[submission].User == user_id:
-                        made_submission = True
-                        if submissions[submission].IsPassing == 1:
-                            passed_flag = True
-                if not passed_flag or not made_submission:
-                    if user_id not in failing_two_out_of_three:
-                        failing_two_out_of_three[user_id] = 1
-                    else:
-                        failing_two_out_of_three[user_id] += 1
-    """
-    The next portion of this function identifies the severity of a student's risk based on the following criteria:
-    1. Students who have failed two out of three most recent assignments.
-    2. Students who have not made a submission for the previous assignment.
-    3. Students who have submitted more than 10 times for the previous assignment but did not achieve a passing grade.
-    
-    No prior submission = 1
-    More than 10 submissions without passing = 2
-    failing two out of three = 3
-    No prior submission + failing two out of three = 4
-    More than 10 submissions without passing + failing two out of three = 5    
-    
-    """
-    NO_PRIOR_ONLY = 1
-    HIGH_SUBS_FAIL_ONLY = 2
-    FAIL_TWO_OUT_OF_THREE_ONLY = 3
-    NO_PRIOR_PLUS_FAIL_TWO_OUT_OF_THREE = 4
-    HIGH_SUBS_FAIL_PLUS_FAIL_TWO_OUT_OF_THREE = 5
-
-    at_riskstudents ={}
-
-    for value in no_submission_prior_assignment:
-        if value not in failing_two_out_of_three:
-            at_riskstudents[value] = NO_PRIOR_ONLY
-        if value in failing_two_out_of_three:
-            at_riskstudents[value] = NO_PRIOR_PLUS_FAIL_TWO_OUT_OF_THREE
-    for value in high_subs_failing:
-        if value not in failing_two_out_of_three:
-            at_riskstudents[value] = HIGH_SUBS_FAIL_ONLY 
-        if value in failing_two_out_of_three:
-            at_riskstudents[value] = HIGH_SUBS_FAIL_PLUS_FAIL_TWO_OUT_OF_THREE
-    for value in failing_two_out_of_three:
-        if value not in at_riskstudents:
-            at_riskstudents[value] = FAIL_TWO_OUT_OF_THREE_ONLY
-    
-    for key in at_riskstudents:
-        user = user_repo.get_user(key)
-        counter = 0
-        for project in projects:
-            counter += submission_repo.get_number_of_questions_asked(project.Id, key)
-        at_riskstudents[key] = [at_riskstudents[key], user.Firstname + " " + user.Lastname, counter, user.Email]
-    
-    message = {
-        'message': 'Success'
-    }
-    return make_response(json.dumps({"AtRiskStudents": at_riskstudents}), HTTPStatus.OK)
-
-@projects_api.route('/AtRiskStudentDetail', methods=['GET'])
-@jwt_required()
-@inject
-def AtRiskStudentDetail(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo], class_repo: ClassRepository = Provide[Container.class_repo], user_repo: UserRepository = Provide[Container.user_repo], link_service: LinkService = Provide[Container.link_service]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'You do not have permission to do this!'
-        }
-        return make_response(message, HTTPStatus.FORBIDDEN)
-    user_id = request.args.get('id')
-    project_id = request.args.get('project_id')
-    class_Name = project_repo.get_className_by_projectId(project_id)
-    class_Id = project_repo.get_class_id_by_name(class_Name)
-    projects = project_repo.get_projects_by_class_id(class_Id)
-    projects = sorted(projects, key=lambda project: project.End, reverse=False)
-
-    submissions = submission_repo.get_all_submissions_for_user(user_id)
-    count = {}
-    for submission in submissions:
-        if submission.Project not in count:
-            count[submission.Project] = 1
-        else:
-            count[submission.Project] += 1
-    
-    data = {}
-    total_OH_questions = 0
-    current_OH_questions = 0
-    student_questions =[]
-    for project in projects:
-        questions = submission_repo.get_student_questions_asked(user_id, project.Id)
-        if len(questions) > 0:
-            questions = [question.StudentQuestionscol for question in questions]
-            for question in questions:
-                if project.Id == int(project_id):
-                    total_OH_questions += 1
-                    current_OH_questions += 1
-                else:
-                    total_OH_questions += 1
-                student_questions.append([project.Name, question])
-    for project in projects:
-        if project.Id in count:
-            data[project.Name] = count[project.Id]
-        else:
-            data[project.Name] = 0
-
-    return make_response(json.dumps({"StudentData": data, "currentOHQCount": current_OH_questions, "AllOHQCount": total_OH_questions, "OHQuestionsDetails": student_questions}), HTTPStatus.OK)
-
 
 
 @projects_api.route('/unlockStudentAccount', methods=['POST'])

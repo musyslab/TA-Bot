@@ -39,20 +39,22 @@ class PastSubmissionPage extends Component<{}, ProjectsState> {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then((res) => {
-                const data = res.data;
+                const data =
+                    typeof res.data === 'string'
+                        ? JSON.parse(res.data)
+                        : res.data;
                 const rows: Array<Row> = [];
 
-                Object.entries(data).map(([key, value]) => {
+                Object.entries(data ?? {}).forEach(([key, value]) => {
                     const row = new Row();
-                    const test = value as Array<string>;
+                    const test = value as any[];
                     row.project_name = key;
-                    row.id = parseInt(test[0]);
-                    row.score = parseInt(test[1]);
-                    row.date = test[2];
-                    row.classname = test[3];
-                    row.classid = test[4];
+                    row.id = Number(test[0] ?? 0);
+                    row.score = Number(test[1] ?? 0);
+                    row.date = String(test[2] ?? '');
+                    row.classname = String(test[3] ?? '');
+                    row.classid = String(test[4] ?? '');
                     rows.push(row);
-                    return row;
                 });
 
                 this.setState({ rows });
@@ -92,7 +94,7 @@ class PastSubmissionPage extends Component<{}, ProjectsState> {
                                 </thead>
                                 <tbody className="table-body">
                                     {this.state.rows.map((row) => (
-                                        <tr className="data-row" key={row.id}>
+                                        <tr className="data-row" key={`${row.classid}-${row.id}`}>
                                             <td className="cell cell-project">{row.project_name}</td>
                                             <td className="cell cell-date">{row.date}</td>
                                             <td className="cell cell-class">{row.classname}</td>

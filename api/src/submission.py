@@ -36,16 +36,27 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
     final={}
     for line in parser.parse_file(file_path):
         if line.category == "test":
-            if role == ADMIN_ROLE or not hasLVLSYSEnabled:
-                if line.yaml_block is not None:
-                    new_yaml = line.yaml_block.copy()
-                    new_yaml["hidden"] = "False"
-                    test.append({
-                        'skipped': line.skip,
-                        'passed': line.ok,
-                        'test': new_yaml
-                    })
+            if line.yaml_block is None:
                 continue
+
+            new_yaml = line.yaml_block.copy()
+            # Normalize "hidden" to "True"/"False" strings (and default to False)
+            raw_hidden = new_yaml.get("hidden", "False")
+            new_yaml["hidden"] = "True" if str(raw_hidden).strip().lower() in ("true", "1", "yes") else "False"
+
+            # Admin/TA always see all tests
+            if role == ADMIN_ROLE or role == TA_ROLE:
+                new_yaml["hidden"] = "False"
+
+            # Levels disabled: just return tests as-is (hidden means actually hidden)
+            if not hasLVLSYSEnabled:
+                test.append({
+                    'skipped': line.skip,
+                    'passed': line.ok,
+                    'test': new_yaml
+                })
+                continue
+
             elif line.yaml_block["hidden"] == "True" and role != ADMIN_ROLE:
                 continue
             
@@ -77,26 +88,11 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
     if submission_id != -1:
         projectid = submission_repo.get_project_by_submission_id(submission_id)
         submission = submission_repo.get_submission_by_submission_id(submission_id)
-        current_level = submission_repo.get_current_level(submission_id, submission.User)
     else:
         projectid = project_repo.get_current_project_by_class(class_id).Id
         submission = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid)
         current_level=submission_repo.get_current_level(submission.Id,current_user.Id)
-    output = convert_tap_to_json(submission.OutputFilepath,current_user.Role,current_level, False)
-    if(current_user.Role == ADMIN_ROLE or current_user.Role == TA_ROLE):
-        return make_response(output, HTTPStatus.OK)
-    else:
-        #call get-timout to see if user is in timeout
-        timeout = submission_repo.check_visibility(current_user.Id, projectid)
-        if timeout == True:
-            return make_response(output, HTTPStatus.OK)
-        else:
-            output_dict = json.loads(output)    
-            for test_item in output_dict["results"]:
-                test_item["test"]["hidden"] = "True"
-            # Convert the modified dictionary back to a JSON string
-            output = json.dumps(output_dict, sort_keys=True, indent=4)
-        # If user is in timeout, go through output and   
+    output = convert_tap_to_json(submission.OutputFilepath, current_user.Role, 0, False)
     return make_response(output, HTTPStatus.OK)
 
 # TODO: Create new function to handle Java and C
@@ -151,26 +147,30 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
     else:
         projectid = project_repo.get_current_project_by_class(class_id).Id
         code_output = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid).CodeFilepath
-    output = ""
-    outputs = []
-    if not os.path.isdir(code_output):
-        with open(code_output, 'r') as file:
-            output = file.read()
-            outputs.append(output)
-    else:
-        # these files are all files in submission directory
-        #files = [filename for filename in os.listdir(code_output)] #  if filename.endswith('.java') <-- why java?
-        files = [filename for filename in os.listdir(code_output) if filename.endswith(".java") or filename.endswith(".c")]
-        for f in files:
-            if "Main.java" in files:
-                with open(code_output + "/" + "Main.java") as file:
-                    output = file.read()
-            else:
-                with open(code_output + "/" + f) as file: # files[0]
-                    output = file.read()
-            outputs.append(output)
+    files_payload = []
 
-    return make_response(outputs[0], HTTPStatus.OK)
+    if not os.path.isdir(code_output):
+        with open(code_output, 'r', encoding='utf-8', errors='replace') as file:
+            files_payload.append({
+                "name": os.path.basename(code_output),
+                "content": file.read()
+            })
+    else:
+        files = [
+            filename for filename in os.listdir(code_output)
+            if filename.endswith(".java") or filename.endswith(".c")
+        ]
+        # Stable ordering: Main.java first (if present), then alphabetical
+        files = sorted(files, key=lambda n: (n != "Main.java", n.lower()))
+
+        for f in files:
+            with open(os.path.join(code_output, f), 'r', encoding='utf-8', errors='replace') as file:
+                files_payload.append({
+                    "name": f,
+                    "content": file.read()
+                })
+
+    return make_response(json.dumps({"files": files_payload}), HTTPStatus.OK)
 
 #TODO: This entire API call can probably be removed
 @submission_api.route('/submissioncounter', methods=['GET'])

@@ -16,40 +16,41 @@ class Testcase {
     constructor() {
         this.id = 0;
         this.name = "";
-        this.levelid = 0;
         this.description = "";
         this.input = "";
         this.output = "";
         this.isHidden = false;
-        this.levelname = "";
     }
 
     id: number;
     name: string;
-    levelid: number;
     description: string;
     input: string;
     output: string;
     isHidden: boolean;
-    levelname: string;
 }
 
 const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [CreateNewState, setCreateNewState] = useState<boolean>();
     const [testcases, setTestcases] = useState<Array<Testcase>>([]);
     const [ProjectName, setProjectName] = useState<string>("");
-    const [ProjectLanguage, setProjectLanguage] = useState<string>("java");
+    const [ProjectLanguage, setProjectLanguage] = useState<string>("");
+    const [serverProjectLanguageSnapshot, setServerProjectLanguageSnapshot] = useState<string>("");
     const [SubmitButton, setSubmitButton] = useState<string>("Create new assignment");
     const [SubmitJSON, setSubmitJSON] = useState<string>("Submit JSON file");
     const [getJSON, setGetJSON] = useState<string>("Export test cases");
-    const [File, setFile] = useState<File>();
+    const [SolutionFiles, setSolutionFiles] = useState<File[]>([]);
+    const [serverSolutionFileNames, setServerSolutionFileNames] = useState<string[]>([]);
+    const [serverSolutionFileNamesSnapshot, setServerSolutionFileNamesSnapshot] = useState<string[]>([]);
+    const [JsonFile, setJsonFile] = useState<File | undefined>(undefined);
     const [AssignmentDesc, setDesc] = useState<File>();
     const [edit, setEdit] = useState<boolean>(false);
     const [selectedAddFiles, setSelectedAddFiles] = useState<File[]>([]);
     const [modalOpen, setModalOpen] = useState<boolean>(false);
     const [selectedTestCaseId, setSelectedTestCaseId] = useState<number>(-4);
-    const [solutionfileName, setSolutionFileName] = useState<string>("");
+    const [solutionFileNames, setSolutionFileNames] = useState<string[]>([]);
     const [descfileName, setDescFileName] = useState<string>("");
+    const [serverDescFileName, setServerDescFileName] = useState<string>("");
     const [jsonfilename, setjsonfilename] = useState<string>("");
     const [activeTab, setActiveTab] = useState<'psettings' | 'testcases'>('psettings');
     const [submittingProject, setSubmittingProject] = useState<boolean>(false);
@@ -63,12 +64,119 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     const [showAdditionalFile, setShowAdditionalFile] = useState<boolean>(false);
     const [additionalFileNames, setAdditionalFileNames] = useState<string[]>([]);
     const [removedAdditionalFiles, setRemovedAdditionalFiles] = useState<string[]>([]);
-
+    const [mainJavaFileName, setMainJavaFileName] = useState<string>("");
 
     const API = import.meta.env.VITE_API_URL;
     const authHeader = { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` };
+
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i;
-    const VALID_LEVELS = new Set(['Level 1', 'Level 2', 'Level 3']);
+    const SOLUTION_ALLOWED_RE = /\.(py|java|c|h|rkt|scm)$/i;
+    const DESC_ALLOWED_RE = /\.(pdf|docx?|txt)$/i;
+    const SOLUTION_ACCEPT = ".py,.java,.c,.h,.rkt,.scm";
+    const DESC_ACCEPT = ".pdf,.doc,.docx,.txt";
+
+    const ADD_ALLOWED_RE = /\.(txt)$/i;
+    const ADD_ACCEPT = ".txt";
+
+    const JAVA_MAIN_RE = /\bpublic\s+static\s+void\s+main\s*\(/;
+    const isJavaFileName = (n: string) => /\.java$/i.test(n);
+
+    const basename = (p: string) => (p || "").split(/[\\/]/).pop() || "";
+
+    type SolutionLang = 'java' | 'python' | 'c' | 'racket';
+    const solutionLangFor = (name: string): SolutionLang | null => {
+        const lower = name.toLowerCase();
+        if (lower.endsWith('.java')) return 'java';
+        if (lower.endsWith('.py')) return 'python';
+        if (lower.endsWith('.c') || lower.endsWith('.h')) return 'c';
+        if (lower.endsWith('.rkt') || lower.endsWith('.scm')) return 'racket';
+        return null;
+    };
+
+    function pickMainJavaFile(allJavaNames: string[], namesWithMain: string[]): string {
+        if (namesWithMain.length === 1) return namesWithMain[0];
+        const mainDotJava = allJavaNames.find(n => n.toLowerCase() === "main.java");
+        if (mainDotJava) return mainDotJava;
+        return namesWithMain[0] || "";
+    }
+
+    async function computeMainJavaFromLocal(files: File[]) {
+        const javaFiles = files.filter(f => isJavaFileName(f.name));
+        if (javaFiles.length <= 1) { setMainJavaFileName(""); return; }
+        const withMain: string[] = [];
+        for (const f of javaFiles) {
+            try {
+                const txt = await f.text();
+                if (JAVA_MAIN_RE.test(txt)) withMain.push(f.name);
+            } catch {
+                // ignore read failures
+            }
+        }
+        setMainJavaFileName(pickMainJavaFile(javaFiles.map(f => f.name), withMain));
+    }
+
+    async function computeMainJavaFromServer(names: string[]) {
+        const javaNames = names.filter(isJavaFileName);
+        if (javaNames.length <= 1) { setMainJavaFileName(""); return; }
+        const withMain: string[] = [];
+        await Promise.all(javaNames.map(async (name) => {
+            try {
+                const url = new URL(`${API}/projects/get_source_file`);
+                url.searchParams.set('project_id', String(props.id));
+                url.searchParams.set('relpath', name);
+                const res = await fetch(url, { headers: authHeader });
+                if (!res.ok) return;
+                const txt = await res.text();
+                if (JAVA_MAIN_RE.test(txt)) withMain.push(name);
+            } catch {
+                // ignore fetch failures
+            }
+        }));
+        setMainJavaFileName(pickMainJavaFile(javaNames, withMain));
+    }
+
+    async function loadServerSolutionFiles() {
+        try {
+            const res = await axios.get(
+                import.meta.env.VITE_API_URL + `/projects/list_solution_files?id=${props.id}`,
+                { headers: { 'Authorization': `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` } }
+            );
+            const names = Array.isArray(res.data) ? res.data : [];
+            setServerSolutionFileNames(names);
+            setServerSolutionFileNamesSnapshot(names);
+        } catch (e) {
+            console.log(e);
+            setServerSolutionFileNames([]);
+            setServerSolutionFileNamesSnapshot([]);
+        }
+    }
+    useEffect(() => {
+        if (edit && props.id > 0) {
+            loadServerSolutionFiles();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [edit, props.id]);
+
+    // Detect which Java file is the entry point (only matters when multiple .java files exist)
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            if (ProjectLanguage !== "java") { if (!cancelled) setMainJavaFileName(""); return; }
+
+            // Prefer local selection if present, otherwise server solution files
+            if (SolutionFiles.length > 0) {
+                await computeMainJavaFromLocal(SolutionFiles);
+                return;
+            }
+            if (edit && serverSolutionFileNames.length > 0) {
+                await computeMainJavaFromServer(serverSolutionFileNames);
+                return;
+            }
+            if (!cancelled) setMainJavaFileName("");
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ProjectLanguage, SolutionFiles, serverSolutionFileNames, edit, props.id]);
 
     function fileIconFor(filename: string): string {
         const lower = filename.toLowerCase();
@@ -82,6 +190,54 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         const text = await file.text();
         setPreviewTitle(file.name); setPreviewText(text); setPreviewOpen(true);
     }
+
+    // When multiple solution files exist, preview ALL of them in one modal
+    async function openAllSolutionPreview() {
+        const isLocal = SolutionFiles.length > 0;
+        const names = isLocal ? SolutionFiles.map(f => f.name) : serverSolutionFileNames;
+        if (names.length === 0) return;
+
+        try {
+            if (isLocal) {
+                const parts = await Promise.all(
+                    SolutionFiles.map(async (f) => `// ===== ${f.name} =====\n${await f.text()}`)
+                );
+                setPreviewTitle("Solution Files");
+                setPreviewText(parts.join("\n\n"));
+                setPreviewOpen(true);
+                return;
+            }
+
+            // Server-side solution files: fetch each and concatenate
+            const parts = await Promise.all(
+                serverSolutionFileNames.map(async (name) => {
+                    const url = new URL(`${API}/projects/get_source_file`);
+                    url.searchParams.set('project_id', String(props.id));
+                    url.searchParams.set('relpath', name);
+                    const res = await fetch(url, { headers: authHeader });
+                    const text = res.ok ? await res.text() : "[Could not load file from server]";
+                    return `// ===== ${name} =====\n${text}`;
+                })
+            );
+            setPreviewTitle("Solution Files");
+            setPreviewText(parts.join("\n\n"));
+            setPreviewOpen(true);
+        } catch (e) {
+            console.log(e);
+            window.alert("Could not preview solution files.");
+        }
+    }
+
+    const languageLabel = (() => {
+        if (!ProjectLanguage) return "Not detected yet";
+        if (ProjectLanguage === "java") return "Java";
+        if (ProjectLanguage === "python") return "Python";
+        if (ProjectLanguage === "c") return "C";
+        if (ProjectLanguage === "racket") return "Racket";
+        return ProjectLanguage;
+    })();
+
+
     async function fetchServerFileList(): Promise<string[]> {
         const res = await fetch(`${API}/projects/list_source_files?project_id=${props.id}`, { headers: authHeader });
         if (!res.ok) return []; const data = await res.json(); const list = data.files.map((f: any) => f.relpath); setServerFiles(list); return list;
@@ -89,12 +245,12 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     async function openServerPreview(relpath?: string) {
         const url = new URL(`${API}/projects/get_source_file`); url.searchParams.set('project_id', String(props.id)); if (relpath) url.searchParams.set('relpath', relpath);
         const res = await fetch(url, { headers: authHeader }); if (!res.ok) return; const text = await res.text();
-        setPreviewTitle(relpath || solutionfileName || "source"); setPreviewText(text); setPreviewOpen(true);
+        setPreviewTitle(relpath || "source"); setPreviewText(text); setPreviewOpen(true);
     }
 
     useEffect(() => {
-        if (showAdditionalFile && edit) { fetchServerFileList(); }
-    }, [showAdditionalFile, edit]);
+        if (edit && props.id > 0) { fetchServerFileList(); }
+    }, [edit, props.id]);
 
 
     const navigate = useNavigate();
@@ -143,13 +299,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
 
 
                     testcase.id = parseInt(key);
-                    testcase.levelid = parseInt(values[0]);
                     testcase.name = values[1];
                     testcase.description = values[2];
                     testcase.input = values[3];
                     testcase.output = values[4];
                     testcase.isHidden = !!values[5];
-                    testcase.levelname = values[6]
 
 
                     rows.push(testcase);
@@ -159,13 +313,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
 
                 var testcase = new Testcase();
                 testcase.id = -1;
-                testcase.levelid = -1;
                 testcase.name = "";
                 testcase.description = "";
                 testcase.input = "";
                 testcase.output = "";
                 testcase.isHidden = false;
-                testcase.levelname = "";
 
                 rows.push(testcase);
 
@@ -188,11 +340,27 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                         setProjectStartDate(new Date(data[props.id][1]));
                         setProjectEndDate(new Date(data[props.id][2]));
                         setProjectLanguage(data[props.id][3]);
-                        setSolutionFileName(data[props.id][4]);
-                        setDescFileName(data[props.id][5]);
-                        const addNames = (data[props.id][6] || []) as string[];
-                        setAdditionalFileNames(addNames);
-                        setShowAdditionalFile(addNames.length > 0);
+                        setServerProjectLanguageSnapshot(data[props.id][3]);
+                        setSolutionFileNames([]);
+                        setSolutionFiles([]);
+                        const serverDesc = (data[props.id][5] || "") as string;
+                        setDescFileName(serverDesc);
+                        setServerDescFileName(serverDesc);
+                        const rawAdd = data[props.id][6] ?? [];
+                        let addList: string[] = [];
+                        if (Array.isArray(rawAdd)) {
+                            addList = rawAdd as string[];
+                        } else if (typeof rawAdd === "string") {
+                            try {
+                                // backend sometimes returns JSON string
+                                const parsed = JSON.parse(rawAdd);
+                                addList = Array.isArray(parsed) ? parsed : (rawAdd ? [rawAdd] : []);
+                            } catch {
+                                addList = rawAdd ? [rawAdd] : [];
+                            }
+                        }
+                        setAdditionalFileNames(addList.map(basename).filter(Boolean));
+                        setShowAdditionalFile(addList.length > 0);
                         setEdit(true);
                         setSubmitButton("Submit changes");
                     }
@@ -233,16 +401,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         });
     }
 
-
-    function handleLevelChange(testcase_id: number, level: string) {
-        setModalDraft(prev => {
-            if (prev && prev.id === testcase_id) {
-                return { ...prev, levelname: level };
-            }
-            return prev;
-        });
-    }
-
     function handleInputChange(testcase_id: number, input_data: string) {
         setModalDraft(prev => {
             if (prev && prev.id === testcase_id) {
@@ -250,18 +408,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             }
             return prev;
         });
-    }
-
-    function handleOutputChange(testcase_id: number, output_data: string) {
-        let new_testcases = [...testcases];
-
-        for (var i = 0; i < new_testcases.length; i++) {
-            if (new_testcases[i].id === testcase_id) {
-                new_testcases[i].output = output_data;
-                setTestcases(new_testcases);
-                break;
-            }
-        }
     }
 
     function buttonhandleTrashClick(testcase: number) {
@@ -305,13 +451,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                     var values = (value as Array<string>);
 
                     testcase.id = parseInt(key);
-                    testcase.levelid = parseInt(values[0]);
                     testcase.name = values[1];
                     testcase.description = values[2];
                     testcase.input = values[3];
                     testcase.output = values[4];
                     testcase.isHidden = !!values[5];
-                    testcase.levelname = values[6];
                     rows.push(testcase);
 
                     return testcase;
@@ -319,13 +463,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
 
                 var testcase = new Testcase();
                 testcase.id = -1;
-                testcase.levelid = -1;
                 testcase.name = "";
                 testcase.description = "";
                 testcase.input = "";
                 testcase.output = "";
                 testcase.isHidden = false;
-                testcase.levelname = "";
 
                 rows.push(testcase);
 
@@ -340,7 +482,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         try {
             setSubmittingJson(true);
             const formData = new FormData();
-            formData.append("file", File!);
+            formData.append("file", JsonFile!);
             formData.append("project_id", props.id.toString());
             formData.append("class_id", props.class_id.toString());
             await axios.post(
@@ -368,8 +510,8 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             window.alert("Please fill out all fields");
             return;
         }
-        if (!File || !AssignmentDesc) {
-            window.alert("Please upload both the solution file and the assignment description.");
+        if (SolutionFiles.length === 0 || !AssignmentDesc) {
+            window.alert("Please upload your solution file(s) and the assignment description.");
             return;
         }
         if (ProjectStartDate.getTime() >= ProjectEndDate.getTime()) {
@@ -404,7 +546,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             // 2) No conflict -> proceed to create
             setSubmittingProject(true);
             const formData = new FormData();
-            formData.append("file", File);
+            SolutionFiles.forEach(f => formData.append("solutionFiles", f));
             formData.append("assignmentdesc", AssignmentDesc);
             selectedAddFiles.forEach(f => formData.append("additionalFiles", f));
             if (selectedAddFiles.length === 0 && additionalFileNames.length === 0) {
@@ -432,9 +574,12 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         }
     }
 
-    // replace the existing handleEditSubmit with this version
     async function handleEditSubmit() {
         try {
+            if (!ProjectName || !ProjectStartDate || !ProjectEndDate || !ProjectLanguage) {
+                window.alert("Please fill out all fields");
+                return;
+            }
             // 1) Check for time conflicts BEFORE saving
             const conflictCheck = await axios.post(
                 `${import.meta.env.VITE_API_URL}/projects/check_time_conflict`,
@@ -462,7 +607,9 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
             setSubmittingProject(true);
             const formData = new FormData();
             formData.append("id", props.id.toString());
-            if (File) formData.append("file", File);
+            if (SolutionFiles.length > 0) {
+                SolutionFiles.forEach(f => formData.append("solutionFiles", f));
+            }
             if (AssignmentDesc) formData.append("assignmentdesc", AssignmentDesc);
             selectedAddFiles.forEach(f => formData.append("additionalFiles", f));
             if (removedAdditionalFiles.length > 0) {
@@ -501,13 +648,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         if (TestCaseId === -1) {
             const t = new Testcase();
             t.id = -1;
-            t.levelid = -1;
             t.name = "";
             t.description = "";
             t.input = "";
             t.output = "";
             t.isHidden = false;
-            t.levelname = "";
             setModalDraft(t);
         } else {
             const source = testcases.find(tc => tc.id === TestCaseId);
@@ -520,18 +665,55 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     }
 
 
-    function handleFileChange(event: React.FormEvent) {
+    function handleSolutionFilesChange(event: React.FormEvent) {
 
         const target = event.target as HTMLInputElement;
         const files = target.files;
 
-        if (files != null && files.length === 1) {
-            // Update the state
-            setFile(files[0]);
-            setSolutionFileName(files[0].name);
-        } else {
-            setFile(undefined);
+        if (!files || files.length === 0) {
+            setSolutionFiles([]);
+            setSolutionFileNames([]);
+            setProjectLanguage(edit ? (serverProjectLanguageSnapshot || ProjectLanguage) : "");
+            return;
         }
+        const arr = Array.from(files);
+
+        // Enforce allowed solution-file types
+        if (arr.some(f => !SOLUTION_ALLOWED_RE.test(f.name))) {
+            window.alert("Solution files must be Python (.py), Java (.java), C (.c/.h), or Racket (.rkt/.scm).");
+            target.value = '';
+            setSolutionFiles([]);
+            setSolutionFileNames([]);
+            setProjectLanguage(edit ? (serverProjectLanguageSnapshot || ProjectLanguage) : "");
+            return;
+        }
+
+        // Do not allow mixing solution languages in one upload
+        const langs = new Set(arr.map(f => solutionLangFor(f.name)));
+        langs.delete(null);
+        if (langs.size > 1) {
+            window.alert("Do not mix solution file types. Upload files for only ONE language at a time.");
+            target.value = '';
+            setSolutionFiles([]);
+            setSolutionFileNames([]);
+            setProjectLanguage(edit ? (serverProjectLanguageSnapshot || ProjectLanguage) : "");
+            return;
+        }
+
+        // Multiple solution files are ONLY allowed for Java (and therefore must all be .java)
+        const onlyLang = Array.from(langs)[0] as SolutionLang | undefined;
+        if (arr.length > 1 && onlyLang !== 'java') {
+            window.alert("Multiple solution files are only supported for Java. Upload a single file for other languages.");
+            target.value = '';
+            setSolutionFiles([]);
+            setSolutionFileNames([]);
+            setProjectLanguage(edit ? (serverProjectLanguageSnapshot || ProjectLanguage) : "");
+            return;
+        }
+
+        setSolutionFiles(arr);
+        setSolutionFileNames(arr.map(f => f.name));
+        setProjectLanguage(onlyLang ?? "");
     };
 
     function handleJsonFileChange(event: React.FormEvent) {
@@ -540,11 +722,10 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         const files = target.files;
 
         if (files != null && files.length === 1) {
-            // Update the state
-            setFile(files[0]);
+            setJsonFile(files[0]);
             setjsonfilename(files[0].name);
         } else {
-            setFile(undefined);
+            setJsonFile(undefined);
         }
     };
 
@@ -554,6 +735,14 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         const files = target.files;
 
         if (files != null && files.length === 1) {
+            // Enforce allowed description-file types
+            if (!DESC_ALLOWED_RE.test(files[0].name)) {
+                window.alert("Description file must be a Word document (.doc/.docx), PDF (.pdf), or text file (.txt).");
+                target.value = '';
+                setDescFileName('');
+                setDesc(undefined);
+                return;
+            }
             // Update the state
             setDesc(files[0]);
             setDescFileName(files[0].name);
@@ -590,7 +779,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     function handleAdditionalFileChange(event: React.FormEvent) {
         const target = event.target as HTMLInputElement;
         const files = target.files;
-        if (!files || files.length === 0) return;
+        if (Array.from(files).some(f => !ADD_ALLOWED_RE.test(f.name))) {
+            window.alert("Additional files must be .txt");
+            target.value = '';
+            return;
+        }
         setSelectedAddFiles(prev => {
             const existing = new Set(prev.map(f => f.name));
             const merged = [...prev];
@@ -633,7 +826,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         const formData = new FormData();
         formData.append('id', modalDraft.id.toString());
         formData.append('name', modalDraft.name);
-        formData.append('levelName', modalDraft.levelname.toString());
         formData.append('project_id', props.id.toString());
         formData.append('class_id', props.class_id.toString());
         formData.append('input', modalDraft.input.toString());
@@ -641,13 +833,8 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         formData.append('isHidden', modalDraft.isHidden.toString());
         formData.append('description', modalDraft.description.toString());
 
-        if (modalDraft.name === "" || modalDraft.levelname === "" || modalDraft.input === "" || modalDraft.description === "") {
+        if (modalDraft.name === "" || modalDraft.input === "" || modalDraft.description === "") {
             window.alert("Please fill out all fields");
-            return;
-        }
-
-        if (!VALID_LEVELS.has(modalDraft.levelname)) {
-            window.alert("Please select a level (Level 1, Level 2, or Level 3).");
             return;
         }
 
@@ -685,13 +872,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                     var testcase = new Testcase();
                     var values = (value as Array<string>);
                     testcase.id = -1;
-                    testcase.levelid = parseInt(values[0]);
                     testcase.name = values[1];
                     testcase.description = values[2];
                     testcase.input = values[3];
                     testcase.output = values[4];
                     testcase.isHidden = !!values[5];
-                    testcase.levelname = values[6];
                     rows.push(testcase);
 
                     return testcase;
@@ -713,15 +898,94 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
     }
 
     const selectedTestCase = modalDraft;
-    const directoryEntries = Array.from(new Set([
+
+    type DirEntry = { key: string; name: string; status: 'none' | 'add' | 'remove'; kind: 'server' | 'local' | 'other' };
+    const baseName = (p: string) => (p || "").split(/[\\/]/).pop()!;
+
+    const serverNames = [
         ...(serverFiles ?? []),
-        ...(solutionfileName ? [solutionfileName] : []),
-        ...selectedAddFiles.map(f => f.name),
+        ...(serverSolutionFileNamesSnapshot ?? []),
         ...additionalFileNames,
-        ...removedAdditionalFiles,
-    ].map(p => p.split(/[\\/]/).pop()!)))
-        .filter(Boolean)
-        .sort();
+        ...(serverDescFileName ? [serverDescFileName] : []),
+    ].map(baseName);
+
+    const localNames = [
+        ...solutionFileNames,
+        ...selectedAddFiles.map(f => f.name),
+        ...(AssignmentDesc ? [AssignmentDesc.name] : []),
+    ].map(baseName);
+
+    const removedNames = removedAdditionalFiles.map(baseName);
+
+    type Flag = { server: boolean; local: boolean; removed: boolean };
+
+    const flags = new Map<string, Flag>();
+
+    const mkEntry = (
+        key: string,
+        name: string,
+        status: DirEntry['status'],
+        kind: DirEntry['kind']
+    ): DirEntry => ({ key, name, status, kind });
+
+    const mark = (names: string[], k: 'server' | 'local' | 'removed') => {
+        names.forEach(n => {
+            if (!n) return;
+            const cur = flags.get(n) ?? { server: false, local: false, removed: false };
+            if (k === 'server') cur.server = true;
+            if (k === 'local') cur.local = true;
+            if (k === 'removed') cur.removed = true;
+            flags.set(n, cur);
+        });
+    };
+    mark(serverNames, 'server');
+    mark(localNames, 'local');
+    mark(removedNames, 'removed');
+
+    // If user selected a NEW description file while editing, the OLD server description should be marked for removal
+    if (edit && AssignmentDesc && serverDescFileName) {
+        mark([baseName(serverDescFileName)], 'removed');
+    }
+
+    // If user selected NEW solution files while editing, ALL existing server solution files are replaced
+    // so every pre-existing solution file should be marked "Submit changes to remove".
+    if (edit && SolutionFiles.length > 0 && serverSolutionFileNamesSnapshot.length > 0) {
+        mark(serverSolutionFileNamesSnapshot.map(baseName), 'removed');
+    }
+
+    const directoryEntries: DirEntry[] = Array.from(flags.entries())
+        .flatMap<DirEntry>(([name, f]) => {
+            if (f.server && f.local) {
+                return [
+                    mkEntry(`${name}__server_remove`, name, 'remove', 'server'),
+                    mkEntry(`${name}__local_add`, name, 'add', 'local'),
+                ];
+            }
+            if (f.local) {
+                return [mkEntry(`${name}__add`, name, 'add', 'local')];
+            }
+            if (f.server || f.removed) {
+                const status: DirEntry['status'] = f.removed ? 'remove' : 'none';
+                return [mkEntry(`${name}__server`, name, status, 'server')];
+            }
+            return [mkEntry(`${name}__other`, name, 'none', 'other')];
+        })
+        // Ensure all "remove" rows appear above "add" rows (and both above "none")
+        .sort((a, b) => {
+            const rank = (s: DirEntry['status']) => (s === 'remove' ? 0 : s === 'add' ? 1 : 2);
+            return (
+                rank(a.status) - rank(b.status) ||
+                a.name.localeCompare(b.name) ||
+                a.kind.localeCompare(b.kind)
+            );
+        });
+
+    // Filesystem view "Main" tag: directoryEntries is objects now, so compute using their names (deduped)
+    const fsUniqueJavaNames = Array.from(new Set(directoryEntries.map(e => e.name).filter(isJavaFileName)));
+    const fsShowMainTag =
+        ProjectLanguage === "java" &&
+        fsUniqueJavaNames.length > 1 &&
+        !!mainJavaFileName;
 
     return (
         <>
@@ -814,20 +1078,10 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                         </div>
                                     </div>
 
-
-                                    {/* Language */}
+                                    {/* Language (auto-detected from solution file type) */}
                                     <div className="form-group language-group">
                                         <label>Language</label>
-                                        <select
-                                            className="dropdown-field"
-                                            value={ProjectLanguage}
-                                            onChange={e => setProjectLanguage(e.currentTarget.value)}
-                                        >
-                                            <option value="java">Java</option>
-                                            <option value="racket">Racket</option>
-                                            <option value="c">C</option>
-                                            <option value="python">Python</option>
-                                        </select>
+                                        <div className="detected-language">{languageLabel}</div>
                                     </div>
 
                                     {/* File sections */}
@@ -843,17 +1097,19 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                 onDrop={e => {
                                                     e.preventDefault();
                                                     const files = e.dataTransfer.files;
-                                                    if (files && files.length === 1) {
-                                                        handleFileChange({ target: { files } } as any);
+                                                    if (files && files.length > 0) {
+                                                        handleSolutionFilesChange({ target: { files } } as any);
                                                     }
                                                 }}
                                             >
-                                                {!solutionfileName ? (
+                                                {(SolutionFiles.length === 0 && (!edit || serverSolutionFileNames.length === 0)) ? (
                                                     <>
                                                         <input
                                                             type="file"
                                                             className="file-input"
-                                                            onChange={handleFileChange}
+                                                            multiple
+                                                            accept={SOLUTION_ACCEPT}
+                                                            onChange={handleSolutionFilesChange}
                                                         />
                                                         <div className="file-drop-message">
                                                             Drag &amp; drop your file here or&nbsp;
@@ -862,44 +1118,88 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                     </>
                                                 ) : (
                                                     <div className="file-preview">
-                                                        <button
-                                                            type="button"
-                                                            className="file-name"
-                                                            onClick={async (e) => {
-                                                                e.preventDefault();
-                                                                if (File) {
-                                                                    openLocalPreview(File);
-                                                                } else if (edit) {
-                                                                    // Show existing server-stored program
-                                                                    // If project is a single-file project, this will open it directly.
-                                                                    // If it's a directory, we first list then let user pick.
-                                                                    fetchServerFileList().then(() => {
-                                                                        if (serverFiles && serverFiles.length === 1) {
-                                                                            openServerPreview(serverFiles[0]);
-                                                                        } else {
-                                                                            // open a simple chooser modal
-                                                                            setPreviewTitle("Select a file to preview");
-                                                                            setPreviewText(""); // we’ll render a clickable list below
-                                                                            setPreviewOpen(true);
-                                                                        }
-                                                                    });
-                                                                }
-                                                            }}
-                                                            title="Click to preview"
-                                                        >
-                                                            {solutionfileName}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className="exchange-icon"
-                                                            onClick={() => {
-                                                                setSolutionFileName('');
-                                                                setFile(undefined);
-                                                            }}
-                                                        >
-                                                            <i className="exchange icon"></i>
-                                                        </button>
-                                                    </div>
+                                                        {(() => {
+                                                            const shownNames = (SolutionFiles.length > 0 ? SolutionFiles.map(f => f.name) : serverSolutionFileNames);
+                                                            const showMainTag =
+                                                                ProjectLanguage === "java" &&
+                                                                shownNames.filter(isJavaFileName).length > 1 &&
+                                                                !!mainJavaFileName;
+                                                            return (
+                                                                <>
+                                                                    {/* Always show ONLY the blue switch icon */}
+                                                                    <button
+                                                                        type="button"
+                                                                        className="exchange-icon"
+                                                                        title={SolutionFiles.length > 0 ? "Clear selected solution files" : "Replace server solution files"}
+                                                                        aria-label={SolutionFiles.length > 0 ? "Clear selected solution files" : "Replace server solution files"}
+                                                                        onClick={(e) => {
+                                                                            e.preventDefault();
+                                                                            if (SolutionFiles.length > 0) {
+                                                                                setSolutionFiles([]);
+                                                                                setSolutionFileNames([]);
+                                                                            } else if (edit && serverSolutionFileNames.length > 0) {
+                                                                                setServerSolutionFileNames([]);
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        <i className="exchange icon" aria-hidden="true"></i>
+                                                                    </button>
+
+                                                                    <div
+                                                                        className="file-preview-list"
+                                                                        role={(shownNames.length > 1) ? "button" : undefined}
+                                                                        tabIndex={(shownNames.length > 1) ? 0 : undefined}
+                                                                        title={(shownNames.length > 1) ? "Click to preview ALL solution files" : undefined}
+                                                                        onClick={(e) => {
+                                                                            if (shownNames.length > 1) {
+                                                                                e.preventDefault();
+                                                                                openAllSolutionPreview();
+                                                                            }
+                                                                        }}
+                                                                        onKeyDown={(e) => {
+                                                                            if (shownNames.length > 1 && (e.key === "Enter" || e.key === " ")) {
+                                                                                e.preventDefault();
+                                                                                openAllSolutionPreview();
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        {shownNames.map((name) => (
+                                                                            <div key={name} className="file-preview-row solution-file-card">
+                                                                                {(shownNames.length > 1) ? (
+                                                                                    <span className="file-name">
+                                                                                        {name}
+                                                                                        {showMainTag && isJavaFileName(name) && name === mainJavaFileName && (
+                                                                                            <span className="main-indicator">Main</span>
+                                                                                        )}
+                                                                                    </span>
+                                                                                ) : (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        className="file-name"
+                                                                                        title="Click to preview"
+                                                                                        onClick={(e) => {
+                                                                                            e.preventDefault();
+                                                                                            if (SolutionFiles.length > 0) {
+                                                                                                const file = SolutionFiles.find(x => x.name === name);
+                                                                                                if (file) openLocalPreview(file);
+                                                                                            } else {
+                                                                                                openServerPreview(name);
+                                                                                            }
+                                                                                        }}
+                                                                                    >
+                                                                                        {name}
+                                                                                        {showMainTag && isJavaFileName(name) && name === mainJavaFileName && (
+                                                                                            <span className="main-indicator">Main</span>
+                                                                                        )}
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </>
+                                                            );
+                                                        })()}
+                                                    </div >
                                                 )}
                                             </div>
                                         </div>
@@ -915,8 +1215,8 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                 onDrop={e => {
                                                     e.preventDefault();
                                                     const files = e.dataTransfer.files;
-                                                    if (files && files.length === 1) {
-                                                        handleDescFileChange({ target: { files } } as any);
+                                                    if (files && files.length > 0) {
+                                                        handleSolutionFilesChange({ target: { files } } as any);
                                                     }
                                                 }}
                                             >
@@ -925,6 +1225,8 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                         <input
                                                             type="file"
                                                             className="file-input"
+                                                            id="descFile"
+                                                            accept={DESC_ACCEPT}
                                                             onChange={handleDescFileChange}
                                                         />
                                                         <div className="file-drop-message">
@@ -934,37 +1236,98 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                     </>
                                                 ) : (
                                                     <div className="file-preview">
-
-                                                        <button
-                                                            type="button"
-                                                            className="file-name"
-                                                            title="Click to download"
-                                                            onClick={(e) => {
-                                                                e.preventDefault();
-                                                                const lower = (descfileName || '').toLowerCase();
-                                                                // Only download server copy when editing and no new local file is chosen
-                                                                if (/\.(pdf|docx?)$/.test(lower) && edit && !AssignmentDesc) {
-                                                                    downloadAssignmentDescription();
-                                                                }
-                                                            }}
-
-                                                        >
-                                                            {descfileName}
-                                                        </button>
-
                                                         <button
                                                             type="button"
                                                             className="exchange-icon"
                                                             onClick={() => {
                                                                 setDescFileName('');
                                                                 setDesc(undefined);
+                                                                const el = document.getElementById('descFile') as HTMLInputElement | null;
+                                                                if (el) el.value = '';
                                                             }}
                                                         >
                                                             <i className="exchange icon"></i>
                                                         </button>
+
+                                                        <div className="file-preview-list">
+                                                            <div className="file-preview-row solution-file-card">
+                                                                <button
+                                                                    type="button"
+                                                                    className="file-name"
+                                                                    title="Click to download"
+                                                                    onClick={(e) => {
+                                                                        e.preventDefault();
+                                                                        const lower = (descfileName || '').toLowerCase();
+                                                                        // Only download server copy when editing and no new local file is chosen
+                                                                        if (/\.(pdf|docx?)$/.test(lower) && edit && !AssignmentDesc) {
+                                                                            downloadAssignmentDescription();
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    {descfileName}
+                                                                </button>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
+                                        </div>
+
+
+                                        {/* Project Filesystem View (always visible, not part of the file-section row) */}
+                                        <div className="filesystem-segment">
+                                            <h1 className="info-title">Project Filesystem View</h1>
+                                            {directoryEntries.length > 0 ? (
+                                                <div className="directory-tree" role="tree" aria-label="Current directory">
+                                                    <div className="tree-rail" aria-hidden="true"></div>
+                                                    <ul className="tree-list">
+                                                        {directoryEntries.map((entry) => {
+                                                            const name = entry.name;
+                                                            const isAdded = !!selectedAddFiles.find(f => f.name === name);
+                                                            const isServer = additionalFileNames.includes(name);
+
+                                                            return (
+                                                                <li className="tree-row" role="treeitem" key={entry.key}>
+                                                                    <span className="tree-icon" aria-hidden="true">
+                                                                        <i className={fileIconFor(name)} />
+                                                                    </span>
+                                                                    <span className="tree-name">
+                                                                        {name}
+                                                                        {fsShowMainTag && isJavaFileName(name) && name === mainJavaFileName && (
+                                                                            <span className="main-indicator">Main</span>
+                                                                        )}
+                                                                    </span>
+                                                                    {entry.status === 'remove' && (
+                                                                        <span className="file-status removed">Submit changes to remove</span>
+                                                                    )}
+                                                                    {entry.status === 'add' && (
+                                                                        <span className="file-status added">Submit changes to add</span>
+                                                                    )}
+                                                                    {isServer ? (
+                                                                        <button
+                                                                            type="button"
+                                                                            className="tree-remove-button from-server"
+                                                                            onClick={() => removeServerAdditional(name)}
+                                                                        >
+                                                                            Remove
+                                                                        </button>
+                                                                    ) : isAdded ? (
+                                                                        <button
+                                                                            type="button"
+                                                                            className="tree-remove-button from-selected"
+                                                                            onClick={() => removeSelectedAdditional(name)}
+                                                                        >
+                                                                            Remove
+                                                                        </button>
+                                                                    ) : null}
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
+                                                </div>
+                                            ) : (
+                                                <div className="filesystem-empty">No files yet.</div>
+                                            )}
                                         </div>
 
                                         <div className="optional-file-toggle">
@@ -976,59 +1339,12 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                     setShowAdditionalFile(prev => !prev);
                                                 }}
                                             >
-                                                {showAdditionalFile ? 'Optional additional file: On' : 'Optional additional file: Off'}
+                                                {showAdditionalFile ? 'Optional additional text file: On' : 'Optional additional text file: Off'}
                                             </button>
                                         </div>
 
                                         {showAdditionalFile && (
                                             <div className="info-segment optional-additional-file-segment">
-                                                <h1 className="info-title">Project Filesystem View</h1>
-                                                {/* Directory-like listing shown above the drop zone */}
-                                                {directoryEntries.length > 0 && (
-                                                    <div className="directory-tree" role="tree" aria-label="Current directory">
-                                                        <div className="tree-rail" aria-hidden="true"></div>
-                                                        <ul className="tree-list">
-                                                            {directoryEntries.map((name) => {
-                                                                const isAdded = !!selectedAddFiles.find(f => f.name === name);
-                                                                const isRemoved = removedAdditionalFiles.includes(name);
-                                                                const isServer = additionalFileNames.includes(name);
-                                                                return (
-                                                                    <li className="tree-row" role="treeitem" key={name}>
-                                                                        <span className="tree-icon" aria-hidden="true">
-                                                                            <i className={fileIconFor(name)} />
-                                                                        </span>
-                                                                        <span className="tree-name">{name}</span>
-                                                                        {(isAdded || isRemoved) && (
-                                                                            <span
-                                                                                className={`file-status ${isRemoved ? 'removed' : 'added'}`}
-                                                                            >
-                                                                                {isRemoved ? 'Submit changes to remove' : 'Submit changes to add'}
-                                                                            </span>
-                                                                        )}
-                                                                        {/* Per-file remove */}
-                                                                        {isServer ? (
-                                                                            <button
-                                                                                type="button"
-                                                                                className="tree-remove-button from-server"
-                                                                                onClick={() => removeServerAdditional(name)}
-                                                                            >
-                                                                                Remove
-                                                                            </button>
-                                                                        ) : isAdded ? (
-                                                                            <button
-                                                                                type="button"
-                                                                                className="tree-remove-button from-selected"
-                                                                                onClick={() => removeSelectedAdditional(name)}
-                                                                            >
-                                                                                Remove
-                                                                            </button>
-                                                                        ) : null}
-                                                                    </li>
-                                                                );
-                                                            })}
-                                                        </ul>
-                                                    </div>
-                                                )}
                                                 <h1 className="info-title">Optional Additional Files</h1>
                                                 <div
                                                     className="file-drop-area optional-additional-file-drop"
@@ -1041,11 +1357,11 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                         }
                                                     }}
                                                 >
-                                                    {/* Always show drop/browse */}
                                                     <input
                                                         type="file"
                                                         className="file-input optional-additional-file-input"
                                                         multiple
+                                                        accept={ADD_ACCEPT}
                                                         onChange={handleAdditionalFileChange}
                                                     />
                                                     <div className="file-drop-message">
@@ -1055,7 +1371,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                 </div>
                                             </div>
                                         )}
-
                                     </div>
 
                                     {/* Submit */}
@@ -1088,7 +1403,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                         <thead>
                                             <tr>
                                                 <th>Name</th>
-                                                <th>Level</th>
                                                 <th>Input</th>
                                                 <th>Output</th>
                                                 <th>Description</th>
@@ -1101,7 +1415,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                 .map(tc => (
                                                     <tr key={tc.id}>
                                                         <td>{tc.name}</td>
-                                                        <td>{tc.levelname}</td>
                                                         <td>
                                                             <pre className="testcase-input">{tc.input}</pre>
                                                         </td>
@@ -1147,8 +1460,8 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                         onDrop={e => {
                                             e.preventDefault();
                                             const files = e.dataTransfer.files;
-                                            if (files && files.length === 1) {
-                                                handleJsonFileChange({ target: { files } } as any);
+                                            if (files && files.length > 0) {
+                                                handleDescFileChange({ target: { files } } as any);
                                             }
                                         }}
                                     >
@@ -1212,36 +1525,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                     </button>
                                 </div>
                             </div>
-
-                            <div className="testcase-info-grid">
-                                <div className="info-segment">
-                                    <h2>Level 1: Base Cases (Simple Cases)</h2>
-                                    <ul className="bulleted">
-                                        <li>Test basic functionality with simple inputs.</li>
-                                    </ul>
-                                </div>
-                                <div className="info-segment">
-                                    <h2>Level 2: Main Functionality Cases</h2>
-                                    <ul className="bulleted">
-                                        <li>Test core features and main tasks.</li>
-                                        <li>Use a variety of inputs, positive/negative scenarios.</li>
-                                    </ul>
-                                </div>
-                                <div className="info-segment">
-                                    <h2>Level 3: Edge Cases (Boundary and Extreme Cases)</h2>
-                                    <ul className="bulleted">
-                                        <li>Test less common or extreme situations.</li>
-                                    </ul>
-                                </div>
-                                <div className="info-segment">
-                                    <h2>General Best Practices for Test Cases:</h2>
-                                    <ul className="bulleted">
-                                        <li>Clear and descriptive names.</li>
-                                        <li>Complete coverage with representative cases.</li>
-                                        <li>Descriptions are robust for students.</li>
-                                    </ul>
-                                </div>
-                            </div>
                         </div>
                     )}
                 </div>
@@ -1257,7 +1540,7 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                             <button
                                 type="button"
                                 className="preview-close-button"
-                                onClick={() => { setPreviewOpen(false); setServerFiles(null); }}
+                                onClick={() => { setPreviewOpen(false); }}
                             >
                                 &times;
                             </button>
@@ -1380,25 +1663,6 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                         />
                                         Hidden
                                     </label>
-                                </div>
-
-                                <div className="form-group level-radio-group">
-                                    {['Level 1', 'Level 2', 'Level 3'].map(level => (
-                                        <div key={level} className="form-field modal-radio">
-                                            <label>
-                                                <input
-                                                    type="radio"
-                                                    name={`levelRadio-${selectedTestCaseId}-${level}`}
-                                                    value={level}
-                                                    checked={selectedTestCase?.levelname === level}
-                                                    onChange={() =>
-                                                        handleLevelChange(selectedTestCaseId!, level)
-                                                    }
-                                                />
-                                                {level}
-                                            </label>
-                                        </div>
-                                    ))}
                                 </div>
 
                                 <div className="modal-action-buttons">

@@ -42,19 +42,20 @@
     border: 1px solid #e5e7eb;
     border-radius: 16px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
-
-    /* cap height & enable scrolling for shorter viewports */
-    max-height: min(78vh, 850px);
-    overflow: auto;
-    overscroll-behavior: contain;
+    overflow-y: auto;
+    overflow-x: hidden;
+    box-sizing: border-box;
+    margin-bottom: 20px;
 
     .page-title {
         display: block;
         width: 100%;
         margin: 0 0 16px 0;
         padding: 12px 24px;
-        background: #d1d5db; /* darker gray, still readable with black text */
-        border: 1px solid #9ca3af; /* slightly darker border for balance */
+        background: #d1d5db;
+        /* darker gray, still readable with black text */
+        border: 1px solid #9ca3af;
+        /* slightly darker border for balance */
         border-radius: 12px;
         text-align: center;
         font-weight: 700;
@@ -159,16 +160,16 @@
                     align-items: center;
                     justify-content: center;
                     position: relative;
-                    border: 1px dashed #ccc;
+                    border: 2px dashed #ccc;
                     border-radius: 10px;
-                    padding: 24px;
+                    padding: 40px;
                     text-align: center;
                     cursor: pointer;
                     transition: background-color 0.2s;
                     margin-bottom: 10px;
                     flex-wrap: wrap;
                     gap: 0.5rem;
-                    background-color: #fafafa;
+                    background-color: #f9f9f9;
                     width: 100%;
 
                     .file-input {
@@ -223,35 +224,43 @@
                     align-items: center;
                     gap: 0.5rem;
                     animation: fadeInScale 0.5s ease-out;
-                    padding: 0.4rem 0.8rem;
-                    margin: 0.25rem 0.5rem;
-                    background-color: #e3e3e3;
-                    border: 1px solid #bbb;
+                    padding: 0.5rem 1rem;
+                    margin: 0.5rem 1rem;
+                    background-color: #dcdcdc;
+                    border: 1px solid rgba(0, 0, 0, 0.1);
                     border-radius: 8px;
                     cursor: pointer;
+                    width: 100%;
+                    flex-wrap: wrap;
+                    align-items: flex-start;
 
-                    .file-name {
-                        font-size: 14px;
-                        color: #333;
-                        word-break: break-all;
-                        margin-right: 1rem;
-                        margin-left: 0.75rem;
-                        margin-bottom: 0;
+                    .file-preview-list {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                        grid-auto-flow: row;
+                        gap: 0.6rem;
+                        width: 100%;
+                        padding-right: 3.8rem;
                     }
 
-                    button.file-name {
-                        background: transparent;
-                        border: 0;
-                        padding: 0;
-                        cursor: pointer;
+                    .solution-file-card {
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                        padding: 0.55rem 0.75rem;
+                        border: 2px solid #bdbdbd;
+                        border-radius: 8px;
+                        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+                        max-width: 100%;
+                        width: 100%;
                     }
 
                     .exchange-icon {
                         position: absolute;
-                        bottom: calc(100% - 12px);
-                        left: calc(100% - 12px);
-                        width: 26px;
-                        height: 26px;
+                        top: -12px;
+                        right: -12px;
+                        width: 28px;
+                        height: 28px;
                         background-color: #3498db;
                         color: #fff;
                         border-radius: 50%;
@@ -263,7 +272,7 @@
                         transition: background-color 0.2s, transform 0.2s;
 
                         i {
-                            font-size: 14px;
+                            font-size: 16px;
                             line-height: 1;
                             margin: 0;
                             padding: 0;
@@ -271,19 +280,22 @@
 
                         &:hover {
                             background-color: #2980b9;
-                            transform: scale(1.08);
+                            transform: scale(1.1);
                         }
                     }
 
-                    &:hover {
-                        transform: translateY(-2px) scale(1.01);
-                        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
-                        background-color: #ededed;
+                    .file-name {
+                        font-size: 16px;
+                        color: #333;
+                        word-break: break-all;
+                        margin-right: 1.2rem;
+                        margin-left: 0.9rem;
+                        margin-bottom: 0;
                     }
 
                     &:active {
                         transform: translateY(0);
-                        box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
+                        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
                     }
 
                     &:focus-within {
@@ -372,4 +384,3 @@
     font-size: 1rem;
     line-height: 1.35;
 }
-

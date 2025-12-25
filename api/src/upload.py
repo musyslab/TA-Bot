@@ -1,4 +1,3 @@
-import shutil
 from flask.json import jsonify
 from src.repositories.config_repository import ConfigRepository
 import json
@@ -6,7 +5,6 @@ import os
 import subprocess
 import os.path
 from typing import List
-import zipfile
 from subprocess import Popen
 
 from flask_jwt_extended import jwt_required
@@ -18,7 +16,6 @@ from flask import current_app
 from http import HTTPStatus
 from datetime import datetime
 from flask_cors import cross_origin
-from src.repositories.models import Levels
 from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.user_repository import UserRepository
@@ -33,11 +30,16 @@ from src.constants import ADMIN_ROLE
 
 upload_api = Blueprint('upload_api', __name__)
 
-ext={"python": [".py","py"],"java": [".java","java"],"c": [".c", "c"],"zip":[".zip","zip"]}
+ext={"python": [".py","py"],"java": [".java","java"],"c": [".c", "c"]}
 
 def _sanitize_fs(s: str) -> str:
     """Make a string safe for filesystem paths: keep alnum, dash, underscore."""
     return "".join(c if (c.isalnum() or c in "-_") else "_" for c in (s or "").strip())
+
+def _safe_upload_filename(filename: str) -> str:
+    base = os.path.basename(filename or "")
+    stem, extn = os.path.splitext(base)
+    return f"{_sanitize_fs(stem)}{extn.lower()}"
 
 def allowed_file(filename):
     """[function for checking to see if the file is an allowed file type]
@@ -104,126 +106,27 @@ def output_pass_or_fail(filepath):
                 return False
     return True
 
-def level_counter(filepath):
-    """
-    This function takes a filepath as input and returns the number of passed levels and total tests for each suite in the file.
-    
-    Args:
-    - filepath (str): The path of the file to be parsed.
-    
-    Returns:
-    - passed_levels (dict): A dictionary containing the number of passed tests for each suite.
-    - total_tests (dict): A dictionary containing the total number of tests for each suite.
-    """
-    parser = Parser()
-    passed_levels={}
-    total_tests={}
-    for test in parser.parse_file(filepath):
-        if test.category == "test":
-            if test.yaml_block is not None and test.yaml_block["suite"] == None:
-                continue
-            if test.yaml_block is not None and test.yaml_block["suite"] in total_tests:
-                if test.yaml_block["suite"] in total_tests:
-                    total_tests[test.yaml_block["suite"]]=total_tests[test.yaml_block["suite"]]+1
-                else:
-                    total_tests[test.yaml_block["suite"]]=1
-                if test.ok:
-                    if test.yaml_block["suite"] in passed_levels:
-                        passed_levels[test.yaml_block["suite"]]=passed_levels[test.yaml_block["suite"]]+1
-                    else:
-                        passed_levels[test.yaml_block["suite"]]=1
-    
-    return passed_levels, total_tests
-
-
-def score_finder(project_repository: ProjectRepository, passed_levels,total_tests,project_id) -> str:
-
-    levels=project_repository.get_levels(project_id)
-    score_total=0
-    for item in levels:
-        #individual_score=levels[item]/total_tests[item]
-        individual_score=0
-        if item in passed_levels:
-            score_total=score_total+(individual_score*passed_levels[item])    
-    return score_total
-
 def test_case_result_finder(filepath):
     results = {'Passed': [], 'Failed': []}
-    current_test = {'name': None, 'level': None}
+    current_test = {'name': None}
 
     with open(filepath, "r") as file:
         for line in file:
             line = line.strip()
             if line.startswith('not ok'):
-                current_test = {'name': None, 'level': None}
+                current_test = {'name': None}
                 is_passing = False
             elif line.startswith('ok'):
-                current_test = {'name': None, 'level': None}
+                current_test = {'name': None}
                 is_passing = True
             elif line.startswith('name:'):
                 current_test['name'] = line.split('\'')[1]
-            elif line.startswith('suite:'):
-                current_test['level'] = line.split('\'')[1]
             elif line.startswith('...') and current_test['name']:
                 if is_passing:
-                    results['Passed'].append({current_test['name']: current_test['level']})
+                    results['Passed'].append(current_test['name'])
                 else:
-                    results['Failed'].append({current_test['name']: current_test['level']})
-
+                    results['Failed'].append(current_test['name'])
     return results
-
-
-def parse_tap_file_for_levels(file_path: str, levels: List[Levels]) -> str:
-    """
-    Parses a TAP file and returns the level(s) that were passed or failed.
-
-    Args:
-        file_path (str): The path to the TAP file to parse.
-        levels (List[Levels]): A list of levels to check for pass/fail.
-
-    Returns:
-        str: The highest level a student reaches (max 3)
-    """
-    parser = Parser()
-    failed_levels=[]
-    passed_levels=[]
-    for test in parser.parse_file(file_path):
-        if test.category == "test":
-            if test.ok and test.yaml_block is not None and test.yaml_block["suite"] is not None:
-                passed_levels.append(test.yaml_block["suite"])
-            else:
-                if test.yaml_block is not None and test.yaml_block["suite"] is not None:
-                    failed_levels.append(test.yaml_block["suite"])
-                else:
-                    print("No suite", flush=True)
-    failed_levels.sort()
-    passed_levels.sort()
-
-    return find_level(passed_levels, failed_levels, levels)
-
-
-def find_level(pass_levels: List[str], failed_levels: List[str], levels: List[Levels]) -> str:
-    """
-    Finds the level of a submission based on the passed and failed tests.
-
-    Args:
-        pass_levels (List[str]): A list of levels that passed the tests.
-        failed_levels (List[str]): A list of levels that failed the tests.
-        levels (List[Levels]): A list of all the levels.
-
-    Returns:
-        str: The name of the max level a student has reached.
-    """
-    # If no tests are failing, return the highest level.  Assumes levels are sorted by order
-    if len(failed_levels) == 0:
-        return levels[-1].Name
-
-    for level in levels:
-        if pass_levels.count(level.Name) < failed_levels.count(level.Name):
-            return level.Name
-
-    # If it gets here it means every level had more passing tests than failing tests.  Return the max level
-    return levels[-1].Name
 
 
 def pylint_score_finder(error_count):
@@ -314,38 +217,29 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
     if(current_user.Role != ADMIN_ROLE):
         class_id = request.form['class_id']
 
-    # check if the post request has the file part
-    if 'file' not in request.files:
-        message = {
-            'message': 'No selected file'
-        }
+    # Accept either legacy single-file field ("file") or new multi-file field ("files")
+    upload_files = request.files.getlist('files')
+    if not upload_files:
+        single = request.files.get('file')
+        if single and single.filename:
+            upload_files = [single]
+    upload_files = [f for f in upload_files if f and f.filename]
+    if not upload_files:
+        message = { 'message': 'No selected file' }
         return make_response(message, HTTPStatus.BAD_REQUEST)
 
-    file = request.files['file']
-    # if user does not select file, browser also
-    # submit an empty part without filename
-    if file.filename == '':
-        message = {
-            'message': 'No selected file'
-        }
-        return make_response(message, HTTPStatus.BAD_REQUEST)
-
-    # Enforce language/file-type compatibility to avoid, e.g., compiling .py as Java
-    orig_ext = os.path.splitext(file.filename)[1].lower()
     proj_lang = (project.Language or "").strip().lower()
     if proj_lang == "java":
-        if not (orig_ext == ".java" or file.filename.lower().endswith(".zip")):
-            message = {
-                'message': 'Selected project expects Java: upload a .java file.'
-            }
+        bad = [f.filename for f in upload_files if os.path.splitext(f.filename)[1].lower() != ".java"]
+        if bad:
+            message = { 'message': 'Selected project expects Java: upload one or more .java files.' }
             return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
     elif proj_lang == "python":
-        if orig_ext != ".py":
+         if len(upload_files) != 1 or os.path.splitext(upload_files[0].filename)[1].lower() != ".py":
             message = {
                 'message': 'Selected project expects Python: upload a .py file.'
             }
             return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
-    filedata=file.read()
     classname = class_repo.get_class_name_withId(class_id)
     
     student_base = current_app.config['STUDENT_FILES_DIR']
@@ -356,53 +250,36 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
     os.makedirs(submission_path, exist_ok=True)
 
 
-    if file and allowed_file(file.filename):
-        zipfile_bool = False  # track zip uploads
+    if upload_files and all(allowed_file(f.filename) for f in upload_files):
         language = (project.Language or "").lower()
         # Per-submission timestamp for filenames
         ts_now = datetime.now()
         ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
         dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
 
-        orig_base = os.path.basename(file.filename)
-        orig_name_no_ext, orig_ext = os.path.splitext(orig_base)
+        orig_base = os.path.basename(upload_files[0].filename)
+        _, orig_ext = os.path.splitext(orig_base)
         safe_project = _sanitize_fs(getattr(project, "Name", str(project.Id)))
         safe_username = _sanitize_fs(username)
         display_base = f"{ts_stamp}__{safe_username}__{safe_project}"
 
-        # Step 1: Run TA-Bot to generate grading folder
-        
-        #check to see if file is a zip file, if so extract the files
-        if file.filename.lower().endswith(".zip"):
-            with zipfile.ZipFile(file, 'r') as zip_ref:
-                zipfile_bool = True
-                outputpath = submission_path
-
-                path = os.path.join(submission_path, display_base)
-                os.makedirs(path, exist_ok=True)
-                if project.Language.lower() == "python":
-                    message = {
-                        'message': 'Python projects do not support zip files!'
-                    }
-                    return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
-                if project.Language.lower() == "java":
-                    for file_info in zip_ref.infolist():
-                        if file_info.filename.endswith('.java'):
-                            with zip_ref.open(file_info) as f:
-                                file_content = f.read()
-                            save_path = os.path.join(path, os.path.basename(file_info.filename))
-                            with open(save_path, 'wb') as f:
-                                f.write(file_content)           
+        # Step 1: Save student upload(s)
+        outputpath = submission_path
+        if language == "java" and len(upload_files) >= 1:
+            # Multi-file Java submission: save into a directory and pass the directory to the grader
+            path = os.path.join(outputpath, display_base)
+            os.makedirs(path, exist_ok=True)
+            for f in upload_files:
+                dst = os.path.join(path, _safe_upload_filename(f.filename))
+                f.save(dst)
         else:
-            file.seek(0)
-            outputpath = submission_path
-
-            save_name = f"{display_base}{orig_ext.lower()}"
+            # Single-file (non-Java or legacy)
+            f0 = upload_files[0]
+            save_name = f"{display_base}{os.path.splitext(f0.filename)[1].lower()}"
             path = os.path.join(outputpath, save_name)
-            file.save(path)
+            f0.save(path)
 
         # Step 2: Run grade.sh
-        research_group = user_repository.get_user_researchgroup(user_id)
         testcase_info_json = project_repo.testcases_to_json(project.Id)
 
         grading_script = "/ta-bot/grading-scripts/tabot.py"
@@ -412,7 +289,6 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
         cmd = [
             "python", grading_script,
             username,
-            str(research_group),
             project.Language,
             str(testcase_info_json),
             path,
@@ -429,9 +305,12 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
             return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
         
         # Step 3: Rename grader outputs to our new scheme:
-        # Grader writes username.out / username.out.lint in outputpath — rename to display_base.*
-        out_src = os.path.join(outputpath, f"{username}.out")
-        lint_src = os.path.join(outputpath, f"{username}.out.lint")
+        # Grader writes username.out / username.out.lint next to the submitted path:
+        # - if path is a directory, outputs are inside that directory
+        # - if path is a file, outputs are next to that file (outputpath)
+        run_output_dir = path if os.path.isdir(path) else outputpath
+        out_src = os.path.join(run_output_dir, f"{username}.out")
+        lint_src = os.path.join(run_output_dir, f"{username}.out.lint")
         out_base = os.path.join(outputpath, display_base)
         tap_path = out_base + ".out"
         lint_path = out_base + ".out.lint"
@@ -451,17 +330,6 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
             error_count = python_error_count(out_base)
         else:
             error_count=0    
-        levels = project_repo.get_levels_by_project(project.Id)
-
-        submission_level = parse_tap_file_for_levels(tap_path, levels)
-
-        passed_levels, total_tests = level_counter(tap_path)
-        student_submission_score=score_finder(project_repo, passed_levels, total_tests, project.Id)
-        if project.Language == "python":
-            pylint_score = python_error_count(out_base)
-        else:
-            pylint_score = 40
-        total_submission_score = student_submission_score+pylint_score
 
         Linting_results = LintErrorLogger(out_base, project.Language)
 
@@ -474,34 +342,18 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
             project.Id,
             status,
             error_count,
-            submission_level,
-            total_submission_score,
-            0,
             TestCaseResults,
             Linting_results
         )
         
-        if current_user.Role == ADMIN_ROLE:
-            submission_repo.set_submission_visibility(submissionId, 1)
-        else:
-            submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
+        submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
 
-        # Step 4 assign point totals for the submission 
-        current_level = submission_repo.get_current_level(project.Id,user_id)
-        if current_level != "":
-            if submission_level > current_level:
-                submission_data=submission_repo.get_most_recent_submission_by_project(project.Id,[user_id])
-                submission_repo.modifying_level(project.Id,user_id,submission_data[user_id].Id,submission_level)
-        else:
-            submission_data=submission_repo.get_most_recent_submission_by_project(project.Id,[user_id])
-            submission_repo.modifying_level(project.Id,user_id,submission_data[user_id].Id, submission_level)
         message = {
             'message': 'Success',
             'remainder': 10,
             "sid": submissionId,
         }
+        
         return make_response(message, HTTPStatus.OK)
-    message = {
-        'message': 'Unsupported file type'
-    }
+    message = { 'message': 'Unsupported file type' }
     return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)

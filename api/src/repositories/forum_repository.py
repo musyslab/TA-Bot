@@ -1,7 +1,7 @@
 from collections import defaultdict
 import os
 from src.repositories.database import db
-from .models import SnippetRuns, StudentGrades, StudentQuestions, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, StudentProgress, users
+from .models import SnippetRuns, StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, users
 from sqlalchemy import desc, and_
 from typing import Dict, List, Tuple
 from src.repositories.config_repository import ConfigRepository
