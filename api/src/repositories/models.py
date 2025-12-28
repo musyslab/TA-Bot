@@ -196,3 +196,10 @@ class SubmissionChargeRedeptions(db.Model):
     RedeemedTime = Column(DateTime)
     SubmissionId = Column(Integer)
     Recouped = Column(Integer)
+
+class SubmissionManualErrors(db.Model):
+    __tablename__ = "SubmissionManualErrors"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    SubmissionId = Column(Integer)
+    LineNumber = Column(Integer)
+    ErrorId = Column(String(45))

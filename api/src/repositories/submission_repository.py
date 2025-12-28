@@ -1,7 +1,7 @@
 from collections import defaultdict
 import os
 from src.repositories.database import db
-from .models import SnippetRuns, StudentGrades, StudentQuestions, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, StudentProgress, Users
+from .models import SnippetRuns, StudentGrades, StudentQuestions, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, StudentProgress, Users, SubmissionManualErrors
 from sqlalchemy import desc, and_
 from typing import Dict, List, Tuple
 from src.repositories.config_repository import ConfigRepository
@@ -753,3 +753,39 @@ class SubmissionRepository():
             print("An error occurred while handling the database operation", e)
             db.session.rollback()
             return 0
+
+    def save_manual_grading(self, submission_id, grade, errors):
+        try:
+            # 1. Update Grade
+            sub = Submissions.query.get(submission_id)
+            if sub:
+                sub.Points = grade
+
+            # 2. Delete Old Errors (ORM Style)
+            SubmissionManualErrors.query.filter_by(SubmissionId=submission_id).delete()
+
+            # 3. Add New Errors (ORM Style)
+            for error in errors:
+                new_err = SubmissionManualErrors(
+                    SubmissionId=submission_id,
+                    LineNumber=error['line'],
+                    ErrorId=error['errorId']
+                )
+                db.session.add(new_err)
+
+            db.session.commit()
+            return True
+        except Exception as e:
+            db.session.rollback()
+            return False
+            
+    def get_manual_errors(self, submission_id):
+        # Fetch all errors for this submission
+        errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId == submission_id).all()
+        
+        # Convert the database objects into a simple list of dictionaries
+        # Result: [{'line': 5, 'errorId': 'ERROR1'}, {'line': 10, 'errorId': 'ERROR2'}]
+        return [
+            {'line': e.LineNumber, 'errorId': e.ErrorId} 
+            for e in errors
+        ]

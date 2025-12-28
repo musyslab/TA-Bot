@@ -33,6 +33,11 @@ interface ErrorDef {
     points: number;
 }
 
+interface BackendError{
+    line: number;
+    errorId: string;
+}
+
 interface ObservedError {
     errorId: string;
 }
@@ -175,8 +180,76 @@ const GradingPage = () => {
                 }
             })
             .catch(err => console.log(err));
+        axios.get(
+            `${import.meta.env.VITE_API_URL}/submissions/get-grading/${submissionId}`,
+            {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
+            }
+        )
+        .then(response => {
+            const { errors, grade } = response.data;
+
+            // 1. Update the Grade Input
+            // (Assuming you have a state variable for grade)
+            setGrade(grade);
+
+            // 2. Convert List back to Dictionary for the UI
+            // The DB gives: [{line: 2, errorId: "ERROR1"}]
+            // The UI needs: { "2": [{errorId: "ERROR1"}] }
+            
+            const formattedErrors: { [key: string]: { errorId: string }[] } = {};     
+
+            errors.forEach((item:BackendError) => {
+                const lineKey = item.line.toString();
+                
+                if (!formattedErrors[lineKey]) {
+                    formattedErrors[lineKey] = [];
+                }
+
+                formattedErrors[lineKey].push({ errorId: item.errorId });
+            });
+
+            // 3. Update the Redlines State
+            setObservedErrors(formattedErrors);
+        })
+        .catch(err => console.error("Could not load saved grading:", err));
     }, [submissionId, cid, pid]);
 
+    const handleSave = () => {
+        // 1. Flatten the observedErrors object into the list Python expects
+        // Converts { "10": [{errorId: "ERROR1"}] }  -->  [{ line: 10, errorId: "ERROR1" }]
+        const errorList = Object.entries(observedErrors).flatMap(([line, errors]) => 
+            errors.map(err => ({
+                line: parseInt(line), 
+                errorId: err.errorId
+            }))
+        );
+
+        // 2. Send the data to your new Python endpoint
+        axios.post(
+            `${import.meta.env.VITE_API_URL}/submissions/save-grading`, 
+            {
+                submissionId: submissionId, // Make sure you have the Submission ID available here!
+                grade: grade,                     // Your current grade state variable
+                errors: errorList
+            },
+            {
+                headers: { 
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` 
+                }
+            }
+        )
+        .then(response => {
+            // Success!
+            alert("Grading saved successfully!");
+            console.log(response.data);
+        })
+        .catch(error => {
+            // Error
+            console.error("Failed to save:", error);
+            alert("Failed to save grading. Check console.");
+        });
+    };
     // Log initial UI state on first load (and when navigating to a different submission/class)
     useEffect(() => {
         const key = `${submissionId}:${cid}`;
@@ -767,10 +840,10 @@ const GradingPage = () => {
                                     return (
                                         <li key={lineNo} className="error-line">
                                             {errors.length > 0 && (
-                                                <div class="error-block error-tag">
-                                                    <div class="error-text">{ERRORS[errors[0].errorId].label}</div>
-                                                    <div class="error-points">-{ERRORS[errors[0].errorId].points}</div>
-                                                    <button class="error-close"
+                                                <div className="error-block error-tag">
+                                                    <div className="error-text">{ERRORS[errors[0].errorId].label}</div>
+                                                    <div className="error-points">-{ERRORS[errors[0].errorId].points}</div>
+                                                    <button className="error-close"
                                                         onClick={() => removeObservedError(lineNo, errors[0].errorId)}
                                                     >X</button>
                                                 </div>
@@ -873,6 +946,7 @@ const GradingPage = () => {
             <div>
                 <h3>Grade: {grade}</h3>
             </div>
+            <button className="save-grade" onClick={handleSave}>Save</button>
         </div>
         
     );
