@@ -5,6 +5,7 @@ import axios from 'axios'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import '../css/AdminProjectConfigComponent.scss'
+import '../css/FileUploadCommon.scss'
 import 'semantic-ui-css/semantic.min.css'
 
 interface AdminProjectConfigProps {
@@ -178,11 +179,17 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [ProjectLanguage, SolutionFiles, serverSolutionFileNames, edit, props.id]);
 
-    function fileIconFor(filename: string): string {
-        const lower = filename.toLowerCase();
-        if (/\.(py|c|cpp|h|java|rkt|scm)$/.test(lower)) return "file code outline icon";
-        if (/\.(pdf|docx?|md|txt)$/.test(lower)) return "file alternate outline icon";
-        return "file outline icon";
+    // Simplified icons:
+    // - Code (java, python, c, racket) => code icon
+    // - Text (text, word, pdf) => two-line text icon
+    // - Otherwise => alternate icon
+    const CODE_ICON_RE = /\.(java|py|c|h|rkt|scm)$/i;
+    const TEXT_ICON_RE = /\.(txt|doc|docx|pdf)$/i;
+
+    function getFileIconName(filename: string): string {
+        if (CODE_ICON_RE.test(filename)) return 'code';
+        if (TEXT_ICON_RE.test(filename)) return 'align justify';
+        return 'x icon';
     }
 
     async function openLocalPreview(file: File) {
@@ -1165,6 +1172,10 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                                     >
                                                                         {shownNames.map((name) => (
                                                                             <div key={name} className="file-preview-row solution-file-card">
+                                                                                <span className="file-icon-wrapper" aria-hidden="true">
+                                                                                    <i className="file outline icon file-outline-icon" />
+                                                                                    <i className={`${getFileIconName(name)} icon file-language-icon`} />
+                                                                                </span>
                                                                                 {(shownNames.length > 1) ? (
                                                                                     <span className="file-name">
                                                                                         {name}
@@ -1251,6 +1262,10 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
 
                                                         <div className="file-preview-list">
                                                             <div className="file-preview-row solution-file-card">
+                                                                <span className="file-icon-wrapper" aria-hidden="true">
+                                                                    <i className="file outline icon file-outline-icon" />
+                                                                    <i className={`${getFileIconName(descfileName)} icon file-language-icon`} />
+                                                                </span>
                                                                 <button
                                                                     type="button"
                                                                     className="file-name"
@@ -1289,7 +1304,10 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                                             return (
                                                                 <li className="tree-row" role="treeitem" key={entry.key}>
                                                                     <span className="tree-icon" aria-hidden="true">
-                                                                        <i className={fileIconFor(name)} />
+                                                                        <span className="fs-file-icon-wrapper">
+                                                                            <i className="file outline icon fs-file-outline-icon" />
+                                                                            <i className={`${getFileIconName(name)} icon fs-file-language-icon`} />
+                                                                        </span>
                                                                     </span>
                                                                     <span className="tree-name">
                                                                         {name}
@@ -1480,6 +1498,10 @@ const AdminProjectConfigComponent = (props: AdminProjectConfigProps) => {
                                             </>
                                         ) : (
                                             <div className="file-preview">
+                                                <span className="file-icon-wrapper" aria-hidden="true">
+                                                    <i className="file outline icon file-outline-icon" />
+                                                    <i className={`${getFileIconName(jsonfilename)} icon file-language-icon`} />
+                                                </span>
                                                 <span className="file-name">{jsonfilename}</span>
                                                 <button
                                                     type="button"

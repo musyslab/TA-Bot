@@ -27,6 +27,7 @@ interface JsonResponse {
 
 type DiffEntry = {
     id: string;
+    num: number;
     test: string;
     status: string;
     passed: boolean;
@@ -276,6 +277,7 @@ export function CodePage() {
             const unified = buildUnifiedDiff(expected, actual, title);
             entries.push({
                 id: `${idx}__${r.test.name}`,
+                num: idx + 1,
                 test: r.test.name,
                 status: labelFor(r),
                 passed: r.passed,
@@ -499,10 +501,12 @@ export function CodePage() {
                                             (f.passed ? 'passed' : 'failed')
                                         }
                                         onClick={() => setSelectedDiffId(f.id)}
-                                        title={`${f.test}`}
+                                        title={`Testcase ${f.num}: ${f.test}`}
                                     >
-                                        <div className="file-name">{f.test}</div>
-                                        <div className="file-sub">
+                                        <div className="testcase-name">
+                                            <span className="tc-num">{f.num}.</span> {f.test}
+                                        </div>
+                                        <div className="testcase-sub">
                                             <span className={'status-dot ' + (f.passed ? 'is-pass' : 'is-fail')} />
                                             {f.status}
                                         </div>
@@ -515,7 +519,7 @@ export function CodePage() {
                             <div className="diff-toolbar">
                                 <div className="diff-title">
                                     {selectedFile
-                                        ? `Testcase Name: ${selectedFile.test}`
+                                        ? `Testcase ${selectedFile.num}: ${selectedFile.test}`
                                         : 'No selection'}
                                 </div>
                                 <div className="spacer" />
@@ -651,17 +655,20 @@ export function CodePage() {
                     <>
                         {codeFiles.length > 1 && (
                             <div className="code-file-picker">
-                                <label className="section-label" htmlFor="codefile-select">File</label>
-                                <select
-                                    id="codefile-select"
-                                    className="select"
-                                    value={selectedCodeFile}
-                                    onChange={(e) => setSelectedCodeFile(e.target.value)}
-                                >
-                                    {codeFiles.map(f => (
-                                        <option key={f.name} value={f.name}>{f.name}</option>
-                                    ))}
-                                </select>
+                                <label className="section-label" htmlFor="codefile-select">File Selection</label>
+                                <div className="select-wrap">
+                                    <select
+                                        id="codefile-select"
+                                        className="select"
+                                        value={selectedCodeFile}
+                                        onChange={(e) => setSelectedCodeFile(e.target.value)}
+                                    >
+                                        {codeFiles.map(f => (
+                                            <option key={f.name} value={f.name}>{f.name}</option>
+                                        ))}
+                                    </select>
+                                    <Icon name="dropdown" className="select-icon" aria-hidden="true" />
+                                </div>
                             </div>
                         )}
                         <div className="code-block code-viewer" role="region" aria-label="Submitted source code">

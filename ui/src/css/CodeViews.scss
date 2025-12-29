@@ -157,6 +157,50 @@
             word-break: normal;
         }
     }
+
+    .code-file-picker {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin: 0.75rem 0 0.75rem;
+
+        .section-label {
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .select {
+            appearance: none;
+            background: #fff;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 0.55rem 2.2rem 0.55rem 0.75rem;
+            font-weight: 600;
+            color: #111827;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+            cursor: pointer;
+            min-width: 260px;
+        }
+
+        .select-wrap {
+            position: relative;
+            display: inline-block;
+        }
+
+        .select-icon {
+            position: absolute;
+            right: 0.75rem;
+            top: 40%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            color: #6b7280;
+        }
+
+        .select:focus-visible {
+            outline: 2px solid #3b82f6;
+            outline-offset: 2px;
+        }
+    }
 }
 
 .tests-section {
@@ -310,6 +354,7 @@
         }
 
         .file-item {
+            display: block;
             border: 1px solid transparent;
             border-radius: 8px;
             padding: 0.5rem 0.6rem;
@@ -325,13 +370,19 @@
                 background: rgba(0, 123, 255, 0.06);
             }
 
-            .file-name {
+            .testcase-name {
                 font-weight: 600;
                 font-size: 0.98rem;
                 color: #1f2937;
             }
 
-            .file-sub {
+            .tc-num {
+                color: #6b7280;
+                margin-right: 0.35rem;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .testcase-sub {
                 font-size: 0.85rem;
                 color: #6b7280;
                 display: flex;

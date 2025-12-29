@@ -289,157 +289,6 @@ body {
             margin-bottom: 0.75rem;
             text-align: center;
           }
-
-          .file-drop-area {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            border: 2px dashed #ccc;
-            border-radius: 10px;
-            padding: 40px;
-            text-align: center;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-            background-color: #f9f9f9;
-            width: 100%;
-
-            .file-input {
-              position: absolute;
-              top: 0;
-              left: 0;
-              width: 100%;
-              height: 100%;
-              opacity: 0;
-              cursor: pointer;
-            }
-
-            .file-drop-message {
-              pointer-events: none;
-              margin-top: 10px;
-              font-size: 16px;
-              color: #666;
-              animation: fadeInScale 0.4s ease-out;
-            }
-
-            .browse-text {
-              color: #00BFFF;
-              text-decoration: underline;
-            }
-          }
-
-          .file-preview {
-            position: relative;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            animation: fadeInScale 0.5s ease-out;
-            padding: 0.5rem 1rem;
-            margin: 0.5rem 1rem;
-            background-color: #dcdcdc;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
-            cursor: pointer;
-            width: 100%;
-            flex-wrap: wrap;
-            align-items: flex-start;
-
-            .file-preview-list {
-              display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-              grid-auto-flow: row;
-              gap: 0.6rem;
-              width: 100%;
-              padding-right: 3.8rem;
-            }
-
-            .solution-file-card {
-              display: inline-flex;
-              align-items: center;
-              gap: 0.5rem;
-              padding: 0.55rem 0.75rem;
-              border: 2px solid #bdbdbd;
-              border-radius: 8px;
-              box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-              max-width: 100%;
-              width: 100%;
-            }
-
-            .exchange-icon {
-              position: absolute;
-              top: -12px;
-              right: -12px;
-              width: 28px;
-              height: 28px;
-              background-color: #3498db;
-              color: #fff;
-              border-radius: 50%;
-              border: none;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              cursor: pointer;
-              transition: background-color 0.2s, transform 0.2s;
-
-              i {
-                font-size: 16px;
-                line-height: 1;
-                margin: 0;
-                padding: 0;
-              }
-
-              &:hover {
-                background-color: #2980b9;
-                transform: scale(1.1);
-              }
-            }
-
-            .file-name {
-              font-size: 16px;
-              color: #333;
-              word-break: break-all;
-              margin-right: 1.2rem;
-              margin-left: 0.9rem;
-              margin-bottom: 0;
-            }
-
-            button.file-name {
-              background: transparent;
-              border: 0;
-              padding: 0;
-              cursor: pointer;
-            }
-
-            &:active {
-              transform: translateY(0);
-              box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
-            }
-
-            &:focus-within {
-              outline: 2px solid #3498db;
-              outline-offset: 2px;
-            }
-
-            @media (max-width: 1150px) {
-              .file-section {
-                flex-direction: column;
-              }
-
-              .info-segment {
-                flex: 1 1 auto;
-                min-width: 100%;
-              }
-
-              .file-drop-area {
-                min-height: 180px;
-                padding: 60px 1rem;
-              }
-            }
-
-          }
         }
       }
 
@@ -588,10 +437,41 @@ body {
       min-width: 1.6rem;
     }
 
-    .filesystem-segment .directory-tree .tree-icon i {
+    .filesystem-segment .directory-tree .tree-icon i:not(.fs-file-language-icon) {
       font-size: 1.4rem;
       line-height: 1;
       color: #475569;
+    }
+
+    /* Filesystem view icons: separate class names from upload preview and smaller sizing */
+    .filesystem-segment .directory-tree .fs-file-icon-wrapper {
+      position: relative;
+      width: 26px;
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+
+    .filesystem-segment .directory-tree .fs-file-outline-icon {
+      font-size: 26px !important;
+      line-height: 1 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      color: #64748b;
+    }
+
+    .filesystem-segment .directory-tree .fs-file-language-icon {
+      position: absolute;
+      top: calc(50% + 3px);
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 10px !important;
+      line-height: 1 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      color: #00BFFF !important;
     }
 
     .filesystem-segment .directory-tree .tree-name {
@@ -853,98 +733,6 @@ body {
     font-size: 1.5rem;
     margin-bottom: 1rem;
     color: #333;
-  }
-
-  .file-drop-area {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    border: 2px dashed #ccc;
-    border-radius: 10px;
-    padding: 40px;
-    text-align: center;
-    cursor: pointer;
-    transition: background-color 0.2s;
-    margin-bottom: 15px;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    background-color: #f9f9f9;
-
-    .file-input {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      opacity: 0;
-      cursor: pointer;
-    }
-
-    .file-drop-message {
-      pointer-events: none;
-      margin-top: 10px;
-      font-size: 16px;
-      color: #666;
-      animation: fadeInScale 0.4s ease-out;
-    }
-
-    .browse-text {
-      color: #00BFFF;
-      text-decoration: underline;
-    }
-  }
-
-  .file-preview {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    animation: fadeInScale 0.5s ease-out;
-    padding: 0.5rem 1rem;
-    margin: 0.5rem 1rem;
-    background-color: #dcdcdc;
-    border: 1px solid #bbb;
-    border-radius: 8px;
-    cursor: text;
-
-    .file-name {
-      font-size: 16px;
-      color: #333;
-      word-break: break-all;
-      margin-right: 1.2rem;
-      margin-left: 0.9rem;
-      margin-bottom: 0;
-    }
-
-    .exchange-icon {
-      position: absolute;
-      bottom: calc(100% - 13px);
-      left: calc(100% - 14px);
-      width: 28px;
-      height: 28px;
-      background-color: #3498db;
-      color: #fff;
-      border-radius: 50%;
-      border: none;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: background-color 0.2s, transform 0.2s;
-
-      i {
-        font-size: 16px;
-        line-height: 1;
-        margin: 0;
-        padding: 0;
-      }
-
-      &:hover {
-        background-color: #2980b9;
-        transform: scale(1.1);
-      }
-    }
   }
 }
 

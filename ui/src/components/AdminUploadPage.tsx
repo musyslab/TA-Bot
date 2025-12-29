@@ -3,6 +3,7 @@ import axios from 'axios'
 import { useNavigate, NavigateFunction } from 'react-router-dom'
 
 import '../css/AdminUploadPage.scss'
+import '../css/FileUploadCommon.scss'
 
 interface Student {
     name: string;
@@ -199,6 +200,19 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                     isLoading: false,
                 });
             });
+    }
+
+    // Simplified icon system:
+    // - Code (java, python, c, racket) => code icon
+    // - Text (text, word, pdf) => two-line text icon
+    // - Otherwise => alternate icon
+    private getFileIconName(filename: string): string {
+        const CODE_ICON_RE = /\.(java|py|c|h|rkt|scm)$/i;
+        const TEXT_ICON_RE = /\.(txt|doc|docx|pdf)$/i;
+
+        if (CODE_ICON_RE.test(filename)) return 'code';
+        if (TEXT_ICON_RE.test(filename)) return 'align justify';
+        return 'x icon';
     }
 
     handleFilesChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -426,6 +440,10 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                     <div className="file-preview-list" title="Selected files">
                                                         {this.state.files.map((f) => (
                                                             <div key={f.name} className="file-preview-row solution-file-card">
+                                                                <span className="file-icon-wrapper" aria-hidden="true">
+                                                                    <i className="file outline icon file-outline-icon" />
+                                                                    <i className={`${this.getFileIconName(f.name)} icon file-language-icon`} />
+                                                                </span>
                                                                 <span className="file-name">{f.name}</span>
                                                             </div>
                                                         ))}

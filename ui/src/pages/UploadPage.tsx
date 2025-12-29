@@ -10,6 +10,7 @@ import Countdown from 'react-countdown'
 import { Helmet } from 'react-helmet'
 import { useParams } from 'react-router-dom'
 import '../css/UploadPage.scss'
+import '../css/FileUploadCommon.scss'
 
 interface UploadProps {
     class_id?: string
@@ -314,40 +315,14 @@ const UploadPage = () => {
             })
     }
 
+    // code => code icon, text => two-line text icon, otherwise => alternate icon
+    const CODE_ICON_RE = /\.(py|java|c|h|rkt|scm|cpp)$/i;
+    const TEXT_ICON_RE = /\.(txt|md|pdf|doc|docx)$/i;
+
     const getFileIcon = (filename: string) => {
-        const ext = filename.split('.').pop()?.toLowerCase();
-        switch (ext) {
-            // Documents
-            case 'pdf':
-                return 'file pdf';
-            case 'doc':
-            case 'docx':
-                return 'file word';
-            case 'xls':
-            case 'xlsx':
-                return 'file excel';
-
-            // Images
-            case 'png':
-            case 'jpg':
-            case 'jpeg':
-            case 'gif':
-                return 'file image';
-
-            // Archives
-            case 'zip':
-            case 'rar':
-                return 'file archive';
-
-            // Programming languages 
-            case 'py':
-                return 'python';
-            case 'c':
-                return 'copyright'
-
-            default:
-                return 'code';
-        }
+        if (CODE_ICON_RE.test(filename)) return 'code';
+        if (TEXT_ICON_RE.test(filename)) return 'align justify';
+        return 'x icon';
     };
 
     const pulseAnimation = `
@@ -487,25 +462,29 @@ const UploadPage = () => {
                                                     </div>
                                                 </>
                                             ) : (
-                                                files.map((f, idx) => (
-                                                    <div key={idx} className="file-preview">
-                                                        <Icon
-                                                            name="close"
-                                                            className="remove-icon"
-                                                            circular
-                                                            onClick={() => {
-                                                                const copy = [...files];
-                                                                copy.splice(idx, 1);
-                                                                setFiles(copy);
-                                                            }}
-                                                        />
-                                                        <div className="file-icon-wrapper">
-                                                            <Icon name="file outline" className="file-outline-icon" />
-                                                            <Icon name={getFileIcon(f.name)} className="file-language-icon" />
-                                                        </div>
-                                                        <span className="file-name">{f.name}</span>
+                                                <div className="file-preview">
+                                                    <button
+                                                        type="button"
+                                                        className="exchange-icon"
+                                                        aria-label="Clear selected files"
+                                                        title="Clear selected files"
+                                                        onClick={() => setFiles([])}
+                                                    >
+                                                        <Icon name="exchange" aria-hidden="true" />
+                                                    </button>
+
+                                                    <div className="file-preview-list" title="Selected files">
+                                                        {files.map((f) => (
+                                                            <div key={f.name} className="file-preview-row solution-file-card">
+                                                                <div className="file-icon-wrapper" aria-hidden="true">
+                                                                    <Icon name="file outline" className="file-outline-icon" />
+                                                                    <Icon name={getFileIcon(f.name)} className="file-language-icon" />
+                                                                </div>
+                                                                <span className="file-name">{f.name}</span>
+                                                            </div>
+                                                        ))}
                                                     </div>
-                                                ))
+                                                </div>
                                             )}
                                         </div>
                                     </Form.Field>
