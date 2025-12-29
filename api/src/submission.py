@@ -565,11 +565,11 @@ def log_ui_click():
 @inject
 def save_grading(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
     
-    # 1. Get the data from the frontend
+    # get the data from frontend
     input_json = request.get_json()
     submission_id = input_json.get('submissionId')
     grade = input_json.get('grade')
-    errors = input_json.get('errors') # Expecting list: [{line: 10, errorId: "ERROR1"}, ...]
+    errors = input_json.get('errors') # Expecting list: [{line: 10, errorId: "ERROR1"}]
 
     success = submission_repo.save_manual_grading(submission_id, grade, errors)
 
@@ -584,10 +584,10 @@ def save_grading(submission_repo: SubmissionRepository = Provide[Container.submi
 @inject
 def get_grading(submission_id, submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
     
-    # 1. Get the errors from the DB
+    # get errors from db
     error_list = submission_repo.get_manual_errors(submission_id)
     
-    # 2. Get the current grade (Optional, but useful to show the saved score)
+    # get current grade
     submission = submission_repo.get_submission_by_submission_id(submission_id)
     current_grade = submission.Points if submission else 0
 

@@ -756,15 +756,15 @@ class SubmissionRepository():
 
     def save_manual_grading(self, submission_id, grade, errors):
         try:
-            # 1. Update Grade
+            # update grade in submission
             sub = Submissions.query.get(submission_id)
             if sub:
                 sub.Points = grade
 
-            # 2. Delete Old Errors (ORM Style)
+            # delete existing errors
             SubmissionManualErrors.query.filter_by(SubmissionId=submission_id).delete()
 
-            # 3. Add New Errors (ORM Style)
+            # add new errors
             for error in errors:
                 new_err = SubmissionManualErrors(
                     SubmissionId=submission_id,
@@ -780,11 +780,11 @@ class SubmissionRepository():
             return False
             
     def get_manual_errors(self, submission_id):
-        # Fetch all errors for this submission
+        
+        # fetch all errors for this submission
         errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId == submission_id).all()
         
-        # Convert the database objects into a simple list of dictionaries
-        # Result: [{'line': 5, 'errorId': 'ERROR1'}, {'line': 10, 'errorId': 'ERROR2'}]
+        # convert to list of dicts
         return [
             {'line': e.LineNumber, 'errorId': e.ErrorId} 
             for e in errors
