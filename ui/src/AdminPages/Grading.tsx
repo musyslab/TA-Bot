@@ -189,13 +189,11 @@ const GradingPage = () => {
         .then(response => {
             const { errors, grade } = response.data;
 
-            // 1. Update the Grade Input
-            // (Assuming you have a state variable for grade)
+            // Update the Grade
             setGrade(grade);
 
-            // 2. Convert List back to Dictionary for the UI
-            // The DB gives: [{line: 2, errorId: "ERROR1"}]
-            // The UI needs: { "2": [{errorId: "ERROR1"}] }
+            // Convert format from db to ui
+            // [{line: 2, errorId: "ERROR1"}] to { "2": [{errorId: "ERROR1"}] }
             
             const formattedErrors: { [key: string]: { errorId: string }[] } = {};     
 
@@ -215,9 +213,13 @@ const GradingPage = () => {
         .catch(err => console.error("Could not load saved grading:", err));
     }, [submissionId, cid, pid]);
 
+    // changes the button state to indicate whether save was successful
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
     const handleSave = () => {
-        // 1. Flatten the observedErrors object into the list Python expects
-        // Converts { "10": [{errorId: "ERROR1"}] }  -->  [{ line: 10, errorId: "ERROR1" }]
+        
+        setSaveStatus('saving');
+        // converts { "10": [{errorId: "ERROR1"}] }  into  [{ line: 10, errorId: "ERROR1" }]
         const errorList = Object.entries(observedErrors).flatMap(([line, errors]) => 
             errors.map(err => ({
                 line: parseInt(line), 
@@ -225,12 +227,12 @@ const GradingPage = () => {
             }))
         );
 
-        // 2. Send the data to your new Python endpoint
+        // sends data to backend
         axios.post(
             `${import.meta.env.VITE_API_URL}/submissions/save-grading`, 
             {
-                submissionId: submissionId, // Make sure you have the Submission ID available here!
-                grade: grade,                     // Your current grade state variable
+                submissionId: submissionId, 
+                grade: grade,                     
                 errors: errorList
             },
             {
@@ -240,14 +242,14 @@ const GradingPage = () => {
             }
         )
         .then(response => {
-            // Success!
-            alert("Grading saved successfully!");
+            
+            setSaveStatus('saved');
             console.log(response.data);
         })
         .catch(error => {
-            // Error
+            
             console.error("Failed to save:", error);
-            alert("Failed to save grading. Check console.");
+            setSaveStatus('error');
         });
     };
     // Log initial UI state on first load (and when navigating to a different submission/class)
@@ -516,6 +518,7 @@ const GradingPage = () => {
             };
         });
         setGrade(prev => prev - ERRORS[errorId].points);
+        setSaveStatus('idle');
     }
 
     function removeObservedError(line: number, errorId: string) {
@@ -531,6 +534,7 @@ const GradingPage = () => {
             return { ...prev, [line]: remaining };
         });
         setGrade(prev => prev + ERRORS[errorId].points);
+        setSaveStatus('idle');
     }
 
 
@@ -946,7 +950,16 @@ const GradingPage = () => {
             <div>
                 <h3>Grade: {grade}</h3>
             </div>
-            <button className="save-grade" onClick={handleSave}>Save</button>
+            <button 
+                className={`save-grade ${saveStatus}`} // Adds class 'success' or 'saving'
+                onClick={handleSave}
+                disabled={saveStatus === 'saving'} // Prevent double-clicks
+            >
+                {saveStatus === 'idle' && "Save"}
+                {saveStatus === 'saving' && "Saving..."}
+                {saveStatus === 'saved' && "✓ Saved!"}
+                {saveStatus === 'error' && "⚠ Error"}
+            </button>
         </div>
         
     );
