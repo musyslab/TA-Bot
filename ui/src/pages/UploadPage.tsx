@@ -40,6 +40,7 @@ const UploadPage = () => {
         cid = parseInt(class_id, 10);
     }
     const [files, setFiles] = useState<File[]>([]);
+    const [mainJavaFileName, setMainJavaFileName] = useState<string>("");
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error_message, setError_Message] = useState<string>("");
     const [isErrorMessageHidden, setIsErrorMessageHidden] = useState<boolean>(true);
@@ -67,10 +68,47 @@ const UploadPage = () => {
     // Allowed upload file extensions (frontend gate)
     const ALLOWED_EXTS = ['.py', '.java', '.c', '.rkt'];
     const isJavaFile = (f: File) => f.name.toLowerCase().endsWith('.java');
+    const isJavaFileName = (n: string) => /\.java$/i.test(n);
     const isAllowedFileName = (name: string) => {
         const ext = '.' + (name.split('.').pop() || '').toLowerCase();
         return ALLOWED_EXTS.includes(ext);
     };
+
+    // Detect entry point when multiple .java files are uploaded
+    const JAVA_MAIN_RE = /\bpublic\s+static\s+void\s+main\s*\(/;
+    function pickMainJavaFile(allJavaNames: string[], namesWithMain: string[]): string {
+        if (namesWithMain.length === 1) return namesWithMain[0];
+        const mainDotJava = allJavaNames.find(n => n.toLowerCase() === "main.java");
+        if (mainDotJava) return mainDotJava;
+        return namesWithMain[0] || "";
+    }
+    async function computeMainJavaFromLocal(localFiles: File[]) {
+        const javaFiles = localFiles.filter(f => isJavaFileName(f.name));
+        if (javaFiles.length <= 1) { setMainJavaFileName(""); return; }
+        const withMain: string[] = [];
+        for (const f of javaFiles) {
+            try {
+                const txt = await f.text();
+                if (JAVA_MAIN_RE.test(txt)) withMain.push(f.name);
+            } catch {
+                // ignore read failures
+            }
+        }
+        setMainJavaFileName(pickMainJavaFile(javaFiles.map(f => f.name), withMain));
+    }
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            if (!(files.length > 1 && files.every(isJavaFile))) {
+                if (!cancelled) setMainJavaFileName("");
+                return;
+            }
+            await computeMainJavaFromLocal(files);
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [files]);
 
     let activeDay: number;
     if (project_name !== "") {
@@ -480,7 +518,12 @@ const UploadPage = () => {
                                                                     <Icon name="file outline" className="file-outline-icon" />
                                                                     <Icon name={getFileIcon(f.name)} className="file-language-icon" />
                                                                 </div>
-                                                                <span className="file-name">{f.name}</span>
+                                                                <span className="file-name">
+                                                                    {f.name}
+                                                                    {files.length > 1 && files.every(isJavaFile) && mainJavaFileName && f.name === mainJavaFileName && (
+                                                                        <span className="main-indicator">Main</span>
+                                                                    )}
+                                                                </span>
                                                             </div>
                                                         ))}
                                                     </div>

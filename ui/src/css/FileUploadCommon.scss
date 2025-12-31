@@ -50,7 +50,7 @@
     animation: fadeInScale 0.5s ease-out;
     padding: 0.5rem 1rem;
     margin: 0.5rem 1rem;
-    background-color: #dcdcdc;
+    background-color: #E5E5E5;
     border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 8px;
     cursor: pointer;
@@ -110,6 +110,7 @@
     width: 100%;
     justify-content: center;
     text-align: center;
+    background-color: #F5F5F5;
 }
 
 .file-icon-wrapper {
@@ -192,6 +193,19 @@
 .file-preview.is-disabled .exchange-icon {
     cursor: not-allowed;
     opacity: 0.75;
+}
+
+.main-indicator {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    background: rgba(24, 144, 255, 0.12);
+    color: #1677ff;
+    white-space: nowrap;
 }
 
 @keyframes fadeInScale {

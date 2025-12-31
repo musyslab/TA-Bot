@@ -130,16 +130,19 @@ class StudentList extends Component<StudentListProps, StudentListState> {
         try {
             if (row.subid === -1) return;
             const url = `${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${row.subid}&class_id=${row.classId}`;
-            const res = await axios.get<string | string[]>(url, {
+            const res = await axios.get<Blob>(url, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
-                responseType: 'text',
+                responseType: 'blob',
             });
-            const code = Array.isArray(res.data) ? (res.data[0] ?? '') : (res.data ?? '');
+            const cd = String((res.headers as any)?.['content-disposition'] ?? '');
+            const match = /filename\*?=(?:UTF-8''|")?([^\";]+)\"?/i.exec(cd);
+            const headerName = match ? decodeURIComponent(match[1]) : '';
             const safe = (s: string) => (s || '').replace(/\s+/g, '_');
-            const fname = `${safe(row.Fname)}_${safe(row.Lname)}_${row.subid}.py`;
-            const blob = new Blob([code], { type: 'text/x-python' });
+            const fallback = `${safe(row.Fname)}_${safe(row.Lname)}_${row.subid}_submission.zip`;
+            const fname = headerName || fallback;
+
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
+            a.href = URL.createObjectURL(res.data);
             a.download = fname;
             document.body.appendChild(a);
             a.click();

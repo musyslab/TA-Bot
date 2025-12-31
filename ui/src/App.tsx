@@ -19,7 +19,6 @@ import AdminProject from './AdminPages/AdminProject';
 import CreateAccountPage from './pages/AccountCreationPage';
 import TaLanding from './AdminPages/TaLanding';
 import OfficeHoursPage from './pages/OfficeHoursPage';
-import ProjectAnalytics from './AdminPages/ProjectAnalitics';
 import PlagiarismCompare from "./pages/PlagiarismCompare";
 
 class App extends Component {

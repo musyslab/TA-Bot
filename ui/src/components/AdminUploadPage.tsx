@@ -19,6 +19,7 @@ interface DropDownOption {
 
 interface UploadPageState {
     files: File[];
+    mainJavaFileName: string;
     isLoading: boolean;
     error_message: string;
     isErrorMessageHidden: boolean;
@@ -46,6 +47,32 @@ interface AdminUploadPageProps {
 }
 
 class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
+
+    private static readonly JAVA_MAIN_RE = /\bpublic\s+static\s+void\s+main\s*\(/;
+    private static isJavaFileName = (n: string) => /\.java$/i.test(n);
+
+    private static pickMainJavaFile(allJavaNames: string[], namesWithMain: string[]): string {
+        if (namesWithMain.length === 1) return namesWithMain[0];
+        const mainDotJava = allJavaNames.find(n => n.toLowerCase() === "main.java");
+        if (mainDotJava) return mainDotJava;
+        return namesWithMain[0] || "";
+    }
+
+    private async computeMainJavaFromLocal(localFiles: File[]): Promise<string> {
+        const javaFiles = localFiles.filter(f => AdminUploadPage.isJavaFileName(f.name));
+        if (javaFiles.length <= 1) return "";
+        const withMain: string[] = [];
+        for (const f of javaFiles) {
+            try {
+                const txt = await f.text();
+                if (AdminUploadPage.JAVA_MAIN_RE.test(txt)) withMain.push(f.name);
+            } catch {
+                // ignore read failures
+            }
+        }
+        return AdminUploadPage.pickMainJavaFile(javaFiles.map(f => f.name), withMain);
+    }
+
     constructor(props: AdminUploadPageProps) {
         super(props);
         this.state = {
@@ -62,6 +89,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             projects: [],
             class_selected: false,
             files: [],
+            mainJavaFileName: "",
         };
 
         this.handleSubmit = this.handleSubmit.bind(this);
@@ -78,6 +106,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             student_id: isNaN(value) ? 0 : value,
             project_id: 0,
             files: [],
+            mainJavaFileName: "",
         });
     }
 
@@ -100,6 +129,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             studentList: [],
             projects: [],
             files: [],
+            mainJavaFileName: "",
         });
 
         axios
@@ -223,6 +253,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         if (fileArr.length > 1 && fileArr.every((f) => !isJavaFile(f))) {
             this.setState({
                 files: [],
+                mainJavaFileName: "",
                 isErrorMessageHidden: false,
                 error_message: 'Multi-file upload is only available for Java (.java) files.',
             });
@@ -231,8 +262,16 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
 
         this.setState({
             files: fileArr,
+            mainJavaFileName: "",
             isErrorMessageHidden: true,
         });
+
+        // Detect entry point when multiple .java files are uploaded
+        if (fileArr.length > 1 && fileArr.every(isJavaFile)) {
+            this.computeMainJavaFromLocal(fileArr)
+                .then((main) => this.setState({ mainJavaFileName: main }))
+                .catch(() => this.setState({ mainJavaFileName: "" }));
+        }
     }
 
     handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -429,7 +468,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                     <button
                                                         type="button"
                                                         className="exchange-icon"
-                                                        onClick={() => this.setState({ files: [] })}
+                                                        onClick={() => this.setState({ files: [], mainJavaFileName: "" })}
                                                         aria-label="Clear selected files"
                                                         title="Clear selected files"
                                                         disabled={disableUpload}
@@ -438,15 +477,27 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                     </button>
 
                                                     <div className="file-preview-list" title="Selected files">
-                                                        {this.state.files.map((f) => (
-                                                            <div key={f.name} className="file-preview-row solution-file-card">
-                                                                <span className="file-icon-wrapper" aria-hidden="true">
-                                                                    <i className="file outline icon file-outline-icon" />
-                                                                    <i className={`${this.getFileIconName(f.name)} icon file-language-icon`} />
-                                                                </span>
-                                                                <span className="file-name">{f.name}</span>
-                                                            </div>
-                                                        ))}
+                                                        {(() => {
+                                                            const isJavaFile = (f: File) => f.name.toLowerCase().endsWith('.java');
+                                                            const showMainTag =
+                                                                this.state.files.length > 1 &&
+                                                                this.state.files.every(isJavaFile) &&
+                                                                !!this.state.mainJavaFileName;
+                                                            return this.state.files.map((f) => (
+                                                                <div key={f.name} className="file-preview-row solution-file-card">
+                                                                    <span className="file-icon-wrapper" aria-hidden="true">
+                                                                        <i className="file outline icon file-outline-icon" />
+                                                                        <i className={`${this.getFileIconName(f.name)} icon file-language-icon`} />
+                                                                    </span>
+                                                                    <span className="file-name">
+                                                                        {f.name}
+                                                                        {showMainTag && f.name === this.state.mainJavaFileName && (
+                                                                            <span className="main-indicator">Main</span>
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                            ));
+                                                        })()}
                                                     </div>
                                                 </div>
                                             )}

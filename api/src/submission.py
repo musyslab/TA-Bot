@@ -7,7 +7,7 @@ import urllib3
 from src.repositories.config_repository import ConfigRepository
 from src.repositories.user_repository import UserRepository
 from flask import Blueprint
-from flask import make_response, request, current_app
+from flask import make_response, request, current_app, send_file
 from flask import request
 from http import HTTPStatus
 from injector import inject
@@ -19,6 +19,8 @@ from src.repositories.config_repository import ConfigRepository
 from src.services.link_service import LinkService
 from src.constants import EMPTY, DELAY_CONFIG, REDEEM_BY_CONFIG, ADMIN_ROLE, TA_ROLE
 import json
+import zipfile
+from io import BytesIO
 from tap.parser import Parser
 from flask import jsonify
 from datetime import datetime
@@ -141,36 +143,74 @@ def lint_output(submission_repo: SubmissionRepository = Provide[Container.submis
 def codefinder(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
     submissionid = int(request.args.get("id"))
     class_id = int(request.args.get("class_id"))
+    fmt = (request.args.get("format", "") or "").strip().lower()
+    want_json = fmt in ("json", "view", "preview")
     code_output = ""
     if submissionid != EMPTY and (current_user.Role == ADMIN_ROLE or current_user.Role == TA_ROLE or submission_repo.submission_view_verification(current_user.Id,submissionid)):
         code_output = submission_repo.get_code_path_by_submission_id(submissionid)
     else:
         projectid = project_repo.get_current_project_by_class(class_id).Id
         code_output = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid).CodeFilepath
-    files_payload = []
+    # JSON preview mode (used by CodePage) so the UI can render readable source
+    if want_json:
+        files_payload = []
+        if not os.path.isdir(code_output):
+            with open(code_output, 'r', encoding='utf-8', errors='replace') as f:
+                files_payload.append({"name": os.path.basename(code_output), "content": f.read()})
+        else:
+            allowed_exts = {".py", ".java", ".c", ".h", ".rkt"}
+            names = sorted(os.listdir(code_output), key=lambda n: (n != "Main.java", n.lower()))
+            for name in names:
+                full = os.path.join(code_output, name)
+                if not os.path.isfile(full):
+                    continue
+                _, ext = os.path.splitext(name)
+                if ext.lower() not in allowed_exts:
+                    continue
+                with open(full, 'r', encoding='utf-8', errors='replace') as f:
+                    files_payload.append({"name": name, "content": f.read()})
+        resp = make_response(json.dumps({"files": files_payload}), HTTPStatus.OK)
+        resp.headers["Content-Type"] = "application/json; charset=utf-8"
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
+    # Download mode (used by StudentList download) stays as attachments/zip
     if not os.path.isdir(code_output):
-        with open(code_output, 'r', encoding='utf-8', errors='replace') as file:
-            files_payload.append({
-                "name": os.path.basename(code_output),
-                "content": file.read()
-            })
-    else:
-        files = [
-            filename for filename in os.listdir(code_output)
-            if filename.endswith(".java") or filename.endswith(".c")
-        ]
-        # Stable ordering: Main.java first (if present), then alphabetical
-        files = sorted(files, key=lambda n: (n != "Main.java", n.lower()))
+        resp = send_file(
+            code_output,
+            as_attachment=True,
+            download_name=os.path.basename(code_output),
+        )
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+        return resp
 
-        for f in files:
-            with open(os.path.join(code_output, f), 'r', encoding='utf-8', errors='replace') as file:
-                files_payload.append({
-                    "name": f,
-                    "content": file.read()
-                })
+    # If it's a directory, zip all relevant source files and return the zip
+    allowed_exts = {".py", ".java", ".c", ".h", ".rkt"}
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        # add files with stable ordering
+        names = sorted(os.listdir(code_output), key=lambda n: (n != "Main.java", n.lower()))
+        for name in names:
+            full = os.path.join(code_output, name)
+            if not os.path.isfile(full):
+                continue
+            _, ext = os.path.splitext(name)
+            if ext.lower() not in allowed_exts:
+                continue
+            z.write(full, arcname=name)
+    buf.seek(0)
 
-    return make_response(json.dumps({"files": files_payload}), HTTPStatus.OK)
+    zip_name = f"submission_{submissionid}.zip"
+    resp = send_file(
+        buf,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=zip_name,
+    )
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+    return resp
 
 #TODO: This entire API call can probably be removed
 @submission_api.route('/submissioncounter', methods=['GET'])
