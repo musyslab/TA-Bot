@@ -239,7 +239,6 @@ CREATE TABLE `Submissions` (
   `CodeFilepath` varchar(256) NOT NULL,
   `NumberOfPylintErrors` int NOT NULL,
   `IsPassing` tinyint(1) NOT NULL,
-  `Points` int NOT NULL,
   `visible` int DEFAULT NULL,
   `TestCaseResults` text,
   `LintingResults` text,
