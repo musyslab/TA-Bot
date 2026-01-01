@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM node:20.11.1 AS build
+FROM node:24.12.0 AS build
 WORKDIR /app
 
 # Install deps (use lockfile if you have it)

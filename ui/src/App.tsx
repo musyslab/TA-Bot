@@ -1,25 +1,26 @@
 import React, { Component } from 'react';
-import 'semantic-ui-css/semantic.min.css'
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import LoginPage from './pages/Login';
-import LandingPage from './pages/Landing';
-import UploadPage from './pages/UploadPage';
-import ProtectedRoute from './components/ProtectedRoute';
-import PastSubmissionPage from "./components/PastSubmissionPage";
-import { CodePage } from './pages/CodeViews';
-import AdminLanding from './AdminPages/AdminLanding';
-import ProjectBreakdown from './AdminPages/ProjectBreakdown';
 import axios from 'axios';
-import NotFoundComponent from './components/NotFoundComponent';
-import AdminUpload from './AdminPages/AdminUpload';
-import AdminSettingsPage from './AdminPages/AdminSettingsPage';
-import ClassSelectionPage from './pages/ClassSelectionPage';
-import AdminProjectConfig from './AdminPages/AdminProjectConfig';
-import AdminProject from './AdminPages/AdminProject';
-import CreateAccountPage from './pages/AccountCreationPage';
-import TaLanding from './AdminPages/TaLanding';
-import OfficeHoursPage from './pages/OfficeHoursPage';
-import PlagiarismCompare from "./pages/PlagiarismCompare";
+
+import LoginPage from './pages/public/Login';
+import LandingPage from './pages/public/Landing';
+import NotFound from './pages/public/NotFound';
+
+import StudentUpload from './pages/student/StudentUpload';
+import StudentOutputDiff from './pages/student/StudentOutputDiff';
+import StudentClassSelection from './pages/student/StudentClassSelection';
+import StudentOfficeHours from './pages/student/StudentOfficeHours';
+import StudentPastSubmissions from "./pages/student/StudentPastSubmissions";
+
+import AdminClassSelection from './pages/admin/AdminClassSelection';
+import AdminOfficeHours from './pages/admin/AdminOfficeHours';
+import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
+import AdminProjectList from './pages/admin/AdminProjectList';
+import AdminProjectManage from './pages/admin/AdminProjectManage';
+import AdminStudentRoster from './pages/admin/AdminStudentRoster';
+import AdminUpload from './pages/admin/AdminUpload';
+
+import ProtectedRoute from './pages/components/ProtectedRoute';
 
 class App extends Component {
 
@@ -44,42 +45,37 @@ class App extends Component {
 
                     <Route path="/submissions" element={
                         <ProtectedRoute>
-                            <PastSubmissionPage />
+                            <StudentPastSubmissions />
                         </ProtectedRoute>
                     } />
                     <Route path="/class/:class_id/upload" element={
                         <ProtectedRoute>
-                            <UploadPage />
+                            <StudentUpload />
                         </ProtectedRoute>
                     } />
                     <Route path="/class/:class_id/code/:id?" element={
                         <ProtectedRoute>
-                            <CodePage />
+                            <StudentOutputDiff />
                         </ProtectedRoute>
                     } />
                     <Route path="/class/classes" element={
                         <ProtectedRoute>
-                            <ClassSelectionPage />
+                            <StudentClassSelection />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/classes" element={
                         <ProtectedRoute>
-                            <AdminLanding />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/admin/TaLanding" element={
-                        <ProtectedRoute>
-                            <TaLanding />
+                            <AdminClassSelection />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/projects/:id/*" element={
                         <ProtectedRoute>
-                            <AdminProject />
+                            <AdminProjectList />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/project/:id" element={
+                    <Route path="/admin/project/:class_id/:id" element={
                         <ProtectedRoute>
-                            <ProjectBreakdown />
+                            <AdminStudentRoster />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/upload" element={
@@ -87,33 +83,28 @@ class App extends Component {
                             <AdminUpload />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/settings" element={
-                        <ProtectedRoute>
-                            <AdminSettingsPage />
-                        </ProtectedRoute>
-                    } />
                     <Route path="/admin/project/edit/:class_id/:id" element={
                         <ProtectedRoute>
-                            <AdminProjectConfig />
+                            <AdminProjectManage />
                         </ProtectedRoute>
                     } />
                     <Route path="/class/OfficeHours/:id" element={
                         <ProtectedRoute>
-                            <OfficeHoursPage />
+                            <StudentOfficeHours />
                         </ProtectedRoute>
                     } />
-                    <Route path="/user/createAccount" element={
+                    <Route path="/admin/OfficeHours" element={
                         <ProtectedRoute>
-                            <CreateAccountPage />
+                            <AdminOfficeHours />
                         </ProtectedRoute>
                     } />
                     <Route path="/plagiarism/compare" element={
                         <ProtectedRoute>
-                            <PlagiarismCompare />
+                            <AdminPlagiarism />
                         </ProtectedRoute>
                     } />
                     {/* Catch-all for 404 */}
-                    <Route path="*" element={<NotFoundComponent />} />
+                    <Route path="*" element={<NotFound />} />
                 </Routes>
             </BrowserRouter>
         );

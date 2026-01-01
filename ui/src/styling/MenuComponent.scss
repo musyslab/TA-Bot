@@ -1,0 +1,155 @@
+/* MenuComponent.scss */
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Base menu */
+.menu {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+
+  background: #111;
+  color: #fff;
+
+  border-bottom: 1px solid #2a2a2a;
+
+  /* Bigger navbar */
+  min-height: 88px;
+  font-size: 20px;
+
+  .menu__container {
+    width: 95%;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    padding: 16px 0;
+    box-sizing: border-box;
+  }
+
+  /* All menu items: same text size + normal weight */
+  .menu__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+
+    padding: 16px 18px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+
+    text-decoration: none;
+    cursor: pointer;
+    border-radius: 12px;
+    line-height: 1;
+
+    font-size: 1em;
+    font-weight: 500;
+
+    transition: background 120ms ease, transform 120ms ease;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.10);
+    }
+
+    &:active {
+      background: rgba(255, 255, 255, 0.14);
+      transform: translateY(1px);
+    }
+
+    &:focus-visible {
+      outline: 2px solid #ffffff;
+      outline-offset: 2px;
+    }
+  }
+
+  /* Only TA-Bot text bold */
+  .menu__item--header {
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    margin-right: 6px;
+    padding-left: 0;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+  }
+
+  /* Keep same size and normal weight for links and logout */
+  .menu__item--link {
+    font-weight: 500;
+    font-size: 1em;
+  }
+
+  .menu__logout {
+    font-weight: 500;
+    font-size: 1em;
+    padding-right: 0;
+
+    &:hover {
+      background: rgba(255, 85, 85, 0.20);
+    }
+
+    &:active {
+      background: rgba(255, 85, 85, 0.26);
+    }
+  }
+
+  .menu__icon {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+  }
+
+  .menu__text {
+    display: inline-block;
+    white-space: nowrap;
+    font-size: 1em;
+    font-weight: inherit;
+  }
+
+  .menu__right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+}
+
+/* Modifier classes */
+.menu--top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2000;
+}
+
+.menu--inverted {
+  background: #111;
+  color: #fff;
+}
+
+.menu--borderless {
+  border-bottom: 0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.menu--huge {
+  font-size: 20px;
+}
+
+/* Keep same text size for all items, even in huge */
+.menu--huge .menu__item {
+  font-size: 1em;
+  padding: 18px 20px;
+}
+
+/* Push content down so it doesn't sit under the fixed navbar */
+.main-grid {
+  padding-top: 96px;
+}

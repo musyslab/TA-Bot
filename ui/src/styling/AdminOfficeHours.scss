@@ -1,0 +1,263 @@
+.oh-page {
+    width: 100%;
+    margin-top: 15px;
+    padding-top: 0;
+    box-sizing: border-box;
+}
+
+/* Keep Directory, title, and table the same width and centered */
+.oh-page .directory,
+.oh-page .pageTitle,
+.oh-page .question-queue-table {
+    width: 95vw;
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+}
+
+/* Ensure the table actually centers as a block/table element */
+.oh-page .question-queue-table {
+    display: table;
+}
+
+.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    background: #f9fafb;
+    color: #111827;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    text-decoration: none;
+
+    &:hover {
+        background: #f3f4f6;
+    }
+
+    &:active {
+        transform: translateY(1px);
+    }
+
+    &:focus-visible {
+        outline: 2px solid #93c5fd;
+        outline-offset: 2px;
+    }
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    /* make disabled state scream "locked" */
+    &.is-locked {
+        opacity: 0.35 !important;
+        filter: grayscale(60%);
+        border-style: dashed;
+        box-shadow: none;
+    }
+
+    &.button-reject {
+        border-color: #ef4444;
+        background: #fef2f2;
+        color: #7f1d1d;
+
+        &:hover {
+            background: #fee2e2;
+            border-color: #dc2626;
+        }
+    }
+
+    &.button-accept {
+        border-color: #10b981;
+        background: #ecfdf5;
+        color: #065f46;
+
+        &:hover {
+            background: #d1fae5;
+            border-color: #059669;
+        }
+    }
+
+    &.button-assignment {
+        border-color: #8b5cf6;
+        background: #f5f3ff;
+        color: #4c1d95;
+
+        &:hover {
+            background: #ede9fe;
+            border-color: #7c3aed;
+        }
+    }
+
+    &.button-view-code {
+        border-color: #3b82f6;
+        background: #eff6ff;
+        color: #1d4ed8;
+
+        &:hover {
+            background: #dbeafe;
+            border-color: #2563eb;
+        }
+    }
+
+    &.button-completed {
+        border-color: #9ca3af;
+        background: #f3f4f6;
+        color: #111827;
+
+        &:hover {
+            background: #e5e7eb;
+            border-color: #6b7280;
+        }
+    }
+}
+
+/* Link wrapper for code view button */
+.link-code {
+    text-decoration: none;
+
+    &:focus-visible {
+        outline: 2px solid #93c5fd;
+        outline-offset: 2px;
+        border-radius: 10px;
+    }
+}
+
+/* ===== Queue table ===== */
+.question-queue-table {
+    width: 95%;
+    margin: 15px auto 24px;
+    border-collapse: collapse;
+    border: 1px solid #d1d5db;
+    background: #ffffff;
+    border-radius: 12px;
+    overflow: hidden;
+
+    .icon {
+        line-height: 1;
+        vertical-align: middle;
+    }
+
+    .table-head {
+        background: #e5e7eb;
+
+        .head-row {
+            th {
+                text-align: left;
+                padding: 0.65rem 0.75rem;
+                color: #111827;
+                font-size: 0.95rem;
+                border: 1px solid #d1d5db;
+                white-space: nowrap;
+                vertical-align: middle;
+            }
+        }
+    }
+
+    .table-body {
+        tr.data-row {
+            background: #f8fafc;
+            transition: background-color 120ms ease;
+
+            &:nth-child(even) {
+                background: #eef2f7;
+            }
+
+            &:hover {
+                background: #e9eef4;
+            }
+
+            &.is-in-oh {
+                background: #ecfdf5 !important;
+                /* subtle green */
+                /* left accent to stand out */
+                box-shadow: inset 4px 0 0 0 #10b981;
+            }
+
+            &.is-in-oh:hover {
+                background: #d1fae5 !important;
+            }
+
+            td {
+                padding: 0.6rem 0.75rem;
+                border: 1px solid #e5e7eb;
+                color: #111827;
+                vertical-align: middle;
+
+                &.cell-position {
+                    text-align: center;
+                    font-weight: inherit;
+                    color: inherit;
+                    background: transparent;
+                    border-left: none;
+                }
+
+                &.cell-student {
+                    font-weight: 600;
+                    color: #0f172a;
+                }
+
+                &.cell-question {
+                    white-space: normal;
+                    word-break: break-word;
+                }
+
+                &.cell-wait {
+                    color: #1f2937;
+                    font-variant-numeric: tabular-nums;
+                }
+
+                &.cell-status {
+                    text-align: center;
+
+                    .status.in-oh .icon {
+                        font-size: 1.75rem;
+                        line-height: 1;
+                    }
+
+                    .status.waiting {
+                        opacity: 0.7;
+                    }
+
+                    .status.waiting .icon {
+                        font-size: 1.75rem;
+                        line-height: 1;
+                    }
+
+                }
+
+                &.cell-feedback {
+                    text-align: center;
+
+                    .feedback-actions {
+                        display: inline-flex;
+                        gap: 0.5rem;
+                        align-items: center;
+                        justify-content: center;
+
+                        &.is-disabled {
+                            opacity: 0.7;
+                            pointer-events: none;
+                            filter: grayscale(25%);
+                        }
+                    }
+                }
+
+                &.cell-assignment,
+                &.cell-code,
+                &.cell-complete {
+                    text-align: center;
+
+                    .button {
+                        width: 100%;
+                        max-width: 160px;
+                    }
+                }
+            }
+        }
+    }
+}
