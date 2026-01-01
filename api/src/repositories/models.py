@@ -92,11 +92,6 @@ class StudentUnlocks(db.Model):
     ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
     Time = Column(DateTime)
 
-class Config(db.Model):
-    __tablename__ = "Config"
-    Name  = Column(String, primary_key=True)
-    Value = Column(String)
-
 class Testcases(db.Model):
     __tablename__ = "Testcases"
     Id = Column(Integer, primary_key=True, autoincrement=True)
@@ -130,30 +125,6 @@ class StudentSuggestions(db.Model):
     UserId = Column(Integer)
     StudentSuggestionscol = Column(String)
     TimeSubmitted = Column(DateTime)
-class SnippetRuns(db.Model):
-    __tablename__ = "SnippetRuns"
-    idSnippetRuns = Column(Integer, primary_key=True, autoincrement=True)
-    UserId = Column(Integer)
-    Code = Column(String)
-    Language = Column(String)
-    TestCaseInput = Column(String)
-    Result = Column(DateTime)
-    TimeSubmitted = Column(DateTime)
-class ChatLogs(db.Model):
-    __tablename__ = "ChatLogs"
-    idChatLogs = Column(Integer, primary_key=True, autoincrement=True)
-    UserId = Column(Integer)
-    ClassId = Column(Integer)
-    ResponseTo = Column(Integer)
-    UserPseudonym = Column(String)
-    UserImage = Column(String)
-    Response = Column(String)
-    Code = Column(String)
-    Language = Column(String)
-    TimeSubmitted = Column(DateTime)
-    MessageFlag = Column(Integer)
-    AcceptedFlag = Column(Integer)
-    Likes=Column(Integer)
 class SubmissionCharges(db.Model):
     __tablename__ = "SubmissionCharges"
     Id = Column(Integer, primary_key=True, autoincrement=True)

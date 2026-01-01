@@ -49,8 +49,9 @@ services:
       BROWSER: "none"  
     volumes:
       - "./ui:/app"
+      - "/app/node_modules"
     ports:
       - "3000:3000"
     depends_on:
       - backend
-    command: ["yarn", "dev", "--host", "0.0.0.0"]
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

@@ -1,5 +1,4 @@
 from flask.json import jsonify
-from src.repositories.config_repository import ConfigRepository
 import json
 import os
 import subprocess
@@ -20,7 +19,6 @@ from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.user_repository import UserRepository
 from src.repositories.class_repository import ClassRepository
-from src.repositories.config_repository import ConfigRepository
 from src.services.timeout_service import on_timeout
 from tap.parser import Parser
 from dependency_injector.wiring import inject, Provide
@@ -128,26 +126,6 @@ def test_case_result_finder(filepath):
                     results['Failed'].append(current_test['name'])
     return results
 
-
-def pylint_score_finder(error_count):
-    """
-    Calculates a pylint score based on the number of errors found in the code.
-
-    Args:
-        error_count (int): The number of errors found in the code.
-
-    Returns:
-        int: The pylint score calculated based on the number of errors found.
-    """
-    if error_count <= 10 and error_count > 7:
-        return 25
-    if error_count <= 7 and error_count > 5:
-        return 30
-    if error_count <= 5:
-        return 40
-    else:
-        return 10
-
 @upload_api.route('/total_students_by_cid', methods=['GET'])
 @jwt_required()
 @inject
@@ -182,7 +160,7 @@ def find_line_by_char(c_file: str, target_char_count: int) -> int:
 @upload_api.route('/', methods=['POST'])
 @jwt_required()
 @inject
-def file_upload(user_repository: UserRepository =Provide[Container.user_repo],submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo], config_repo: ConfigRepository = Provide[Container.config_repo],config_repos: ConfigRepository = Provide[Container.config_repo],class_repo: ClassRepository = Provide[Container.class_repo]):
+def file_upload(user_repository: UserRepository =Provide[Container.user_repo],submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo], class_repo: ClassRepository = Provide[Container.class_repo]):
     """[summary]
 
     Args:

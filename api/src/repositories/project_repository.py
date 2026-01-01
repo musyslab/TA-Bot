@@ -8,7 +8,7 @@ from typing import Optional, Dict
 from flask import send_file
 
 from sqlalchemy.sql.expression import asc
-from .models import ChatLogs, Projects, StudentGrades, Submissions, Testcases, Classes
+from .models import Projects, StudentGrades, Submissions, Testcases, Classes
 from src.repositories.database import db
 from sqlalchemy import desc, and_
 from datetime import datetime
@@ -20,7 +20,6 @@ import json
 
 class ProjectRepository():
 
-    #TODO: Remove
     def get_current_project(self) -> Optional[Projects]:
         """[Identifies the current project based on the start and end date]
         Returns:
@@ -44,7 +43,6 @@ class ProjectRepository():
         #Start and end time format: 2023-05-31 14:33:00
         return project
 
-    #TODO: Remove
     def get_all_projects(self) -> Projects:
         """Get all projects from the mySQL database and return a project object sorted by end date.
 
@@ -217,20 +215,6 @@ class ProjectRepository():
         db.session.delete(testcase)
         db.session.commit()
 
-    def get_testcase_input(self, testcase_id: int):
-        testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
-        return testcase.input
-
-    def get_testcase_project(self, testcase_id: int):
-        testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
-        return testcase.ProjectId
-
-    def get_project_id_by_name(self, projectname:str):
-        if(Projects.query.filter(Projects.Name==projectname).count() == 0):
-            return 0
-        project = Projects.query.filter(Projects.Name==projectname).first()
-        return project.Id
-
     def testcases_to_json(self, project_id: int) -> str:
         testcase_holder: Dict[int, list] = {}
         proj = Projects.query.filter(Projects.Id == project_id).first()
@@ -252,6 +236,7 @@ class ProjectRepository():
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)
         return json_object
+
     def wipe_submissions(self, project_id:int):
         submissions = Submissions.query.filter(Submissions.Project == project_id).all()
         for student in student_progress:
@@ -284,27 +269,33 @@ class ProjectRepository():
         project = Projects.query.filter(Projects.Id == project_id).first()
         class_obj = Classes.query.filter(Classes.Id ==project.ClassId).first()
         return class_obj.Name
-    #TODO: Move this call to class repository
+
+
     def get_class_id_by_name(self, class_name):
         class_id = Classes.query.filter(Classes.Name==class_name).first().Id
         return class_id
+
     def get_project_path(self, project_id):
         project = Projects.query.filter(Projects.Id==project_id).first()
         return project.solutionpath
+
     def get_project_desc_path(self, project_id):
         project = Projects.query.filter(Projects.Id==project_id).first()
         return project.AsnDescriptionPath
+
     def get_project_desc_file(self, project_id):
         project = Projects.query.filter(Projects.Id == project_id).first()
         filepath = project.AsnDescriptionPath
         with open(filepath, 'rb') as file:
             file_contents = file.read()
         return file_contents  # Return the contents of the PDF file
+
     def get_student_grade(self, project_id, user_id):
         student_progress = StudentGrades.query.filter(and_(StudentGrades.Sid==user_id, StudentGrades.Pid==project_id)).first()
         if student_progress is None:
             return 0
         return student_progress.Grade
+        
     def set_student_grade(self, project_id, user_id, grade):
         student_grade = StudentGrades.query.filter(and_(StudentGrades.Sid==user_id, StudentGrades.Pid==project_id)).first()
         if student_grade is not None:
@@ -315,34 +306,3 @@ class ProjectRepository():
         db.session.add(studentGrade)
         db.session.commit()
         return
-    def submit_student_chat(self, user_id, class_id, project_id, user_message, user_code, language, response_to):
-        dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        #Get User UserPseudonym
-        UserPseudonym = ChatLogs.query.filter(ChatLogs.UserId==user_id).first().UserPseudonym
-        new_flag = True
-        if UserPseudonym is None:
-            while new_flag:
-                adjectives = ['Agile', 'Brave', 'Calm', 'Diligent', 'Eager', 'Fierce', 'Gentle', 'Heroic', 'Inventive', 'Jovial', 'Keen', 'Lively', 'Mighty', 'Noble', 'Optimistic', 'Proud', 'Quick', 'Resilient', 'Strong', 'Tenacious', 'Unique', 'Vibrant', 'Wise', 'Xenial', 'Youthful', 'Zealous']
-                nouns = ['Lion', 'Eagle', 'Tiger', 'Leopard', 'Elephant', 'Bear', 'Fox', 'Wolf', 'Hawk', 'Shark', 'Dolphin', 'Cheetah', 'Panther', 'Falcon', 'Gazelle', 'Hippopotamus', 'Iguana', 'Jaguar', 'Kangaroo', 'Lemur', 'Mongoose', 'Narwhal', 'Octopus', 'Penguin', 'Quail', 'Raccoon', 'Squirrel', 'Tortoise', 'Urchin', 'Vulture', 'Walrus', 'Xerus', 'Yak', 'Zebra']
-                colors = ['Red', 'Blue', 'Green', 'Yellow', 'Purple', 'Orange', 'Pink', 'Brown', 'Black', 'White', 'Gray', 'Crimson', 'Cyan', 'Magenta', 'Lime', 'Maroon', 'Navy', 'Olive', 'Teal', 'Violet', 'Indigo', 'Gold', 'Silver', 'Bronze', 'Ruby', 'Emerald', 'Sapphire', 'Amethyst', 'Quartz', 'Onyx', 'Jade', 'Pearl', 'Topaz', 'Opal', 'Turquoise', 'Amber', 'Coral', 'Garnet', 'Jasper', 'Malachite', 'Peridot', 'Tourmaline', 'Zircon']
-                UserPseudonym = random.choice(colors) + random.choice(adjectives) + random.choice(nouns)
-                unique = ChatLogs.query.filter(ChatLogs.UserPseudonym==UserPseudonym).first()
-                if unique is None:
-                    new_flag = False
-        
-        chat = ChatLogs(UserId=user_id, 
-                        ClassId=class_id,
-                        project_id=project_id, 
-                        ResponseTo=response_to,
-                        UserPseudonym=UserPseudonym,
-                        UserImage="",
-                        Response=user_message, 
-                        Code=user_code, 
-                        Language=language, 
-                        TimeSubmitted=dt_string,
-                        MessageFlag=0,
-                        AcceptedFlag=0,
-                        Likes=0)
-        db.session.add(chat)
-        db.session.commit()
-        return "ok"

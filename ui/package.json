@@ -6,6 +6,7 @@
   "dependencies": {
     "@types/react-dom": "^19.2.3",
     "@types/react-helmet": "^6.1.11",
+    "@vitejs/plugin-react": "^5.1.2",
     "axios": "^1.13.2",
     "diff": "^8.0.2",
     "react": "^19.2.3",
@@ -16,12 +17,13 @@
     "react-icons": "^5.5.0",
     "react-router-dom": "^7.11.0",
     "react-split": "^2.0.14",
+    "sass-embedded": "^1.97.1",
     "tap": "^21.5.0",
     "tap-parser": "^18.3.0",
-    "yarn": "^1.22.22"
+    "vite": "^7.3.0"
   },
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -29,23 +31,5 @@
     "extends": [
       "react-app"
     ]
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
-  "devDependencies": {
-    "@types/node": "^25.0.3",
-    "@types/react-router-dom": "^5.3.3",
-    "@vitejs/plugin-react": "^5.1.2",
-    "vite": "^7.3.0"
   }
 }

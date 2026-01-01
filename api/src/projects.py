@@ -33,7 +33,6 @@ from flask import request
 from dependency_injector.wiring import inject, Provide
 from container import Container
 from datetime import datetime
-from src.services.link_service import LinkService
 import itertools
 import importlib.util
 from werkzeug.utils import secure_filename
@@ -885,20 +884,6 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
         new_projects.append(ProjectJson(proj.Id, proj.Name, proj.Start.strftime("%x %X"), proj.End.strftime("%x %X"), thisdic[proj.Id]).toJson())
     return jsonify(new_projects)
 
-
-@projects_api.route('/reset_project', methods=['POST', 'DELETE'])
-@jwt_required()
-@inject
-def reset_project(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
-    project_id = request.args.get('id')
-    project_repo.wipe_submissions(project_id)
-    return make_response("Project reset", HTTPStatus.OK)
-
 @projects_api.route('/delete_project', methods=['POST', 'DELETE'])
 @jwt_required()
 @inject
@@ -951,7 +936,7 @@ def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container
 @projects_api.route('/ProjectGrading', methods=['POST'])
 @jwt_required()
 @inject
-def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo], class_repo: ClassRepository = Provide[Container.class_repo], user_repo: UserRepository = Provide[Container.user_repo], link_service: LinkService = Provide[Container.link_service]):
+def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo], class_repo: ClassRepository = Provide[Container.class_repo], user_repo: UserRepository = Provide[Container.user_repo]):
     if current_user.Role != ADMIN_ROLE:
         message = {
             'message': 'You do not have permission to do this!'

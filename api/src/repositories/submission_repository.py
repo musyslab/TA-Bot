@@ -1,13 +1,13 @@
 from collections import defaultdict
 import os
 from src.repositories.database import db
-from .models import SnippetRuns, StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users
+from .models import StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users
 from sqlalchemy import desc, and_
 from typing import Dict, List, Tuple
-from src.repositories.config_repository import ConfigRepository
 from datetime import datetime, timedelta
 
 class SubmissionRepository():
+
     def get_submission_by_user_id(self, user_id: int) -> Submissions:
         """Returns the latest submission made by a user with the given user_id.
 
@@ -19,6 +19,7 @@ class SubmissionRepository():
         """
         submission = Submissions.query.filter(Submissions.User == user_id).order_by(desc("Time")).first()
         return submission
+
     def get_submission_by_user_and_projectid(self, user_id:int, project_id: int)-> Submissions:
         """Returns the latest submission made by a user for a given project.
 
@@ -90,6 +91,7 @@ class SubmissionRepository():
             with open(code_path, "r") as f:
                 student_file = f.read()
         return student_file
+        
     def read_output_file(self, output_path) -> str:
         """Returns the contents of the output file associated with a given submission.
 
@@ -500,13 +502,6 @@ class SubmissionRepository():
         dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
         suggestion = StudentSuggestions(UserId=user_id, StudentSuggestionscol=suggestion, TimeSubmitted=dt_string)
         db.session.add(suggestion)
-        db.session.commit()
-        return "ok"
-    def log_code_snippet(self, user_id, code, language, input, result ):
-        dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        # Don't need to sanitize code input as using an ORM (Object-Relational Mapping) library aka SQLAlchemy automatically parameterizes queries to prevent SQL injection
-        snippet = SnippetRuns(UserId=user_id, Code=code, Language=language, TestCaseInput=input, Result=result, TimeSubmitted=dt_string)
-        db.session.add(snippet)
         db.session.commit()
         return "ok"
     def get_charges(self, user_id, class_id, project_id):

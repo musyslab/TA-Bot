@@ -379,7 +379,7 @@ const StudentUpload = () => {
       <DirectoryBreadcrumbs
         items={[
           { label: "Class Selection", to: "/class/classes" },
-          { label: "Project List" },
+          { label: "Project Upload" },
         ]}
       />
 

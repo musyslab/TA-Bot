@@ -13,9 +13,8 @@ from src.submission import submission_api
 from src.projects import projects_api
 from src.classes import class_api
 from src.error import error_api
-from src.settings import settings_api
 from src.jwt_manager import jwt
-from src import classes, auth, projects, submission, upload, settings
+from src import classes, auth, projects, submission, upload
 from src.services import timeout_service
 import os
 
@@ -23,7 +22,7 @@ def create_app():
     app = Flask(__name__)
     container = Container()
     app.container = container
-    container.wire(modules=[classes, auth, projects, submission, upload, settings, timeout_service])
+    container.wire(modules=[classes, auth, projects, submission, upload, timeout_service])
     
     TEACHER_DIR = "/ta-bot/project-files/teacher-files"
     STUDENT_DIR = "/ta-bot/project-files/student-files"
@@ -56,7 +55,6 @@ def create_app():
     app.register_blueprint(projects_api,url_prefix='/api/projects')  
     app.register_blueprint(class_api,url_prefix='/api/class')
     app.register_blueprint(error_api,url_prefix='/api/error')
-    app.register_blueprint(settings_api,url_prefix="/api/settings")
     
     # Initialize extensions
     jwt.init_app(app)
