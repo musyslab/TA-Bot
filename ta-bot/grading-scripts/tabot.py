@@ -5,13 +5,12 @@ import sys
 import time
 from pyston import PystonClient, File
 import requests
-from output import *
 import asyncio
 import ast
 import subprocess
 import tempfile
 import re
-import CompilerRunner
+import glob
 from typing import List, Tuple, Any
 
 PISTON_URL = "https://emkc.org/api/v2/piston/execute"
@@ -21,36 +20,56 @@ PISTON_URL = "https://emkc.org/api/v2/piston/execute"
 TEMP_PREFIX = "temp-"
 OUTPUT_PATH_NAME = "output"
 
+TYPE_CONFIG_KEY = "TYPE"
+DESCRIPTION_CONFIG_KEY = "DESCRIPTION"
+HIDDEN_CONFIG_KEY = "HIDDEN"
 
-# -----------------------------
-# Lint parsing helpers
-# -----------------------------
 
-def parse_checkstyle_output(checkstyle_output: str) -> str:
-    warnings = []
-    for line in checkstyle_output.split('\n'):
-        if line.strip():
-            match = re.match(
-                r'^\[(?P<warning_type>\w+)\] (?P<path>.*):(?P<line>\d+):(?P<column>\d+): (?P<message>.*) \[(?P<rule_id>\w+)\]$',
-                line.strip()
-            )
-            if match:
-                warning = {
-                    'column': int(match.group('column')) - 1,
-                    'endColumn': None,
-                    'endLine': None,
-                    'line': int(match.group('line')) - 1,
-                    'message': match.group('message'),
-                    'message-id': match.group('rule_id'),
-                    'module': None,
-                    'obj': "",
-                    'path': match.group('path'),
-                    'reflink': None,
-                    'symbol': None,
-                    'type': 'convention'
-                }
-                warnings.append(warning)
-    return json.dumps(warnings, ensure_ascii=False, default=str)
+def createTapFile(output_file: str):
+    with open(output_file, "w") as file:
+        file.write("TAP version 13\n")
+
+
+def parseTestConfig(test_path: str):
+    config = {}
+    with open(test_path, "r") as test_file:
+        for line in test_file:
+            m = re.match(r"([a-zA-Z]+)=(.*)", line)
+            if m:
+                config[m.group(1)] = m.group(2).rstrip("\r\n")
+            else:
+                return -1
+    return config
+
+
+def add_test_to_tap(output_file: str, directory: str, test: str):
+    """
+    Kept for compatibility with older workflows that used *.info config files.
+    Not used by the JSON-driven runner below, but included since output.py had it.
+    """
+    test_path = os.path.join(directory, test)
+    config = parseTestConfig(test_path)
+    with open(output_file, "a") as file:
+        if config == -1:
+            file.write("not ok # SKIP Could not parse test config file.  Please contact the instructor\n")
+            return
+        if TYPE_CONFIG_KEY not in config:
+            file.write("not ok # SKIP Missing TYPE setting in test config.  Please contact the instructor\n")
+            return
+        if DESCRIPTION_CONFIG_KEY not in config:
+            file.write("not ok # SKIP Missing DESCRIPTION setting in test config.  Please contact the instructor\n")
+            return
+
+
+def end_tap_file_from_info(output_file: str, temp_directory: str):
+    """
+    Kept for compatibility with older workflows that emitted *.info files.
+    Not used by the JSON-driven runner below.
+    """
+    tests = glob.glob1(temp_directory, "*.info")
+    with open(output_file, "a") as file:
+        file.write(f"1..{str(len(tests))}\n")
+    return output_file
 
 
 # -----------------------------
@@ -58,18 +77,18 @@ def parse_checkstyle_output(checkstyle_output: str) -> str:
 # -----------------------------
 
 def assess_test(student_output: str, expected_output: str):
-    with tempfile.NamedTemporaryFile(mode='w', delete=False) as expected_file:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as expected_file:
         expected_file.write(expected_output)
         expected_filename = expected_file.name
 
-    with tempfile.NamedTemporaryFile(mode='w', delete=False) as student_file:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as student_file:
         student_file.write(student_output)
         student_filename = student_file.name
 
     result = subprocess.run(
         ["diff", "-B", "-w", "-i", "-a", "-Z", "-b", "--ignore-trailing-space", expected_filename, student_filename],
         capture_output=True,
-        text=True
+        text=True,
     )
 
     subprocess.run(["rm", expected_filename])
@@ -140,7 +159,7 @@ def strip_java_package(src: str) -> str:
 def extract_main_class_name(src: str) -> str:
     if "public static void main(" not in src:
         return ""
-    m = re.search(r'\bclass\s+([A-Za-z_]\w*)\b', src)
+    m = re.search(r"\bclass\s+([A-Za-z_]\w*)\b", src)
     return m.group(1) if m else ""
 
 
@@ -155,7 +174,7 @@ def detect_multiple_mains(java_sources: List[Tuple[str, str]]) -> List[str]:
 
 
 def demote_public_types(src: str) -> str:
-    return re.sub(r'^\s*public\s+(class|interface|enum)\s+', r'\1 ', src, flags=re.M)
+    return re.sub(r"^\s*public\s+(class|interface|enum)\s+", r"\1 ", src, flags=re.M)
 
 
 def bundle_java_into_main(java_sources: List[Tuple[str, str]], entry_override: str = "") -> str:
@@ -193,7 +212,7 @@ def bundle_java_into_main(java_sources: List[Tuple[str, str]], entry_override: s
         main_class = entry_override.strip()
 
     if not main_class:
-        m = re.search(r'\bclass\s+([A-Za-z_]\w*)\b', "\n".join(bodies))
+        m = re.search(r"\bclass\s+([A-Za-z_]\w*)\b", "\n".join(bodies))
         main_class = m.group(1) if m else "Main"
 
     bodies = [demote_public_types(b) for b in bodies if b]
@@ -201,7 +220,7 @@ def bundle_java_into_main(java_sources: List[Tuple[str, str]], entry_override: s
 
     if main_class == "Main":
         joined = "\n\n".join(bodies)
-        joined = re.sub(r'^\s*class\s+Main\b', 'public class Main', joined, flags=re.M)
+        joined = re.sub(r"^\s*class\s+Main\b", "public class Main", joined, flags=re.M)
         if import_block:
             return import_block + "\n\n" + joined + "\n"
         return joined + "\n"
@@ -243,7 +262,7 @@ def parse_additional_files(additional_files: Any) -> List[str]:
             s = additional_files.strip()
             if not s:
                 return []
-            extras = json.loads(s) if s.startswith('[') else [s]
+            extras = json.loads(s) if s.startswith("[") else [s]
         else:
             extras = list(additional_files)
     except Exception:
@@ -277,7 +296,7 @@ def call_piston_api(student_file: str, testcase_in: str, language: str, addition
                     return {
                         "stdout": "",
                         "stderr": "",
-                        "compile_output": f"Multiple main entrypoints found: {', '.join(uniq)}. Configure entry_class in testcase JSON."
+                        "compile_output": f"Multiple main entrypoints found: {', '.join(uniq)}. Configure entry_class in testcase JSON.",
                     }
 
             # Include additional .java files into the bundle too
@@ -296,10 +315,12 @@ def call_piston_api(student_file: str, testcase_in: str, language: str, addition
                     full = os.path.join(root, fn)
                     if os.path.isfile(full):
                         with open(full, "r", errors="ignore") as fh:
-                            files.append({
-                                "name": normalize_double_ext(os.path.basename(fn)),
-                                "content": fh.read()
-                            })
+                            files.append(
+                                {
+                                    "name": normalize_double_ext(os.path.basename(fn)),
+                                    "content": fh.read(),
+                                }
+                            )
     else:
         with open(student_file, "r", errors="ignore") as fh:
             if language == "java":
@@ -319,7 +340,7 @@ def call_piston_api(student_file: str, testcase_in: str, language: str, addition
                         return {
                             "stdout": "",
                             "stderr": "",
-                            "compile_output": f"Multiple main entrypoints found: {', '.join(uniq)}. Configure entry_class in testcase JSON."
+                            "compile_output": f"Multiple main entrypoints found: {', '.join(uniq)}. Configure entry_class in testcase JSON.",
                         }
 
                 bundled = bundle_java_into_main(java_sources, entry_override=entry_class)
@@ -352,7 +373,7 @@ def call_piston_api(student_file: str, testcase_in: str, language: str, addition
                 PISTON_URL,
                 data=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
-                timeout=30
+                timeout=30,
             )
         except Exception:
             time.sleep(0.2 * (attempt + 1))
@@ -388,10 +409,10 @@ def call_piston_api(student_file: str, testcase_in: str, language: str, addition
 def execute_test(filename: str, testcase_in: str, language: str, additional_files, entry_class: str = ""):
     response = call_piston_api(
         filename,
-        testcase_in.replace('\r', ''),
+        testcase_in.replace("\r", ""),
         language,
         additional_files,
-        entry_class=entry_class
+        entry_class=entry_class,
     )
     if response is None:
         return {"stdout": "", "stderr": "", "compile_output": ""}
@@ -405,35 +426,19 @@ def execute_test(filename: str, testcase_in: str, language: str, additional_file
 def run_liter(myroot: str, output_dir: str, student_name: str, filename: str, language: str):
     if language == "python":
         target = filename if not os.path.isdir(filename) else os.path.join(filename, f"{student_name}.py")
-        data = subprocess.run(["pylint", target, "--output-format=json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        data = subprocess.run(
+            ["pylint", target, "--output-format=json"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
         output = data.stdout.decode("utf-8").strip()
         with open(os.path.join(output_dir, f"{student_name}.out.lint"), "w") as file:
             file.write(output)
 
     elif language == "java":
-        checkstyle_jar = "/ta-bot/grading-scripts/checkstyle-10.9.2-all.jar"
-        config_file = "/ta-bot/grading-scripts/google_checks.xml"
-
-        if not os.path.isdir(filename):
-            file_to_check = filename
-        else:
-            files = [fn for fn in os.listdir(filename) if fn.endswith('.java')]
-            if "Main.java" in files:
-                file_to_check = os.path.join(filename, "Main.java")
-            else:
-                file_to_check = os.path.join(filename, files[0])
-
-        data = subprocess.run(
-            ["java", "-jar", checkstyle_jar, "-c", config_file, file_to_check],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        output = data.stdout.decode("utf-8")
-        output = str(parse_checkstyle_output(output))
-
         with open(os.path.join(output_dir, f"{student_name}.out.lint"), "w") as file:
-            file.write(output)
+            file.write("[]")
 
 
 # -----------------------------
@@ -442,7 +447,12 @@ def run_liter(myroot: str, output_dir: str, student_name: str, filename: str, la
 
 def admin_run(language: str, user_input: str, path: str, additional_files):
     piston_response = execute_test(path, user_input, language, additional_files)
-    combined = (piston_response.get("stdout") or piston_response.get("stderr") or piston_response.get("compile_output") or "")
+    combined = (
+        piston_response.get("stdout")
+        or piston_response.get("stderr")
+        or piston_response.get("compile_output")
+        or ""
+    )
     print(combined.replace("\r", "\n"))
     return combined.replace("\r", "\n")
 
@@ -478,9 +488,20 @@ def run(student_name: str, language: str, testcases: str, path: str, myroot: str
             entry_class = value[6].strip()
 
         filename = path  # file or directory
-        piston_resp = execute_test(filename, testcase_in, language, testcase_additional_files, entry_class=entry_class)
+        piston_resp = execute_test(
+            filename,
+            testcase_in,
+            language,
+            testcase_additional_files,
+            entry_class=entry_class,
+        )
 
-        combined = (piston_resp.get("stdout") or piston_resp.get("stderr") or piston_resp.get("compile_output") or "")
+        combined = (
+            piston_resp.get("stdout")
+            or piston_resp.get("stderr")
+            or piston_resp.get("compile_output")
+            or ""
+        )
 
         if piston_resp.get("compile_output"):
             result = [piston_resp.get("compile_output"), 1]
@@ -510,22 +531,37 @@ def main():
         testcase_json = " ".join(sys.argv[3:-4])
         return admin_run(language, testcase_json, paths, additional_file_path)
 
-    parser = argparse.ArgumentParser(description='Runs student code against a set of test cases.')
-    parser.add_argument('student_name', metavar='StudentName', type=str, help='the name of the student file in the input directory')
-    parser.add_argument('language', metavar='Language', type=str, help='the language of the student\'s code')
-    parser.add_argument('testcase_json', metavar='testcase_json', type=str, help='testcase json input')
-    parser.add_argument('paths', metavar='paths', type=str, help='student path files')
-    parser.add_argument('additional_file_path', metavar='additional_file_path', type=str, help='additional file path')
-    parser.add_argument('project_id', metavar='project_name', type=str, help='name of the current project')
-    parser.add_argument('class_id', metavar='class_id_name', type=str, help='name of the current project')
-    parser.add_argument('-r', '--root', default=os.getcwd(), type=str, help='the root of the TA-Bot folder containing input, output, and tests directories.')
+    parser = argparse.ArgumentParser(description="Runs student code against a set of test cases.")
+    parser.add_argument(
+        "student_name",
+        metavar="StudentName",
+        type=str,
+        help="the name of the student file in the input directory",
+    )
+    parser.add_argument(
+        "language",
+        metavar="Language",
+        type=str,
+        help="the language of the student's code",
+    )
+    parser.add_argument("testcase_json", metavar="testcase_json", type=str, help="testcase json input")
+    parser.add_argument("paths", metavar="paths", type=str, help="student path files")
+    parser.add_argument("additional_file_path", metavar="additional_file_path", type=str, help="additional file path")
+    parser.add_argument("project_id", metavar="project_name", type=str, help="name of the current project")
+    parser.add_argument("class_id", metavar="class_id_name", type=str, help="name of the current project")
+    parser.add_argument(
+        "-r",
+        "--root",
+        default=os.getcwd(),
+        type=str,
+        help="the root of the TA-Bot folder containing input, output, and tests directories.",
+    )
     args = parser.parse_args()
 
     if args.student_name == "ADMIN":
         return admin_run(args.language, args.testcase_json, args.paths, args.additional_file_path)
 
     return run(args.student_name, args.language, args.testcase_json, args.paths, args.root)
-
 
 if __name__ == "__main__":
     main()

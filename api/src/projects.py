@@ -562,7 +562,7 @@ def load_tabot_module():
     """
     Try to import tabot as a normal module first.
     If that fails, load it from /ta-bot/grading-scripts and make sure
-    its directory is on sys.path so sibling imports (output, tests, CompilerRunner)
+    its directory is on sys.path so sibling imports (output, tests)
     resolve correctly.
     """
     try:

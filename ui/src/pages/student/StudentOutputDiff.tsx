@@ -3,6 +3,7 @@ import axios from 'axios'
 import { useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
+import { FaRegCheckSquare, FaChevronDown } from 'react-icons/fa'
 import '../../styling/StudentOutputDiff.scss'
 import { diffChars } from 'diff'
 
@@ -105,7 +106,7 @@ export function CodePage() {
             .catch(err => console.log(err));
 
         axios
-        .get(`${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${submissionId}&class_id=${cid}&format=json`, {
+            .get(`${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${submissionId}&class_id=${cid}&format=json`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
@@ -543,7 +544,7 @@ export function CodePage() {
                                         <div className="diff-content">
                                             <div className="diff-empty" role="status" aria-live="polite">
                                                 <div className="empty-icon" aria-hidden="true">
-                                                    <Icon name="check square" />
+                                                    <FaRegCheckSquare />
                                                 </div>
                                                 <div className="empty-text">
                                                     <div className="empty-title">No differences found</div>
@@ -666,7 +667,7 @@ export function CodePage() {
                                             <option key={f.name} value={f.name}>{f.name}</option>
                                         ))}
                                     </select>
-                                    <Icon name="dropdown" className="select-icon" aria-hidden="true" />
+                                    <FaChevronDown className="select-icon" aria-hidden="true" />
                                 </div>
                             </div>
                         )}
