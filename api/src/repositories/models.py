@@ -41,15 +41,12 @@ class Submissions(db.Model):
     __tablename__ = "Submissions"
     Id = Column(Integer, primary_key=True)
     OutputFilepath = Column(String)
-    PylintFilepath = Column(String)
     CodeFilepath = Column(String)
     IsPassing = Column(Boolean)
-    NumberOfPylintErrors = Column(String)
     Time = Column(Date)
     User = Column(Integer, ForeignKey('Users.Id'))
     Project = Column(Integer, ForeignKey('Projects.Id'))
     TestCaseResults=Column(String)
-    LintingResults=Column(String)
 
 class LoginAttempts(db.Model):
     __tablename__ = "LoginAttempts"
@@ -63,7 +60,6 @@ class Classes(db.Model):
     Id = Column(Integer, primary_key=True)
     Name = Column(String)
     Tid = Column(String)
-    
 
 class Labs(db.Model):
     __tablename__ = "Labs"
@@ -100,7 +96,6 @@ class Testcases(db.Model):
     Description = Column(String)
     input = Column(String)
     Output = Column(String)
-    IsHidden = Column(Boolean)
 
 class OHVisits(db.Model):
     __tablename__ = "OHVisits"
@@ -119,12 +114,14 @@ class StudentGrades(db.Model):
     Sid = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
     Pid = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
     Grade = Column(Integer)
+
 class StudentSuggestions(db.Model):
     __tablename__ = "StudentSuggestions"
     idStudentSuggestions = Column(Integer, primary_key=True, autoincrement=True)
     UserId = Column(Integer)
     StudentSuggestionscol = Column(String)
     TimeSubmitted = Column(DateTime)
+
 class SubmissionCharges(db.Model):
     __tablename__ = "SubmissionCharges"
     Id = Column(Integer, primary_key=True, autoincrement=True)
@@ -132,6 +129,7 @@ class SubmissionCharges(db.Model):
     ClassId = Column(Integer)
     BaseCharge = Column(Integer)
     RewardCharge = Column(Integer)
+    
 class SubmissionChargeRedeptions(db.Model):
     __tablename__ = "SubmissionChargeRedeptions"
     Id = Column(Integer, primary_key=True, autoincrement=True)

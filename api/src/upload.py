@@ -53,42 +53,6 @@ def allowed_file(filename):
         if filetype in ext[key]:
             return True 
 
-
-def python_error_count(filepath):
-    """[A function that finds the ammount of errors from the pylint.out file that was generated]
-
-    Args:
-        filepath ([string]): [path to the .out file]
-
-    Returns:
-        [int]: [The number of errors that the student had in their pylint output]
-    """
-    with open(filepath+".out.lint", "r") as file:
-        parsed_json = json.load(file)
-        error_count = 0
-        for line in parsed_json:
-            if("UPPER_CASE" in line["message"]):
-                continue
-            else:
-                error_count = error_count + 1
-        return error_count
-    
-def LintErrorLogger(filepath, language):
-    if language == "python":
-        """A function that saves all the Linting errors into a dictionary"""
-        with open(filepath+".out.lint", "r") as file:
-            parsed_json = json.load(file)
-            error_dict = {}
-            for line in parsed_json:
-                message = line["symbol"]
-                if message in error_dict:
-                    error_dict[message] += 1
-                else:
-                    error_dict[message] = 1
-            return error_dict
-    else:
-        return {}
-
 def output_pass_or_fail(filepath):
     """[a function that looks at all results from a students test run]
 
@@ -283,25 +247,19 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
             return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
         
         # Step 3: Rename grader outputs to our new scheme:
-        # Grader writes username.out / username.out.lint next to the submitted path:
+        # Grader writes username.out next to the submitted path:
         # - if path is a directory, outputs are inside that directory
         # - if path is a file, outputs are next to that file (outputpath)
         run_output_dir = path if os.path.isdir(path) else outputpath
         out_src = os.path.join(run_output_dir, f"{username}.out")
-        lint_src = os.path.join(run_output_dir, f"{username}.out.lint")
         out_base = os.path.join(outputpath, display_base)
         tap_path = out_base + ".out"
-        lint_path = out_base + ".out.lint"
         try:
             if os.path.exists(out_src):
                 os.replace(out_src, tap_path)
         except Exception:
             pass
-        try:
-            if os.path.exists(lint_src):
-                os.replace(lint_src, lint_path)
-        except Exception:
-            pass
+
         status=output_pass_or_fail(tap_path)
         TestCaseResults=test_case_result_finder(tap_path)
         if project.Language == "python":
@@ -309,19 +267,15 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
         else:
             error_count=0    
 
-        Linting_results = LintErrorLogger(out_base, project.Language)
-
         submissionId = submission_repo.create_submission(
             user_id,
             tap_path,
             path,
-            lint_path,
             dt_string,
             project.Id,
             status,
             error_count,
             TestCaseResults,
-            Linting_results
         )
         
         submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)

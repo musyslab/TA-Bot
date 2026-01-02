@@ -418,29 +418,6 @@ def execute_test(filename: str, testcase_in: str, language: str, additional_file
         return {"stdout": "", "stderr": "", "compile_output": ""}
     return response
 
-
-# -----------------------------
-# Lint runners
-# -----------------------------
-
-def run_liter(myroot: str, output_dir: str, student_name: str, filename: str, language: str):
-    if language == "python":
-        target = filename if not os.path.isdir(filename) else os.path.join(filename, f"{student_name}.py")
-        data = subprocess.run(
-            ["pylint", target, "--output-format=json"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        output = data.stdout.decode("utf-8").strip()
-        with open(os.path.join(output_dir, f"{student_name}.out.lint"), "w") as file:
-            file.write(output)
-
-    elif language == "java":
-        with open(os.path.join(output_dir, f"{student_name}.out.lint"), "w") as file:
-            file.write("[]")
-
-
 # -----------------------------
 # Main execution paths
 # -----------------------------
@@ -511,14 +488,6 @@ def run(student_name: str, language: str, testcases: str, path: str, myroot: str
         write_to_tap(output_file, result, test_name, test_description, hidden)
 
     end_tap_file(output_file, len(testcases))
-
-    if language == "python":
-        run_liter(myroot, output_dir, student_name, path, language)
-    elif language == "java":
-        run_liter(myroot, output_dir, student_name, path, language)
-    else:
-        with open(os.path.join(output_dir, f"{student_name}.out.lint"), "w") as file:
-            file.write("")
 
     return 0
 

@@ -638,9 +638,8 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
             name = vals[1] if len(vals) > 1 else ""
             desc = vals[2] if len(vals) > 2 else ""
             inp = vals[3] if len(vals) > 3 else ""
-            is_hidden = bool(vals[5]) if len(vals) > 5 else False
         except Exception:
-            name, desc, inp, is_hidden = "", "", "", False
+            name, desc, inp = "", "", "", False
 
         new_out = run_solution_for_input(solution_root, lang, inp, project_id, class_id, add_path)
         try:
@@ -651,7 +650,6 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
                 desc or "",
                 inp or "",
                 new_out,
-                bool(is_hidden),
                 int(class_id),
             )
         except Exception:
@@ -799,7 +797,6 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
                 testcase["description"],
                 testcase["input"],
                 testcase["output"],
-                bool(testcase["isHidden"]),
                 class_id
             )
 
@@ -821,11 +818,10 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     input_data = request.form.get('input', '')
     output = request.form.get('output', '')
     project_id = request.form.get('project_id', '').strip()
-    isHidden = request.form.get('isHidden', '').strip()
     description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
     
-    if id_val == '' or name == '' or input_data == '' or project_id == '' or isHidden == '' or description == '' or class_id == '':
+    if id_val == '' or name == '' or input_data == '' or project_id == '' or description == '' or class_id == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
 
     # Coerce types with validation
@@ -835,8 +831,6 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         class_id_int = int(class_id)
     except ValueError:
         return make_response("Invalid numeric id", HTTPStatus.BAD_REQUEST)
-
-    isHidden = True if isHidden.lower() == "true" else False  
 
     # Auto-recompute expected output when editing a testcase.
     # If the project's language is Python, run the saved solution with the new input
@@ -851,7 +845,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         # Fall back to the submitted output if recomputation fails
         pass
 
-    project_repo.add_or_update_testcase(project_id, id_val, name, description, input_data, output, isHidden, class_id_int)
+    project_repo.add_or_update_testcase(project_id, id_val, name, description, input_data, output, class_id_int)
 
     return make_response("Testcase Added", HTTPStatus.OK)
     

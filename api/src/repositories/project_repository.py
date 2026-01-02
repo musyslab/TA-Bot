@@ -136,7 +136,6 @@ class ProjectRepository():
             testcase_data.append(test.Description) 
             testcase_data.append(test.input)       
             testcase_data.append(test.Output)      
-            testcase_data.append(test.IsHidden)    
             testcase_info[test.Id] = testcase_data
         return testcase_info
 
@@ -148,7 +147,6 @@ class ProjectRepository():
         description: str,
         input_data: str,
         output: str,
-        is_hidden: bool,
         class_id: int,
     ):
         from flask import current_app
@@ -198,7 +196,6 @@ class ProjectRepository():
                 Description=description,
                 input=input_data,
                 Output=output,
-                IsHidden=is_hidden,
             )
             db.session.add(testcase)
         else:
@@ -206,7 +203,6 @@ class ProjectRepository():
             testcase.Description = description
             testcase.input = input_data
             testcase.Output = output
-            testcase.IsHidden = is_hidden
 
         db.session.commit()
 
@@ -230,7 +226,6 @@ class ProjectRepository():
                 test.Description,
                 test.input,
                 test.Output,
-                test.IsHidden,
                 add_list,
             ]
         json_object = json.dumps(testcase_holder)

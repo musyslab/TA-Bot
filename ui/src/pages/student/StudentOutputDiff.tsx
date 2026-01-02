@@ -14,7 +14,6 @@ interface JsonTestResponseBody {
     type: number;
     description: string;
     name: string;
-    hidden: string;
 }
 interface JsonResponseBody {
     skipped: boolean;
@@ -149,16 +148,6 @@ export function CodePage() {
         logUiClick('Diff Finder', initialIntraRef.current, initialIntraRef.current);
     }, [submissionId, cid]);
 
-    // Filter out hidden tests (and keep a single summary count)
-    const visibleResults = useMemo(
-        () => json.results.filter(r => r.test.hidden !== 'True'),
-        [json.results]
-    );
-    const hiddenTestsCount = useMemo(
-        () => json.results.filter(r => r.test.hidden === 'True').length,
-        [json.results]
-    );
-
     // Helpers
     const labelFor = (r: JsonResponseBody) => (r.skipped ? 'Skipped' : r.passed ? 'Passed' : 'Failed');
 
@@ -270,7 +259,7 @@ export function CodePage() {
     // Build diff "files" for the Diff File View
     const diffFilesAll: DiffEntry[] = useMemo(() => {
         const entries: DiffEntry[] = [];
-        visibleResults.forEach((r, idx) => {
+        json.results.forEach((r, idx) => {
             const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
             const { expected, actual } = parseOutputs(rawOut);
             const title = `${r.test.name}`;
@@ -289,7 +278,7 @@ export function CodePage() {
         });
         // Prefer failed first in sidebar ordering
         return entries.sort((a, b) => Number(a.passed) - Number(b.passed) || a.test.localeCompare(b.test));
-    }, [visibleResults]);
+    }, [json.results]);
 
     // Ensure there is a selected file
     useEffect(() => {
@@ -354,10 +343,7 @@ export function CodePage() {
 
     const testRows: TestRow[] = [];
 
-    if (hiddenTestsCount > 0) {
-        testRows.push({ kind: 'info', note: `Hidden tests not shown: ${hiddenTestsCount}` });
-    }
-    visibleResults.forEach(r => {
+    json.results.forEach(r => {
         const status = labelFor(r);
         const rawOut = (r.skipped ? friendlySkipMessage() : (r.test.output || [])).join('\n');
         const { expected, actual, hadDiff } = parseOutputs(rawOut);
@@ -422,7 +408,6 @@ export function CodePage() {
                                         </tr>
                                         <tr>
                                             <td>Notes</td>
-                                            <td>Score is a weighted blend of tests and pylint; it is not a final grade.</td>
                                         </tr>
                                     </tbody>
                                 </table>

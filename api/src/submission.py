@@ -31,49 +31,59 @@ submission_api = Blueprint('submission_api', __name__)
 
 def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
     parser = Parser()
-    test=[]
-    final={}
+    test = []
+    final = {}
+
+    def sanitize_yaml_block(yaml_block: dict) -> dict:
+        new_yaml = (yaml_block or {}).copy()
+        new_yaml.pop("hidden", None)
+        return new_yaml
+
+    def parse_suite(yaml_block: dict) -> int:
+        try:
+            return int((yaml_block or {}).get("suite", 0))
+        except (TypeError, ValueError):
+            return 0
+
     for line in parser.parse_file(file_path):
-        if line.category == "test":
-            if line.yaml_block is None:
-                continue
+        if line.category != "test":
+            continue
+        if line.yaml_block is None:
+            continue
 
-            new_yaml = line.yaml_block.copy()
-            # Normalize "hidden" to "True"/"False" strings (and default to False)
-            raw_hidden = new_yaml.get("hidden", "False")
-            new_yaml["hidden"] = "True" if str(raw_hidden).strip().lower() in ("true", "1", "yes") else "False"
+        yaml_clean = sanitize_yaml_block(line.yaml_block)
 
-            # Admin/TA always see all tests
-            if role == ADMIN_ROLE:
-                new_yaml["hidden"] = "False"
+        # Levels disabled: return tests as-is
+        if not hasLVLSYSEnabled:
+            test.append({
+                'skipped': line.skip,
+                'passed': line.ok,
+                'test': yaml_clean
+            })
+            continue
 
-            # Levels disabled: just return tests as-is (hidden means actually hidden)
-            if not hasLVLSYSEnabled:
-                test.append({
-                    'skipped': line.skip,
-                    'passed': line.ok,
-                    'test': new_yaml
-                })
-                continue
+        suite_req = parse_suite(yaml_clean)
 
-            elif line.yaml_block["hidden"] == "True" and role != ADMIN_ROLE:
-                continue
-            
-            if current_level >= line.yaml_block["suite"]:
-                test.append({
-                    'skipped': line.skip,
-                    'passed': line.ok,
-                    'test': line.yaml_block
-                })
-            else:
-                new_yaml = line.yaml_block.copy()
-                new_yaml["hidden"] = "True"
-                test.append({
-                    'skipped': "",
-                    'passed': "",
-                    'test': new_yaml
-                })
-    final["results"]=test
+        if current_level >= suite_req:
+            test.append({
+                'skipped': line.skip,
+                'passed': line.ok,
+                'test': yaml_clean
+            })
+        else:
+            locked_yaml = {
+                "name": yaml_clean.get("name", ""),
+                "description": yaml_clean.get("description", ""),
+                "suite": suite_req,
+                "locked": True
+            }
+            test.append({
+                'skipped': "",
+                'passed': "",
+                'test': locked_yaml
+            })
+
+    final["results"] = test
     return json.dumps(final, sort_keys=True, indent=4)
 
 @submission_api.route('/testcaseerrors', methods=['GET'])
@@ -184,7 +194,7 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
     userids=[]
     for user in users:
         userids.append(user.Id)
-    bucket = submission_repo.get_most_recent_submission_by_project(projectid, userids)    
+    bucket = submission_repo.get_most_recent_submission_by_project(projectid, userids)
     submission_counter_dict = submission_repo.submission_counter(projectid, userids)
     user_lectures_dict = user_repo.get_user_lectures(userids, class_id)
     user_labs_dict = user_repo.get_user_labs(userids, class_id)
@@ -197,11 +207,10 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
                     user.Lastname,
                     user.Firstname,
                     user_lectures_dict[user.Id],
-                    user_labs_dict[user.Id],                      
+                    user_labs_dict[user.Id],
                     submission_counter_dict[user.Id],
                     bucket[user.Id].Time.strftime("%x %X"),
                     bucket[user.Id].IsPassing,
-                    bucket[user.Id].NumberOfPylintErrors,
                     bucket[user.Id].Id,
                     str(class_id),
                     student_grade,
@@ -211,19 +220,19 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
             else:
                 student_id = user_repo.get_StudentNumber(user.Id)
                 studentattempts[user.Id] = [
-                    user.Lastname,                   
-                    user.Firstname,                 
-                    user_lectures_dict[user.Id],    
-                    user_labs_dict[user.Id],        
-                    "N/A",                           
-                    "N/A",                          
-                    "N/A",                          
-                    "N/A",                         
-                    -1,                              
-                    str(class_id),                  
-                    "0",                             
-                    student_id,                      
-                    user.IsLocked                   
+                    user.Lastname,
+                    user.Firstname,
+                    user_lectures_dict[user.Id],
+                    user_labs_dict[user.Id],
+                    "N/A",
+                    "N/A",
+                    "N/A",
+                    "N/A",
+                    -1,
+                    str(class_id),
+                    "0",
+                    student_id,
+                    user.IsLocked
                 ]
     return make_response(json.dumps(studentattempts), HTTPStatus.OK)
 
@@ -318,7 +327,7 @@ def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Contai
     start_time = project.get(projectId)[1]
     start_date = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%S")
     current_time = datetime.now()
-    #get days passed 
+    #get days passed
     days_passed = (current_time - start_date).days
     submission_details.append(str(days_passed))
     time_until_next_submission = submission_repo.check_timeout(current_user.Id, projectId)[1]
@@ -331,9 +340,9 @@ def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Contai
     else:
         submission_details.append("None")
     submission_details.append(project.get(projectId)[0])
-    end_time_str = project.get(projectId)[2]  
+    end_time_str = project.get(projectId)[2]
     submission_details.append(end_time_str)
-    submission_details.append(str(projectId))    
+    submission_details.append(str(projectId))
     return make_response(submission_details, HTTPStatus.OK)
 
 @submission_api.route('/submitgrades', methods=['POST'])
@@ -384,7 +393,7 @@ def GetCharges(submission_repo: SubmissionRepository = Provide[Container.submiss
         }), HTTPStatus.NOT_FOUND)
     projectId = project.Id
     base_charge, reward_charge = submission_repo.get_charges(current_user.Id, class_id, projectId)
-    
+
     hours_until_recharge = 0
     minutes_until_recharge = 0
     seconds_until_recharge = 0
@@ -410,7 +419,7 @@ def ConsumeCharge(submission_repo: SubmissionRepository = Provide[Container.subm
         class_id = int(request.args.get("class_id"))
         projectId = project_repo.get_current_project_by_class(class_id).Id
         submission_repo.consume_reward_charge(current_user.Id, class_id, projectId)
-    except Exception as e:   
+    except Exception as e:
         print("Error: ", e, flush=True)
         return make_response("Error: " + str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
     return make_response("Charge Consumed", HTTPStatus.OK)

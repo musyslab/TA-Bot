@@ -39,12 +39,10 @@ class Row {
         this.Fname = ''
         this.numberOfSubmissions = 0
         this.date = ''
-        this.numberOfPylintErrors = 0
         this.isPassing = false
         this.subid = 0
         this.lecture_number = 0
         this.lab_number = 0
-        this.hidden = false
         this.classId = ''
         this.grade = 0
         this.StudentNumber = 0
@@ -56,12 +54,10 @@ class Row {
     Fname: string
     numberOfSubmissions: number
     date: string
-    numberOfPylintErrors: number
     isPassing: boolean
     subid: number
     lecture_number: number
     lab_number: number
-    hidden: boolean
     classId: string
     grade: number
     StudentNumber: number
@@ -219,14 +215,13 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                         passRaw === 'ok' ||
                         passRaw === 'success'
 
-                    row.numberOfPylintErrors = parseInt(String(student_output_data[7] ?? '0'), 10)
-                    row.subid = parseInt(String(student_output_data[8] ?? '-1'), 10)
-                    row.hidden = false
-                    row.classId = String(student_output_data[9] ?? '')
-                    row.grade = parseInt(String(student_output_data[10] ?? '0'), 10)
-                    row.StudentNumber = parseInt(String(student_output_data[11] ?? '0'), 10)
-
-                    const lockRaw = String(student_output_data[12] ?? '').toLowerCase().trim()
+                    const hasSub = String(student_output_data[7] ?? 'N/A') !== 'N/A'
+                    const off = hasSub ? 0 : 1
+                    row.subid = parseInt(String(student_output_data[7 + off] ?? '-1'), 10)
+                    row.classId = String(student_output_data[8 + off] ?? '')
+                    row.grade = parseInt(String(student_output_data[9 + off] ?? '0'), 10)
+                    row.StudentNumber = parseInt(String(student_output_data[10 + off] ?? '0'), 10)
+                    const lockRaw = String(student_output_data[11 + off] ?? '').toLowerCase().trim()
                     row.IsLocked = lockRaw === 'true' || lockRaw === '1' || lockRaw === 'locked'
 
                     rows.push(row)
@@ -759,7 +754,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                 <th className="col-lab-number">Lab</th>
                                                 <th className="col-submissions">Submissions</th>
                                                 <th className="col-date">Last Submitted</th>
-                                                <th className="col-pylint-errors">Pylint Errors</th>
                                                 <th className="col-status">Status</th>
                                                 <th className="col-view">View</th>
                                                 <th className="col-download">Download</th>
@@ -786,7 +780,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                             <td className="lab-number-cell">{row.lab_number}</td>
                                                             <td className="submissions-cell">N/A</td>
                                                             <td className="date-cell">N/A</td>
-                                                            <td className="pylint-errors-cell">N/A</td>
                                                             <td className="status-cell">N/A</td>
                                                             <td className="view-cell">N/A</td>
                                                             <td className="download-cell">N/A</td>
@@ -821,7 +814,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                         <td className="lab-number-cell">{row.lab_number}</td>
                                                         <td className="submissions-cell">{row.numberOfSubmissions}</td>
                                                         <td className="date-cell">{row.date}</td>
-                                                        <td className="pylint-errors-cell">{row.numberOfPylintErrors}</td>
                                                         <td className={row.isPassing ? 'status-cell status passed' : 'status-cell status failed'}>
                                                             {row.isPassing ? 'PASSED' : 'FAILED'}
                                                         </td>

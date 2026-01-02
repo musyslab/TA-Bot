@@ -32,7 +32,6 @@ class Testcase {
         this.description = ''
         this.input = ''
         this.output = ''
-        this.isHidden = false
     }
 
     id: number
@@ -40,7 +39,6 @@ class Testcase {
     description: string
     input: string
     output: string
-    isHidden: boolean
 }
 
 const AdminProjectManage = () => {
@@ -341,7 +339,6 @@ const AdminProjectManage = () => {
                     testcase.description = values[2]
                     testcase.input = values[3]
                     testcase.output = values[4]
-                    testcase.isHidden = !!values[5]
 
                     rows.push(testcase)
                     return testcase
@@ -353,7 +350,6 @@ const AdminProjectManage = () => {
                 testcase.description = ''
                 testcase.input = ''
                 testcase.output = ''
-                testcase.isHidden = false
 
                 rows.push(testcase)
                 setTestcases(rows)
@@ -421,15 +417,6 @@ const AdminProjectManage = () => {
         })
     }
 
-    function handleHiddenChange(testcase_id: number, checked: boolean) {
-        setModalDraft(prev => {
-            if (prev && prev.id === testcase_id) {
-                return { ...prev, isHidden: !prev.isHidden }
-            }
-            return prev
-        })
-    }
-
     function handleInputChange(testcase_id: number, input_data: string) {
         setModalDraft(prev => {
             if (prev && prev.id === testcase_id) return { ...prev, input: input_data }
@@ -481,7 +468,6 @@ const AdminProjectManage = () => {
                     testcase.description = values[2]
                     testcase.input = values[3]
                     testcase.output = values[4]
-                    testcase.isHidden = !!values[5]
                     rows.push(testcase)
 
                     return testcase
@@ -493,7 +479,6 @@ const AdminProjectManage = () => {
                 testcase.description = ''
                 testcase.input = ''
                 testcase.output = ''
-                testcase.isHidden = false
 
                 rows.push(testcase)
                 setTestcases(rows)
@@ -665,7 +650,6 @@ const AdminProjectManage = () => {
             t.description = ''
             t.input = ''
             t.output = ''
-            t.isHidden = false
             setModalDraft(t)
         } else {
             const source = testcases.find(tc => tc.id === TestCaseId)
@@ -829,7 +813,6 @@ const AdminProjectManage = () => {
         formData.append('class_id', classId.toString())
         formData.append('input', modalDraft.input.toString())
         formData.append('output', modalDraft.output.toString())
-        formData.append('isHidden', modalDraft.isHidden.toString())
         formData.append('description', modalDraft.description.toString())
 
         if (modalDraft.name === '' || modalDraft.input === '' || modalDraft.description === '') {
@@ -869,7 +852,6 @@ const AdminProjectManage = () => {
                     testcase.description = values[2]
                     testcase.input = values[3]
                     testcase.output = values[4]
-                    testcase.isHidden = !!values[5]
                     rows.push(testcase)
                     return testcase
                 })
@@ -1657,17 +1639,6 @@ const AdminProjectManage = () => {
                                                     />
                                                 </div>
                                             </div>
-                                        </div>
-
-                                        <div className="form-field modal-checkbox">
-                                            <label>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedTestCase?.isHidden || false}
-                                                    onChange={() => handleHiddenChange(selectedTestCaseId!, true)}
-                                                />
-                                                Hidden
-                                            </label>
                                         </div>
 
                                         <div className="modal-action-buttons">

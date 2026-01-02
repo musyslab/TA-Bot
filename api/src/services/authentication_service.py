@@ -12,11 +12,6 @@ class AuthenticationService(ABC):
     def login(self, username: str, password: str) -> bool:
         """This is a prototype for our actual method called Login found in the class PAMAuthenticationService"""
         pass
-    @abstractmethod
-    def placeholder(self, username: str, password: str) -> bool:
-        """this class exists so pylint isnt annoyed"""
-        pass
-
 
 class PAMAuthenticationService(AuthenticationService):
     """This class utalizes the PAM library to authenticate users"""
@@ -33,6 +28,3 @@ class PAMAuthenticationService(AuthenticationService):
         response = requests.post(url, json = data)
         response_json = response.json()
         return response_json['success']
-    def placeholder(self, username: str, password: str) -> bool:
-        """this class exists so pylint isnt annoyed"""
-        pass
