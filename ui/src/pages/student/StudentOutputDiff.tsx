@@ -439,7 +439,7 @@ export function StudentOutputDiff() {
                 showReviewButton={false}
             />
 
-            <div className="tests-banner">Diff View</div>
+            <div className="tests-banner">Submission Output Viewer</div>
 
             <section className="diff-view no-user-select" {...copyBlockHandlers}>
                 <aside className="diff-sidebar">

@@ -163,6 +163,25 @@ class ProjectRepository():
         )
 
         add_path = getattr(project, "AdditionalFilePath", "") or ""
+        # Expand stored names to absolute paths under the teacher project folder for grade.py/piston.
+        try:
+            base_dir = project_base if os.path.isdir(project_base) else os.path.dirname(project_base)
+            raw = (add_path or "").strip()
+            if raw.startswith("[") or raw.startswith("{"):
+                lst = json.loads(raw)
+            else:
+                lst = [raw] if raw else []
+            abs_list = []
+            for p in (lst or []):
+                if not p:
+                    continue
+                if os.path.isabs(p):
+                    abs_list.append(p)
+                else:
+                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
+            add_path = json.dumps(abs_list)
+        except Exception:
+            pass
         #   grade.py ADMIN <language> <input_text> <solution_path> [additional_files_json]
         result = subprocess.run(
             [
@@ -219,6 +238,25 @@ class ProjectRepository():
             add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
         except Exception:
             add_list = []
+
+        # Expand stored names to absolute paths under the teacher solution folder (needed by piston).
+        try:
+            base_dir = ""
+            if proj and getattr(proj, "solutionpath", ""):
+                sp = getattr(proj, "solutionpath", "")
+                base_dir = sp if os.path.isdir(sp) else os.path.dirname(sp)
+            abs_list = []
+            for p in (add_list or []):
+                if not p:
+                    continue
+                if os.path.isabs(p):
+                    abs_list.append(p)
+                else:
+                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
+            add_list = abs_list
+        except Exception:
+            pass
+
         tests = Testcases.query.filter(Testcases.ProjectId == project_id).all()
         for test in tests:
             testcase_holder[test.Id] = [

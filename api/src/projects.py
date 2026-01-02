@@ -397,18 +397,18 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     assignmentdesc_path = os.path.join(path, ad_name)
     ad.save(assignmentdesc_path)
 
-    # Multiple additional files (preserve original filenames; no renaming)
-    add_paths = []
+    # Multiple additional files: save into version folder, but store only basenames in DB (short)
+    add_names = []
     for add_up in request.files.getlist('additionalFiles'):
         if add_up and add_up.filename:
             orig_name = safe_name(add_up.filename)
             dst = os.path.join(path, orig_name)
             add_up.save(dst)
-            add_paths.append(dst)
+            add_names.append(orig_name)
     selected_path = path
     new_project_id = project_repo.create_project(
         name, start_date, end_date, language, class_id,
-        selected_path, assignmentdesc_path, json.dumps(add_paths)
+        selected_path, assignmentdesc_path, json.dumps(add_names)
     )
 
     return make_response(str(new_project_id), HTTPStatus.OK)
@@ -488,7 +488,19 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
         try:
             seed_add_paths = []
             existing_add = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
-            seed_add_paths = json.loads(existing_add) if (existing_add or "").startswith('[') else ([existing_add] if existing_add else [])
+            existing_list = json.loads(existing_add) if (existing_add or "").startswith('[') else ([existing_add] if existing_add else [])
+            # existing_list may be basenames or absolute paths. Resolve for seeding when not using seed_from_dir.
+            legacy_base = None
+            if existing_path:
+                legacy_base = existing_path if os.path.isdir(existing_path) else os.path.dirname(existing_path)
+            legacy_base = legacy_base or proj_dir
+            for p in (existing_list or []):
+                if not p:
+                    continue
+                if os.path.isabs(p):
+                    seed_add_paths.append(p)
+                else:
+                    seed_add_paths.append(os.path.join(legacy_base, os.path.basename(p)))
         except Exception:
             seed_add_paths = []
         seed_version_dir(
@@ -532,41 +544,35 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
         assignmentdesc_path = os.path.join(path, ad_name)
         ad.save(assignmentdesc_path)
 
-    # Multiple additional files: keep the list scoped to this version folder
+    # Multiple additional files: store only basenames in DB; operate on files inside `path`.
     existing_add = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
     try:
-        add_paths = json.loads(existing_add) if (existing_add or "").startswith('[') else ([existing_add] if existing_add else [])
+        add_names = json.loads(existing_add) if (existing_add or "").startswith('[') else ([existing_add] if existing_add else [])
     except Exception:
-        add_paths = []
-    # If we minted a new version dir, remap existing_add paths into this folder by basename
+        add_names = []
+    add_names = [os.path.basename(p) for p in (add_names or []) if p]
+    # If we minted a new version dir, keep only names that exist in the new folder.
     if needs_new_version:
-        remapped = []
-        for p in add_paths:
-            bn = os.path.basename(p)
-            cand = os.path.join(path, bn)
-            if os.path.exists(cand):
-                remapped.append(cand)
-        add_paths = remapped
+        add_names = [n for n in add_names if os.path.exists(os.path.join(path, n))]
     additional_file_changed = False
     # Remove selected files (match by basename)
     if to_remove:
         keep = []
-        for p in add_paths:
-            bn = os.path.basename(p)
-            if bn in to_remove:
+        for n in add_names:
+            if n in to_remove:
                 try:
-                    os.remove(p)
+                    os.remove(os.path.join(path, n))
                 except Exception:
                     pass
                 additional_file_changed = True
             else:
-                keep.append(p)
-        add_paths = keep
+                keep.append(n)
+        add_names = keep
     # Clear all
-    if clear_add and add_paths:
-        for p in add_paths:
+    if clear_add and add_names:
+        for n in add_names:
             try:
-                os.remove(p)
+                os.remove(os.path.join(path, n))
             except Exception:
                 pass
         add_paths = []
@@ -577,7 +583,7 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
             orig_name = safe_name(add_up.filename)
             dst = os.path.join(path, orig_name)
             add_up.save(dst)
-            add_paths.append(dst)
+            add_names.append(orig_name)
             additional_file_changed = True
 
     # Always point the project at the newest version directory when available
@@ -587,7 +593,7 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
 
     project_repo.edit_project(
         name, start_date, end_date, language, pid,
-        path, assignmentdesc_path, json.dumps(add_paths)
+        path, assignmentdesc_path, json.dumps(add_names)
     )
 
     # Recompute testcase outputs **against the path we just wrote**, so we don't depend on
@@ -621,13 +627,35 @@ def run_solution_for_input(solution_root: str, language: str, input_text: str, p
     if not solution_root or not os.path.exists(solution_root):
         return ""
     script = "/tabot-files/grading-scripts/grade.py"
+
+    # Expand DB-stored additional file names to absolute paths under solution_root.
+    add_arg = additional_file_path or ""
+    try:
+        base_dir = solution_root if os.path.isdir(solution_root) else os.path.dirname(solution_root)
+        raw = add_arg.strip() if isinstance(add_arg, str) else ""
+        if raw.startswith("[") or raw.startswith("{"):
+            lst = json.loads(raw)
+        else:
+            lst = [raw] if raw else []
+        abs_list = []
+        for p in (lst or []):
+            if not p:
+                continue
+            if os.path.isabs(p):
+                abs_list.append(p)
+            else:
+                abs_list.append(os.path.join(base_dir, os.path.basename(p)))
+        add_arg = json.dumps(abs_list)
+    except Exception:
+        add_arg = additional_file_path or ""
+
     args = [
         "python", script,
         "ADMIN",              # student_name triggers admin path
         language or "python", # language as tabot expects
         input_text or "",     # goes to admin_run(user_input)
         solution_root,        # file or directory
-        additional_file_path or "",  # additional_file_path
+        add_arg,
         str(project_id or 0),
         str(class_id or 0),
     ]
