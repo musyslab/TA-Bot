@@ -33,11 +33,6 @@ interface ErrorDef {
     points: number;
 }
 
-interface BackendError{
-    line: number;
-    errorId: string;
-}
-
 interface ObservedError {
     errorId: string;
 }
@@ -180,78 +175,8 @@ const GradingPage = () => {
                 }
             })
             .catch(err => console.log(err));
-        axios.get(
-            `${import.meta.env.VITE_API_URL}/submissions/get-grading/${submissionId}`,
-            {
-                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
-            }
-        )
-        .then(response => {
-            const { errors, grade } = response.data;
-
-            // Update the Grade
-            setGrade(grade);
-
-            // Convert format from db to ui
-            // [{line: 2, errorId: "ERROR1"}] to { "2": [{errorId: "ERROR1"}] }
-            
-            const formattedErrors: { [key: string]: { errorId: string }[] } = {};     
-
-            errors.forEach((item:BackendError) => {
-                const lineKey = item.line.toString();
-                
-                if (!formattedErrors[lineKey]) {
-                    formattedErrors[lineKey] = [];
-                }
-
-                formattedErrors[lineKey].push({ errorId: item.errorId });
-            });
-
-            // 3. Update the Redlines State
-            setObservedErrors(formattedErrors);
-        })
-        .catch(err => console.error("Could not load saved grading:", err));
     }, [submissionId, cid, pid]);
 
-    // changes the button state to indicate whether save was successful
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-
-    const handleSave = () => {
-        
-        setSaveStatus('saving');
-        // converts { "10": [{errorId: "ERROR1"}] }  into  [{ line: 10, errorId: "ERROR1" }]
-        const errorList = Object.entries(observedErrors).flatMap(([line, errors]) => 
-            errors.map(err => ({
-                line: parseInt(line), 
-                errorId: err.errorId
-            }))
-        );
-
-        // sends data to backend
-        axios.post(
-            `${import.meta.env.VITE_API_URL}/submissions/save-grading`, 
-            {
-                submissionId: submissionId, 
-                grade: grade,                     
-                errors: errorList
-            },
-            {
-                headers: { 
-                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` 
-                }
-            }
-        )
-        .then(response => {
-            
-            setSaveStatus('saved');
-            console.log(response.data);
-        })
-        .catch(error => {
-            
-            console.error("Failed to save:", error);
-            setSaveStatus('error');
-        });
-    };
     // Log initial UI state on first load (and when navigating to a different submission/class)
     useEffect(() => {
         const key = `${submissionId}:${cid}`;
@@ -517,8 +442,6 @@ const GradingPage = () => {
                 line]: [...errors, { errorId }],
             };
         });
-        setGrade(prev => prev - ERRORS[errorId].points);
-        setSaveStatus('idle');
     }
 
     function removeObservedError(line: number, errorId: string) {
@@ -533,8 +456,6 @@ const GradingPage = () => {
 
             return { ...prev, [line]: remaining };
         });
-        setGrade(prev => prev + ERRORS[errorId].points);
-        setSaveStatus('idle');
     }
 
 
@@ -844,10 +765,10 @@ const GradingPage = () => {
                                     return (
                                         <li key={lineNo} className="error-line">
                                             {errors.length > 0 && (
-                                                <div className="error-block error-tag">
-                                                    <div className="error-text">{ERRORS[errors[0].errorId].label}</div>
-                                                    <div className="error-points">-{ERRORS[errors[0].errorId].points}</div>
-                                                    <button className="error-close"
+                                                <div class="error-block error-tag">
+                                                    <div class="error-text">{ERRORS[errors[0].errorId].label}</div>
+                                                    <div class="error-points">-{ERRORS[errors[0].errorId].points}</div>
+                                                    <button class="error-close"
                                                         onClick={() => removeObservedError(lineNo, errors[0].errorId)}
                                                     >X</button>
                                                 </div>
@@ -867,57 +788,56 @@ const GradingPage = () => {
                     <div className="error-menu" style={{ top: errorMenu.y, left: errorMenu.x, }}>
                         <div className="menu-line">Line: {errorMenu.line}</div>
                         
-                        <div className="menu-actions">
-                            <div className="menu-add"
-                                onMouseEnter={() => setShowSubMenu(true)}
-                                onMouseLeave={() => setShowSubMenu(false)}
+                        <div className="menu-add"
+                            onMouseEnter={() => setShowSubMenu(true)}
+                            onMouseLeave={() => setShowSubMenu(false)}
+                        >
+                            <button className="menu-add-button">Add Error &#9656;</button>
+                            {/* Sub menu */}
+                            {showSubMenu && (
+                                <div className="sub-menu">
+                                    {Object.values(ERRORS).map((err) => (
+                                        <button
+                                            key={err.id}
+                                            onClick={() => {
+                                                addObservedError(errorMenu.line, err.id);
+                                                setShowSubMenu(false);
+                                                hideErrorMenu();
+                                            }}
+                                        >
+                                            {err.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        {/* Remove Menu */}
+                        {!!observedErrors[errorMenu.line]?.length && (
+                            <div className="remove-error"
+                                onMouseEnter={() => setShowRemoveMenu(true)}
+                                onMouseLeave={() => setShowRemoveMenu(false)}
                             >
-                                <button className="menu-add-button">Add Error &#9656;</button>
-                                {/* Sub menu */}
-                                {showSubMenu && (
-                                    <div className="sub-menu">
-                                        {Object.values(ERRORS).map((err) => (
-                                            <button className="add-menu-item"
-                                                key={err.id}
+                                <button className="remove-button">Remove Error &#9656;</button>
+                                {showRemoveMenu && (
+                                    <div className="remove-menu">
+                                        {observedErrors[errorMenu.line].map((error, idx) => (
+                                            <button
+                                                key={idx}
+                                                className="remove-menu-item"
                                                 onClick={() => {
-                                                    addObservedError(errorMenu.line, err.id);
-                                                    setShowSubMenu(false);
+                                                    removeObservedError(errorMenu.line, error.errorId);
+                                                    setShowRemoveMenu(false);
                                                     hideErrorMenu();
                                                 }}
                                             >
-                                                {err.label}
+                                                {ERRORS[error.errorId].label}
                                             </button>
                                         ))}
                                     </div>
                                 )}
                             </div>
-                            {/* Remove Menu */}
-                            {!!observedErrors[errorMenu.line]?.length && (
-                                <div className="remove-error"
-                                    onMouseEnter={() => setShowRemoveMenu(true)}
-                                    onMouseLeave={() => setShowRemoveMenu(false)}
-                                >
-                                    <button className="remove-button">Remove Error &#9656;</button>
-                                    {showRemoveMenu && (
-                                        <div className="remove-menu">
-                                            {observedErrors[errorMenu.line].map((error, idx) => (
-                                                <button
-                                                    key={idx}
-                                                    className="remove-menu-item"
-                                                    onClick={() => {
-                                                        removeObservedError(errorMenu.line, error.errorId);
-                                                        setShowRemoveMenu(false);
-                                                        hideErrorMenu();
-                                                    }}
-                                                >
-                                                    {ERRORS[error.errorId].label}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
+                        )}
+
                         <button className="menu-close" onClick={hideErrorMenu}>Close</button>
                     </div>
                 )}
@@ -942,26 +862,11 @@ const GradingPage = () => {
                     ))}
                 </ul>
 
-                {/* Raw Data View (good for checking technical details) */}
-                <pre>
-                    {JSON.stringify(observedErrors, null, 2)}
-                </pre>
+                {/* Raw Data View */}
+                <pre>{JSON.stringify(observedErrors, null, 2)}</pre>
             </div>
-            <div>
-                <h3>Grade: {grade}</h3>
-            </div>
-            <button 
-                className={`save-grade ${saveStatus}`} // Adds class 'success' or 'saving'
-                onClick={handleSave}
-                disabled={saveStatus === 'saving'} // Prevent double-clicks
-            >
-                {saveStatus === 'idle' && "Save"}
-                {saveStatus === 'saving' && "Saving..."}
-                {saveStatus === 'saved' && "✓ Saved!"}
-                {saveStatus === 'error' && "⚠ Error"}
-            </button>
+
         </div>
-        
     );
 }
 
