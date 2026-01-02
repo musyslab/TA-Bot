@@ -267,3 +267,4 @@ ui/package-lock.json
 ui/yarn.lock
 .env.production
 ta-bot/grading-scripts/id_rsa
+*.BACKUP
