@@ -41,9 +41,10 @@ from urllib.parse import quote
 projects_api = Blueprint('projects_api', __name__)
 
 ALLOWED_SOURCE_EXTS = {'.py', '.c', '.java', '.rkt'}
+TS_DIR_RE = re.compile(r"^\d{8}_\d{6}$")
 
 def project_root() -> str:
-    return "/ta-bot/project-files"
+    return "/tabot-files/project-files"
 
 def teacher_root() -> str:
     return os.path.join(project_root(), "teacher-files")
@@ -54,6 +55,45 @@ def student_root() -> str:
 def project_dir(base_proj: str, ts: str) -> str:
     # teacher-files/<YYYYMMDD_HHMMSS>__<projectname>
     return os.path.join(teacher_root(), f"{ts}__{base_proj}")
+
+def is_ts_dir(name: str) -> bool:
+    return bool(TS_DIR_RE.match(name or ""))
+
+def version_dir(proj_dir_path: str, ts: str) -> str:
+    # teacher-files/<projecttimestamp__projectname>/<submissiontimestamp>/
+    return os.path.join(proj_dir_path, ts)
+
+def pick_latest_version_dir(proj_dir_path: str) -> str | None:
+    try:
+        kids = [d for d in os.listdir(proj_dir_path) if is_ts_dir(d) and os.path.isdir(os.path.join(proj_dir_path, d))]
+        if kids:
+            return os.path.join(proj_dir_path, max(kids))
+    except Exception:
+        pass
+    return None
+
+def seed_version_dir(dest_dir: str, *, seed_from_dir: str | None, seed_solution_path: str | None, seed_desc_path: str | None, seed_add_paths: list[str]):
+    os.makedirs(dest_dir, exist_ok=True)
+    # Prefer copying an existing version directory (new layout)
+    if seed_from_dir and os.path.isdir(seed_from_dir):
+        shutil.copytree(seed_from_dir, dest_dir, dirs_exist_ok=True)
+        return
+    # Legacy seeding: copy solution file/dir sources
+    if seed_solution_path and os.path.exists(seed_solution_path):
+        if os.path.isdir(seed_solution_path):
+            for fn in os.listdir(seed_solution_path):
+                src = os.path.join(seed_solution_path, fn)
+                if os.path.isfile(src) and os.path.splitext(fn)[1].lower() in (ALLOWED_SOURCE_EXTS | {".h", ".hpp", ".cpp"}):
+                    shutil.copy2(src, os.path.join(dest_dir, fn))
+        else:
+            shutil.copy2(seed_solution_path, os.path.join(dest_dir, os.path.basename(seed_solution_path)))
+    # Copy assignment description
+    if seed_desc_path and os.path.isfile(seed_desc_path):
+        shutil.copy2(seed_desc_path, os.path.join(dest_dir, os.path.basename(seed_desc_path)))
+    # Copy additional files
+    for p in (seed_add_paths or []):
+        if p and os.path.isfile(p):
+            shutil.copy2(p, os.path.join(dest_dir, os.path.basename(p)))
 
 def extract_ts(name: str, base_proj: str) -> str:
     """
@@ -341,9 +381,8 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     proj_dir_path = project_dir(base_proj, ts)
     os.makedirs(proj_dir_path, exist_ok=True)
 
-    # Save multi-file solution into a timestamped solution directory
-    sol_dir_name = f"{ts}__solution__{base_proj}"
-    path = os.path.join(proj_dir_path, sol_dir_name)
+    # Save solution + description + additional into a timestamped version directory
+    path = version_dir(proj_dir_path, ts)
     os.makedirs(path, exist_ok=True)
     for up in solution_uploads:
         orig = safe_name(up.filename)
@@ -353,13 +392,9 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
         dst = os.path.join(path, orig)
         up.save(dst)
 
-    # Save assignment description using the same naming scheme as solutions:
-    # "{ts}__{file}__{base_proj}[.ext]"
     ad = request.files['assignmentdesc']
-    ad_base = os.path.splitext(safe_name(ad.filename or "assignment"))[0]
-    ad_ext = os.path.splitext(ad.filename or "")[1] or ".pdf"
-    ad_name = f"{ts}__{ad_base}__{base_proj}{ad_ext}"
-    assignmentdesc_path = os.path.join(proj_dir_path, ad_name)
+    ad_name = safe_name(ad.filename or "assignment.pdf")
+    assignmentdesc_path = os.path.join(path, ad_name)
     ad.save(assignmentdesc_path)
 
     # Multiple additional files (preserve original filenames; no renaming)
@@ -367,10 +402,9 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     for add_up in request.files.getlist('additionalFiles'):
         if add_up and add_up.filename:
             orig_name = safe_name(add_up.filename)
-            dst = os.path.join(proj_dir_path, orig_name)
+            dst = os.path.join(path, orig_name)
             add_up.save(dst)
             add_paths.append(dst)
-    # Use the just-uploaded path directly; avoid directory scan on create
     selected_path = path
     new_project_id = project_repo.create_project(
         name, start_date, end_date, language, class_id,
@@ -410,6 +444,8 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     ts = ts_str()
     existing_path = project_repo.get_project_path(pid)
     if existing_path:
+        # In the new layout, existing_path is a version directory:
+        # teacher-files/<proj_ts>__<base_proj>/<version_ts>
         proj_dir = os.path.dirname(existing_path)
         # Derive base_proj from folder name if not set: "<timestamp>__<base_proj>"
         if not base_proj:
@@ -428,14 +464,58 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     existing_proj = project_repo.get_selected_project(pid)
     add_path = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
 
-    # If new solution file(s) were uploaded, save as a new timestamped solution directory
+    # Determine whether we need to mint a new version directory
     solution_uploads = request.files.getlist('solutionFiles')
     solution_uploads = [f for f in solution_uploads if f and f.filename]
     solution_changed = False
+    ad = request.files.get('assignmentdesc')
+    desc_changed = bool(ad and ad.filename)
+    remove_add = request.form.get('removeAdditionalFiles', '').strip()
+    clear_add = (request.form.get('clearAdditionalFiles', '').strip().lower() == 'true')
+    new_add_uploads = [f for f in request.files.getlist('additionalFiles') if f and f.filename]
+    try:
+        to_remove = json.loads(remove_add) if remove_add else []
+    except Exception:
+        to_remove = []
+    additional_ops = bool(clear_add or to_remove or new_add_uploads)
+    needs_new_version = bool(solution_uploads or desc_changed or additional_ops)
+
+    # Seed a new version folder so history is preserved and teacher layout is consistent
+    current_version_dir = existing_path if (existing_path and os.path.isdir(existing_path) and is_ts_dir(os.path.basename(existing_path))) else None
+    if needs_new_version:
+        new_version = version_dir(proj_dir, ts)
+        # Seed from current version directory when available; otherwise seed from legacy paths
+        try:
+            seed_add_paths = []
+            existing_add = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
+            seed_add_paths = json.loads(existing_add) if (existing_add or "").startswith('[') else ([existing_add] if existing_add else [])
+        except Exception:
+            seed_add_paths = []
+        seed_version_dir(
+            new_version,
+            seed_from_dir=current_version_dir,
+            seed_solution_path=existing_path,
+            seed_desc_path=assignmentdesc_path,
+            seed_add_paths=seed_add_paths,
+        )
+        path = new_version
+        # After seeding, rewrite assignmentdesc_path into this version folder if it existed
+        if assignmentdesc_path:
+            bn = os.path.basename(assignmentdesc_path)
+            cand = os.path.join(path, bn)
+            if os.path.exists(cand):
+                assignmentdesc_path = cand
+
+    # If new solution file(s) were uploaded, replace solution sources inside the current version folder
     if solution_uploads:
-        sol_dir_name = f"{ts}__solution__{base_proj}"
-        path = os.path.join(proj_dir, sol_dir_name)
-        os.makedirs(path, exist_ok=True)
+        # Remove old source files only in this (new) version directory
+        try:
+            for fn in os.listdir(path):
+                full = os.path.join(path, fn)
+                if os.path.isfile(full) and os.path.splitext(fn)[1].lower() in ALLOWED_SOURCE_EXTS:
+                    os.remove(full)
+        except Exception:
+            pass
         for up in solution_uploads:
             orig = safe_name(up.filename)
             ext = os.path.splitext(orig)[1].lower()
@@ -443,29 +523,30 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
                 return make_response({'message': f'Unsupported file type: {ext}'}, HTTPStatus.BAD_REQUEST)
             dst = os.path.join(path, orig)
             up.save(dst)
-        # Note: we DO NOT delete the prior directory; this preserves history.
         solution_changed = True
 
-    # If a new assignment description was uploaded, save with a unique name
+    # If a new assignment description was uploaded, save into the version folder
     ad = request.files.get('assignmentdesc')
     if ad and ad.filename:
-        ad_base = os.path.splitext(safe_name(ad.filename or "assignment"))[0]
-        ad_ext = os.path.splitext(ad.filename or "")[1] or ".pdf"
-        assignmentdesc_path = os.path.join(proj_dir, f"{ts}__{ad_base}__{base_proj}{ad_ext}")
+        ad_name = safe_name(ad.filename or "assignment.pdf")
+        assignmentdesc_path = os.path.join(path, ad_name)
         ad.save(assignmentdesc_path)
 
-    # Multiple additional files: load current list, remove/clear, then append new uploads
+    # Multiple additional files: keep the list scoped to this version folder
     existing_add = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
     try:
         add_paths = json.loads(existing_add) if (existing_add or "").startswith('[') else ([existing_add] if existing_add else [])
     except Exception:
         add_paths = []
-    clear_add = (request.form.get('clearAdditionalFiles', '').strip().lower() == 'true')
-    remove_add = request.form.get('removeAdditionalFiles', '').strip()
-    try:
-        to_remove = json.loads(remove_add) if remove_add else []
-    except Exception:
-        to_remove = []
+    # If we minted a new version dir, remap existing_add paths into this folder by basename
+    if needs_new_version:
+        remapped = []
+        for p in add_paths:
+            bn = os.path.basename(p)
+            cand = os.path.join(path, bn)
+            if os.path.exists(cand):
+                remapped.append(cand)
+        add_paths = remapped
     additional_file_changed = False
     # Remove selected files (match by basename)
     if to_remove:
@@ -491,18 +572,18 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
         add_paths = []
         additional_file_changed = True
     # Append newly uploaded additional files
-    for add_up in request.files.getlist('additionalFiles'):
+    for add_up in new_add_uploads:
         if add_up and add_up.filename:
             orig_name = safe_name(add_up.filename)
-            dst = os.path.join(proj_dir, orig_name)
+            dst = os.path.join(path, orig_name)
             add_up.save(dst)
             add_paths.append(dst)
             additional_file_changed = True
 
-    # Always point the project at the newest solution inside its folder
-    latest = pick_latest_solution(proj_dir, base_proj)
-    if latest:
-        path = latest
+    # Always point the project at the newest version directory when available
+    latest_version = pick_latest_version_dir(proj_dir)
+    if latest_version:
+        path = latest_version
 
     project_repo.edit_project(
         name, start_date, end_date, language, pid,
@@ -534,12 +615,12 @@ def has_allowed_ext(path: str) -> bool:
 
 def run_solution_for_input(solution_root: str, language: str, input_text: str, project_id: int, class_id: int, additional_file_path: str = "") -> str:
     """
-    Execute code strictly via /ta-bot/grading-scripts/tabot.py (ADMIN path).
+    Execute code strictly via /tabot-files/grading-scripts/grade.py (ADMIN path).
     Returns stdout (or stderr) with normalized newlines, or "" on failure.
     """
     if not solution_root or not os.path.exists(solution_root):
         return ""
-    script = "/ta-bot/grading-scripts/tabot.py"
+    script = "/tabot-files/grading-scripts/grade.py"
     args = [
         "python", script,
         "ADMIN",              # student_name triggers admin path
@@ -571,10 +652,10 @@ def load_tabot_module():
     except Exception:
         pass
 
-    grading_dir = "/ta-bot/grading-scripts"
-    grading_path = os.path.join(grading_dir, "tabot.py")
+    grading_dir = "/tabot-files/grading-scripts"
+    grading_path = os.path.join(grading_dir, "grade.py")
 
-    spec = importlib.util.spec_from_file_location("tabot", grading_path)
+    spec = importlib.util.spec_from_file_location("tabot-files", grading_path)
     if not spec or not spec.loader:
         raise ImportError(f"Cannot load spec for {grading_path}")
 
@@ -878,23 +959,6 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
         new_projects.append(ProjectJson(proj.Id, proj.Name, proj.Start.strftime("%x %X"), proj.End.strftime("%x %X"), thisdic[proj.Id]).toJson())
     return jsonify(new_projects)
 
-@projects_api.route('/delete_project', methods=['POST', 'DELETE'])
-@jwt_required()
-@inject
-def delete_project(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
-    project_id = request.args.get('id')
-    
-    project_repo.wipe_submissions(project_id)
-    
-    project_repo.delete_project(project_id)
-    
-    return make_response("Project reset", HTTPStatus.OK)
-
 @projects_api.route('/getAssignmentDescription', methods=['GET'])
 @jwt_required()
 @inject
@@ -951,75 +1015,18 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
     if user_id in submissions:
         student_code = submission_repo.read_code_file(submissions[user_id].CodeFilepath)
         student_output = submission_repo.read_output_file(submissions[user_id].OutputFilepath)
-
-        current_test = None
-        in_test = False
-        in_diag = False
-        in_output = False
-        output_lines: list[str] = []
-
-        Q = r"([^']*(?:''[^']*)*)"
-        name_re = re.compile(rf"name:\s*'{Q}'")
-        output_item_re = re.compile(rf"^-\s*'{Q}'\s*$")
-
-        for raw_line in student_output.splitlines():
-            line = raw_line.rstrip("\r\n")
-            s = line.strip()
-
-            if s.startswith("TAP version"):
-                continue
-
-            if s.startswith("ok") or s.startswith("not ok"):
-                if in_test and current_test and in_output:
-                    current_test['output'] = output_lines[:]
-                    test_info.append(current_test)
-
-                in_test = True
-                in_diag = False
-                in_output = False
-                output_lines = []
-                current_test = {
-                    'name': None,
-                    'passed': s.startswith('ok'),
-                    'State': s.startswith('ok'),  
-                    'output': []  
-                }
-                continue
-
-            if not in_test:
-                continue
-
-            if s == '---':
-                in_diag = True
-                continue
-            if s == '...':
-                if current_test is not None:
-                    current_test['output'] = output_lines[:]
-                    test_info.append(current_test)
-                in_test = False
-                in_diag = False
-                in_output = False
-                output_lines = []
-                current_test = None
-                continue
-
-            if not in_diag:
-                continue
-
-            if not in_output:
-                m = name_re.search(s)
-                if m and current_test is not None:
-                    current_test['name'] = m.group(1).replace("''", "'")
-                    continue
-                if s.startswith('output:'):
-                    in_output = True
-                    output_lines = []
-                    continue
-            else:
-                m = output_item_re.match(s)
-                if m:
-                    item = m.group(1).replace("''", "'")
-                    output_lines.append(item)
+        try:
+            payload = json.loads(student_output) if student_output else {}
+        except Exception:
+            payload = {}
+        for r in (payload or {}).get("results", []):
+            test_info.append({
+                "name": (r or {}).get("name", ""),
+                "passed": bool((r or {}).get("passed", False)),
+                "State": bool((r or {}).get("passed", False)),
+                "shortDiff": (r or {}).get("shortDiff", ""),
+                "longDiff": (r or {}).get("longDiff", ""),
+            })
 
         grading_data[user_id] = [student_code, test_info]
     else:

@@ -24,8 +24,8 @@ def create_app():
     app.container = container
     container.wire(modules=[classes, auth, projects, submission, upload, timeout_service])
     
-    TEACHER_DIR = "/ta-bot/project-files/teacher-files"
-    STUDENT_DIR = "/ta-bot/project-files/student-files"
+    TEACHER_DIR = "/tabot-files/project-files/teacher-files"
+    STUDENT_DIR = "/tabot-files/project-files/student-files"
     os.makedirs(TEACHER_DIR, exist_ok=True)
     os.makedirs(STUDENT_DIR, exist_ok=True)
     app.config.update({
@@ -40,7 +40,6 @@ def create_app():
     )
         
     # App configuration
-    app.config['TABOT_PATH'] = os.getenv('TABOT_DIR') + '/tabot.sh'
     app.config["JWT_SECRET_KEY"] = "ob1L04WeQ1U0H5Kiybk9rMoQigVhoGJCKBxC6KxF85G89vAK3L903I073JXQ"
     app.config["MAX_FAILED_LOGINS"] = 5
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1000 * 1000

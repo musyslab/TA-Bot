@@ -30,12 +30,12 @@ services:
       DB_NAME: "autota"
       DB_PORT: "3306"
       FLASK_DEBUG: "True"
-      TABOT_DIR: "/ta-bot"
+      TABOT_DIR: "/tabot-files"
     ports:
       - "5000:5000"
     volumes:
       - "./api:/app"
-      - "./ta-bot:/ta-bot"
+      - "./tabot-files:/tabot-files"
     depends_on:
       db:
         condition: service_healthy

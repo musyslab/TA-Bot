@@ -25,11 +25,21 @@ from dependency_injector.wiring import inject, Provide
 from container import Container
 from urllib.parse import unquote
 
-ui_clicks_log = "/ta-bot/project-files/code_view_clicks.log"
+ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
 submission_api = Blueprint('submission_api', __name__)
 
 def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
+    # New grader writes JSON directly (testcases.json). If so, pass it through.
+    try:
+        if str(file_path or "").lower().endswith(".json"):
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                obj = json.load(f) or {}
+            return json.dumps(obj, sort_keys=True, indent=4)
+    except Exception:
+        # Fall back to TAP parsing below for legacy outputs
+        pass
+
     parser = Parser()
     test = []
     final = {}

@@ -155,20 +155,20 @@ class ProjectRepository():
         project = Projects.query.filter(Projects.Id == project_id).first()
         teacher_base = current_app.config["TEACHER_FILES_DIR"]
         # Ensure solutionpath points to the teacher project folder
-        project_base = project.solutionpath  # e.g., /ta-bot/project-files/teacher-files/Project_XYZ
+        project_base = project.solutionpath  
 
         # Run grading-script to compute default output if none provided
         grading_script = os.path.join(
-            current_app.root_path, "..", "ta-bot", "grading-scripts", "tabot.py"
+            current_app.root_path, "..", "tabot-files", "grading-scripts", "grade.py"
         )
 
         add_path = getattr(project, "AdditionalFilePath", "") or ""
+        #   grade.py ADMIN <language> <input_text> <solution_path> [additional_files_json]
         result = subprocess.run(
             [
                 "python",
                 grading_script,
                 "ADMIN",
-                str(-1),
                 project.Language,
                 input_data,
                 project_base,
@@ -240,25 +240,6 @@ class ProjectRepository():
         for submission in submissions:
             db.session.delete(submission)
         db.session.commit()
-
-    def delete_project(self, project_id:int):
-        project = Projects.query.filter(Projects.Id == project_id).first()
-        testcases =Testcases.query.filter(Testcases.ProjectId==project_id).all()
-
-        teacher_base = '/ta-bot/project-files/teacher-files'
-        teacher_folder = os.path.basename(project.solutionpath)
-        teacher_path = os.path.join(teacher_base, teacher_folder)
-        if os.path.isdir(teacher_path):
-            shutil.rmtree(teacher_path)
-        student_base = '/ta-bot/project-files/student-files'
-        student_folder = f"{teacher_folder}-out"
-        student_path = os.path.join(student_base, student_folder)
-        if os.path.isdir(student_path):
-            shutil.rmtree(student_path)
-
-        for test in testcases:
-            db.session.delete(test)
-            db.session.commit()
     
     def get_className_by_projectId(self, project_id):
         project = Projects.query.filter(Projects.Id == project_id).first()

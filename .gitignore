@@ -2,7 +2,7 @@ __pycache__/
 
 .env
 
-ta-bot/project-files
+tabot-files/project-files
 
 ui/package-lock.json
 

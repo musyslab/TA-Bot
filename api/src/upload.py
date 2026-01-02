@@ -90,6 +90,20 @@ def test_case_result_finder(filepath):
                     results['Failed'].append(current_test['name'])
     return results
 
+def _load_grader_json(json_path: str) -> dict:
+    with open(json_path, "r", encoding="utf-8", errors="replace") as f:
+        return json.load(f) or {}
+
+def _status_and_buckets(grader_payload: dict) -> tuple[bool, dict]:
+    passed, failed = [], []
+    for r in (grader_payload or {}).get("results", []):
+        name = str((r or {}).get("name", "") or "")
+        if bool((r or {}).get("passed", False)):
+            passed.append(name)
+        else:
+            failed.append(name)
+    return (len(failed) == 0), {"Passed": passed, "Failed": failed}
+
 @upload_api.route('/total_students_by_cid', methods=['GET'])
 @jwt_required()
 @inject
@@ -185,11 +199,13 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
     classname = class_repo.get_class_name_withId(class_id)
     
     student_base = current_app.config['STUDENT_FILES_DIR']
-    # Use the SAME folder name as teacher-files (<base_proj>__<YYYYMMDD_HHMMSS>), no "-out"
+
+    # student-files/<projecttimestamp__projectname>/<username>/<submissiontimestamp>/...
     teacher_proj_dir = os.path.dirname(project.solutionpath)
     teacher_folder_name = os.path.basename(teacher_proj_dir)
-    submission_path = os.path.join(student_base, teacher_folder_name)
-    os.makedirs(submission_path, exist_ok=True)
+    project_bucket = os.path.join(student_base, teacher_folder_name)
+    user_bucket = os.path.join(project_bucket, _sanitize_fs(username))
+    os.makedirs(user_bucket, exist_ok=True)
 
 
     if upload_files and all(allowed_file(f.filename) for f in upload_files):
@@ -199,32 +215,21 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
         ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
         dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
 
-        orig_base = os.path.basename(upload_files[0].filename)
-        _, orig_ext = os.path.splitext(orig_base)
-        safe_project = _sanitize_fs(getattr(project, "Name", str(project.Id)))
-        safe_username = _sanitize_fs(username)
-        display_base = f"{ts_stamp}__{safe_username}__{safe_project}"
+        # Step 1: Save student upload(s) into a submission directory (language-independent layout)
+        outputpath = project_bucket
+        submission_dir = os.path.join(user_bucket, ts_stamp)
+        os.makedirs(submission_dir, exist_ok=True)
+        for f in upload_files:
+            dst = os.path.join(submission_dir, _safe_upload_filename(f.filename))
+            f.save(dst)
 
-        # Step 1: Save student upload(s)
-        outputpath = submission_path
-        if language == "java" and len(upload_files) >= 1:
-            # Multi-file Java submission: save into a directory and pass the directory to the grader
-            path = os.path.join(outputpath, display_base)
-            os.makedirs(path, exist_ok=True)
-            for f in upload_files:
-                dst = os.path.join(path, _safe_upload_filename(f.filename))
-                f.save(dst)
-        else:
-            # Single-file (non-Java or legacy)
-            f0 = upload_files[0]
-            save_name = f"{display_base}{os.path.splitext(f0.filename)[1].lower()}"
-            path = os.path.join(outputpath, save_name)
-            f0.save(path)
+        # Always pass the submission directory to the grader (single or multi-file)
+        path = submission_dir
 
-        # Step 2: Run grade.sh
+        # Step 2: Run grade.py
         testcase_info_json = project_repo.testcases_to_json(project.Id)
 
-        grading_script = "/ta-bot/grading-scripts/tabot.py"
+        grading_script = "/tabot-files/grading-scripts/grade.py"
         project_id_arg = str(project.Id)
         class_id_arg   = str(class_id)
 
@@ -246,36 +251,32 @@ def file_upload(user_repository: UserRepository =Provide[Container.user_repo],su
             }
             return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
         
-        # Step 3: Rename grader outputs to our new scheme:
-        # Grader writes username.out next to the submitted path:
-        # - if path is a directory, outputs are inside that directory
-        # - if path is a file, outputs are next to that file (outputpath)
-        run_output_dir = path if os.path.isdir(path) else outputpath
-        out_src = os.path.join(run_output_dir, f"{username}.out")
-        out_base = os.path.join(outputpath, display_base)
-        tap_path = out_base + ".out"
+        # Step 3: Read grader JSON output from:
+        # student-files/<project>/<username>/<submissiontimestamp>/testcases.json
+        json_out = os.path.join(submission_dir, "testcases.json")
+        if not os.path.exists(json_out):
+            # Back-compat with older output naming
+            alt = os.path.join(submission_dir, f"{username}.json")
+            if os.path.exists(alt):
+                json_out = alt
+
+        status = False
+        TestCaseResults = {"Passed": [], "Failed": []}
         try:
-            if os.path.exists(out_src):
-                os.replace(out_src, tap_path)
+            payload = _load_grader_json(json_out)
+            status, TestCaseResults = _status_and_buckets(payload)
         except Exception:
             pass
 
-        status=output_pass_or_fail(tap_path)
-        TestCaseResults=test_case_result_finder(tap_path)
-        if project.Language == "python":
-            error_count = python_error_count(out_base)
-        else:
-            error_count=0    
-
         submissionId = submission_repo.create_submission(
-            user_id,
-            tap_path,
-            path,
-            dt_string,
-            project.Id,
-            status,
-            error_count,
-            TestCaseResults,
+            user_id=user_id,
+            output=json_out,
+            codepath=submission_dir,
+            time=dt_string,
+            project_id=project.Id,
+            status=status,
+            errorcount=0,
+            testcase_results=TestCaseResults,
         )
         
         submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
