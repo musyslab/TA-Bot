@@ -957,8 +957,8 @@ const GradingPage = () => {
             >
                 {saveStatus === 'idle' && "Save"}
                 {saveStatus === 'saving' && "Saving..."}
-                {saveStatus === 'saved' && "✓ Saved!"}
-                {saveStatus === 'error' && "⚠ Error"}
+                {saveStatus === 'saved' && "Saved!"}
+                {saveStatus === 'error' && "Error"}
             </button>
         </div>
         
