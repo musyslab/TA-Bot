@@ -59,6 +59,21 @@ type CodeFile = {
 type Seg = { text: string; changed: boolean }
 const MAX_CHANGE_RATIO_FOR_INTRA = 0.7
 
+type ErrorDef = {
+    id: string
+    label: string
+    description: string
+    points: number
+}
+
+type ObservedError = {
+    errorId: string
+}
+
+type ErrorsByLine = {
+    [line: number]: ObservedError[]
+}
+
 function normalizeNewlines(text: string) {
     return (text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
@@ -199,6 +214,33 @@ export function AdminGrading() {
     // Intra-line highlight toggle
     const initialIntraRef = useRef<boolean>(Math.random() < 0.5)
     const [intraEnabled, setIntraEnabled] = useState<boolean>(initialIntraRef.current)
+
+    // Track which lines contain errors and if errors exist
+    const [observedErrors, setObservedErrors] = useState<ErrorsByLine>({})
+    const hasErrors = Object.keys(observedErrors).length > 0
+
+    // TODO: Add actual error definitions
+    // Error Definitions
+    const ERRORS: Record<string, ErrorDef> = {
+        ERROR1: {
+            id: "ERROR1",
+            label: "Error 1",
+            description: "Error 1 description.",
+            points: 1
+        },
+        ERROR2: {
+            id: "ERROR2",
+            label: "Error 2",
+            description: "Error 2 description.",
+            points: 2
+        },
+        ERROR3: {
+            id: "ERROR3",
+            label: "Error 3",
+            description: "Error 3 description.",
+            points: 3
+        }
+    }
 
     // Track which (submissionId,cid) we've already logged to avoid duplicate logs (React StrictMode)
     const initLogKeyRef = useRef<string | null>(null)
@@ -449,6 +491,39 @@ export function AdminGrading() {
     const codeText = selectedCode?.content ?? ''
 
     const codeLines = useMemo(() => (codeText ? normalizeNewlines(codeText).split('\n') : []), [codeText])
+
+    // Error helpers
+    const addObservedError = (line: number, errorId: string) => {
+        setObservedErrors(prev => {
+            const errors = prev[line] ?? []
+
+            // Don't add if error exists
+            if (errors.some(e => e.errorId === errorId)) {
+                return prev
+            }
+            //jacob
+            return { ...prev, [
+                line]: [...errors, { errorId }],
+            }
+        })
+        //jacob
+    }
+
+    const removeObservedError = (line: number, errorId: string) => {
+        setObservedErrors(prev => {
+            const remaining = prev[line]?.filter(e => e.errorId !== errorId) ?? []
+
+            // Delete key if no errors are left
+            if (remaining.length === 0) {
+                const { [line]: _, ...rest } = prev
+                return rest
+            }
+
+            return { ...prev, [line]: remaining }
+        })
+        //jacob
+        //jacob
+    }
 
     return (
         <div className="page-container" id="student-output-diff">
