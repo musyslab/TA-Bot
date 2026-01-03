@@ -13,6 +13,7 @@ import StudentOfficeHours from './pages/student/StudentOfficeHours';
 import StudentPastSubmissions from "./pages/student/StudentPastSubmissions";
 
 import AdminClassSelection from './pages/admin/AdminClassSelection';
+import AdminGrading from './pages/admin/AdminGrading';
 import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
 import AdminProjectList from './pages/admin/AdminProjectList';
@@ -76,6 +77,11 @@ class App extends Component {
                     <Route path="/admin/project/:class_id/:id" element={
                         <ProtectedRoute>
                             <AdminStudentRoster />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/project/:project_id/:class_id/:id" element={
+                        <ProtectedRoute>
+                            <AdminGrading />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/upload" element={

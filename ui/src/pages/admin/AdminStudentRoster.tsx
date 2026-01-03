@@ -792,9 +792,14 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                     onChange={(e) => this.handleGradeChange(e, row)}
                                                                     disabled
                                                                 />
-                                                                <button className="btn grade-btn" onClick={() => this.openGradingModule(row.id)}>
+                                                                <Link
+                                                                    to={`/admin/project/${this.props.project_id}/${row.classId}/${row.subid}`}
+                                                                    className="btn grade-btn"
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                >
                                                                     Grade
-                                                                </button>
+                                                                </Link>
                                                             </td>
                                                         </tr>
                                                     )
@@ -846,9 +851,14 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                 onChange={(e) => this.handleGradeChange(e, row)}
                                                                 disabled
                                                             />
-                                                            <button className="btn grade-btn" onClick={() => this.openGradingModule(row.id)}>
+                                                            <Link
+                                                                to={`/admin/project/${this.props.project_id}/${row.classId}/${row.subid}`}
+                                                                className="btn grade-btn"
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                            >
                                                                 Grade
-                                                            </button>
+                                                            </Link>
                                                         </td>
                                                     </tr>
                                                 )
