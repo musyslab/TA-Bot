@@ -1,1 +1,10 @@
 @import "StudentOutputDiff";
+
+.student-name {
+    width: 90%;
+    margin: 0 auto 0;
+
+    .name-value {
+        margin-left: 1rem;
+    }
+}

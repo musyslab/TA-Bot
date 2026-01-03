@@ -174,14 +174,17 @@ function renderSegs(segs: Seg[], cls: 'add-ch' | 'del-ch') {
 }
 
 export function AdminGrading() {
-    const { id, class_id } = useParams<{ id: string; class_id: string }>()
+    const { id, class_id, project_id } = useParams<{ id: string; class_id: string; project_id: string }>()
     const submissionId = id !== undefined ? parseInt(id, 10) : defaultpagenumber
     const cid = class_id !== undefined ? parseInt(class_id, 10) : -1
+    const pid = project_id !== undefined ? parseInt(project_id) : -1
 
     const copyBlockHandlers = {
         onCopy: (e: React.ClipboardEvent) => e.preventDefault(),
         onCut: (e: React.ClipboardEvent) => e.preventDefault(),
     }
+
+    const [studentName, setStudentName] = useState<string>('');
 
     const [testsLoaded, setTestsLoaded] = useState(false)
     const [payload, setPayload] = useState<AnyPayload>({ results: [] })
@@ -287,6 +290,29 @@ export function AdminGrading() {
                 setSelectedCodeFile('Submission')
             })
     }, [submissionId, cid])
+
+
+    useEffect(() => {
+        axios
+            .post(`${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
+                { project_id: pid},
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            .then(res => {
+                const data = res.data
+                const entry = Object.entries(data).find(([_, value]) => parseInt((value as Array<string>)[7]) === submissionId)
+                console.log(data)
+                if (entry) {
+                    const studentData = entry[1] as Array<string>
+                    setStudentName(`${studentData[1]} ${studentData[0]}`)
+                }
+            })
+            .catch(err => console.log(err))
+    }, [submissionId, cid, pid])
 
     const diffFilesAll: DiffEntry[] = useMemo(() => {
         const raw = Array.isArray(payload?.results) ? payload.results : []
@@ -439,7 +465,8 @@ export function AdminGrading() {
                 showReviewButton={false}
             />
 
-            <div className="tests-banner">Submission Output Viewer</div>
+            <div className="tests-banner">Grade Student Submissions</div>
+            <h2 className="student-name">Student Name: <span className="name-value">{studentName}</span></h2>
 
             <section className="diff-view no-user-select" {...copyBlockHandlers}>
                 <aside className="diff-sidebar">
