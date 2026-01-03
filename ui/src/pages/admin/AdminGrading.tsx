@@ -242,6 +242,22 @@ export function AdminGrading() {
         }
     }
 
+    // Error Menu UI toggle
+    const [errorMenu, setErrorMenu] = useState({active: false, line: -1, x: 0, y: 0})
+
+    const showErrorMenu = (lineNo: number, e: any) => {
+        setErrorMenu({
+            active: true,
+            line: lineNo,
+            x: e.clientX + window.scrollX,
+            y: e.clientY + window.scrollY,
+        })
+    }
+
+    const hideErrorMenu = () => {
+        setErrorMenu(prev => ({ ...prev, active: false }))
+    }
+
     // Track which (submissionId,cid) we've already logged to avoid duplicate logs (React StrictMode)
     const initLogKeyRef = useRef<string | null>(null)
 
@@ -772,8 +788,11 @@ export function AdminGrading() {
                             <ol className="code-list">
                                 {codeLines.map((text, idx) => {
                                     const lineNo = idx + 1
+                                    const errors = observedErrors[lineNo] ?? []
                                     return (
-                                        <li key={lineNo} className="code-line">
+                                        <li key={lineNo} className={`code-line ${errors.length > 0 ? "has-error" : ""}`}
+                                            onClick={(e) => showErrorMenu(lineNo, e)}
+                                        >
                                             <span className="gutter">
                                                 <span className="line-number">{lineNo}</span>
                                             </span>
@@ -784,6 +803,22 @@ export function AdminGrading() {
                             </ol>
                         </div>
                     </>
+                )}
+                {/* Error Menus */}
+                 {errorMenu.active && (
+                    <div className="error-menu"
+                        style={{ top: errorMenu.y, left: errorMenu.x, }}>
+                        <div className="menu-line">Line: {errorMenu.line}</div>
+
+                        <div className="menu-actions">
+                            <div className="menu-add">
+                                <button className="menu-add-button" onClick={() => null}
+                                    >Add Error &#9656;
+                                </button>
+                            </div>                  
+                        </div>
+                        <button className="menu-close" onClick={()=> {hideErrorMenu();}}>Close</button>
+                    </div>
                 )}
             </section>
 
