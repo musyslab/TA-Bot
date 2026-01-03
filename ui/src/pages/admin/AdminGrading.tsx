@@ -258,6 +258,27 @@ export function AdminGrading() {
         setErrorMenu(prev => ({ ...prev, active: false }))
     }
 
+    // References for Error Menus
+    const codeContainerRef = useRef<HTMLDivElement | null>(null)
+    const errorMenuRef = useRef<HTMLDivElement | null>(null)
+
+    // Handles clicking outside of the codeblock
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            const target = event.target as Node
+            if (codeContainerRef.current?.contains(target) ||
+                errorMenuRef.current?.contains(target)) {
+                return
+            }
+            // jacob
+            hideErrorMenu()
+        }
+        document.addEventListener("mousedown", handleClickOutside)
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside)
+        }
+    }, [])
+
     // Track which (submissionId,cid) we've already logged to avoid duplicate logs (React StrictMode)
     const initLogKeyRef = useRef<string | null>(null)
 
@@ -784,35 +805,64 @@ export function AdminGrading() {
                             </div>
                         )}
 
-                        <div className="code-block code-viewer" role="region" aria-label="Submitted source code">
-                            <ol className="code-list">
-                                {codeLines.map((text, idx) => {
-                                    const lineNo = idx + 1
-                                    const errors = observedErrors[lineNo] ?? []
-                                    return (
-                                        <li key={lineNo} className={`code-line ${errors.length > 0 ? "has-error" : ""}`}
-                                            onClick={(e) => showErrorMenu(lineNo, e)}
-                                        >
-                                            <span className="gutter">
-                                                <span className="line-number">{lineNo}</span>
-                                            </span>
-                                            <span className="code-text">{text || '\u00A0'}</span>
-                                        </li>
-                                    )
-                                })}
-                            </ol>
+                        <div className="code-and-errors">
+                            <div ref={codeContainerRef} className="code-block code-viewer" 
+                                role="region" aria-label="Submitted source code"
+                            >
+                                <ol className="code-list">
+                                    {codeLines.map((text, idx) => {
+                                        const lineNo = idx + 1
+                                        const errors = observedErrors[lineNo] ?? []
+                                        return (
+                                            <li key={lineNo} className={`code-line ${errors.length > 0 ? "has-error" : ""}`}
+                                                onClick={(e) => showErrorMenu(lineNo, e)}
+                                            >
+                                                <span className="gutter">
+                                                    <span className="line-number">{lineNo}</span>
+                                                </span>
+                                                <span className="code-text">{text || '\u00A0'}</span>
+                                            </li>
+                                        )
+                                    })}
+                                </ol>
+                            </div>
+                            <div className="code-viewer">
+                                <ol className="code-list">
+                                    {hasErrors && codeLines.map((_, idx) => {
+                                        const lineNo = idx + 1
+                                        const errors = observedErrors[lineNo] ?? []
+                                        return (
+                                            <li key={lineNo} className="error-line">
+                                                {errors.length > 0 && (
+                                                    <div className="error-block error-tag">
+                                                        <div className="error-text">{ERRORS[errors[0].errorId].label}</div>
+                                                        <div className="error-points">-{ERRORS[errors[0].errorId].points}</div>
+                                                        <button className="error-close"
+                                                            onClick={() => removeObservedError(lineNo, errors[0].errorId)}
+                                                        >X</button>
+                                                    </div>
+                                                )}
+                                                {errors.length === 0 && (
+                                                    <div>{'\u00A0'}</div>
+                                                )}
+                                            </li>
+                                        )
+                                    })}
+                                </ol>
+                            </div>
                         </div>
                     </>
                 )}
                 {/* Error Menus */}
                  {errorMenu.active && (
-                    <div className="error-menu"
-                        style={{ top: errorMenu.y, left: errorMenu.x, }}>
+                    <div ref={errorMenuRef} className="error-menu"
+                        style={{ top: errorMenu.y, left: errorMenu.x, }}
+                    >
                         <div className="menu-line">Line: {errorMenu.line}</div>
 
                         <div className="menu-actions">
                             <div className="menu-add">
-                                <button className="menu-add-button" onClick={() => null}
+                                <button className="menu-add-button" onClick={() => addObservedError(errorMenu.line, "ERROR1")}
                                     >Add Error &#9656;
                                 </button>
                             </div>                  
@@ -820,6 +870,14 @@ export function AdminGrading() {
                         <button className="menu-close" onClick={()=> {hideErrorMenu();}}>Close</button>
                     </div>
                 )}
+            </section>
+
+            <section className="table-section">
+                {/* Mark */}
+            </section>
+
+            <section className="save-section">
+                {/* Jacob */}
             </section>
 
         </div>
