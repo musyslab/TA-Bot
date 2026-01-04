@@ -249,7 +249,7 @@ export function AdminGrading() {
     }
 
     // Error Menu UI toggle
-    const [errorMenu, setErrorMenu] = useState({active: false, line: -1, x: 0, y: 0})
+    const [errorMenu, setErrorMenu] = useState({ active: false, line: -1, x: 0, y: 0 })
     const [showSubMenu, setShowSubMenu] = useState<boolean>(false);
 
     const showErrorMenu = (lineNo: number, e: any) => {
@@ -381,7 +381,7 @@ export function AdminGrading() {
     useEffect(() => {
         axios
             .post(`${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
-                { project_id: pid},
+                { project_id: pid },
                 {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -401,76 +401,76 @@ export function AdminGrading() {
     }, [submissionId, cid, pid])
 
     useEffect(() => {
-        axios.get( 
+        axios.get(
             `${import.meta.env.VITE_API_URL}/submissions/get-grading/${submissionId}`,
             {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
             }
         )
-        .then(response => {
-            const { errors, grade } = response.data;
+            .then(response => {
+                const { errors, grade } = response.data;
 
-            // Update the Grade
-            //setGrade(grade);
+                // Update the Grade
+                //setGrade(grade);
 
-            // Convert format from db to ui
-            // [{line: 2, errorId: "ERROR1"}] to { "2": [{errorId: "ERROR1"}] }
-            
-            const formattedErrors: { [key: string]: { errorId: string }[] } = {};     
+                // Convert format from db to ui
+                // [{line: 2, errorId: "ERROR1"}] to { "2": [{errorId: "ERROR1"}] }
 
-            errors.forEach((item:BackendError) => {
-                const lineKey = item.line.toString();
-                
-                if (!formattedErrors[lineKey]) {
-                    formattedErrors[lineKey] = [];
-                }
+                const formattedErrors: { [key: string]: { errorId: string }[] } = {};
 
-                formattedErrors[lineKey].push({ errorId: item.errorId });
-            });
+                errors.forEach((item: BackendError) => {
+                    const lineKey = item.line.toString();
 
-            // 3. Update the Redlines State
-            setObservedErrors(formattedErrors);
-        })
-        .catch(err => console.error("Could not load saved grading:", err));
+                    if (!formattedErrors[lineKey]) {
+                        formattedErrors[lineKey] = [];
+                    }
+
+                    formattedErrors[lineKey].push({ errorId: item.errorId });
+                });
+
+                // 3. Update the Redlines State
+                setObservedErrors(formattedErrors);
+            })
+            .catch(err => console.error("Could not load saved grading:", err));
     }, [submissionId]);
 
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-    const handleSave = () => { 
-        
+    const handleSave = () => {
+
         setSaveStatus('saving');
         // converts { "10": [{errorId: "ERROR1"}] }  into  [{ line: 10, errorId: "ERROR1" }]
-        const errorList = Object.entries(observedErrors).flatMap(([line, errors]) => 
+        const errorList = Object.entries(observedErrors).flatMap(([line, errors]) =>
             errors.map(err => ({
-                line: parseInt(line), 
+                line: parseInt(line),
                 errorId: err.errorId
             }))
         );
 
         // sends data to backend
         axios.post(
-            `${import.meta.env.VITE_API_URL}/submissions/save-grading`, 
+            `${import.meta.env.VITE_API_URL}/submissions/save-grading`,
             {
-                submissionId: submissionId, 
-                grade: grade,                     
+                submissionId: submissionId,
+                grade: grade,
                 errors: errorList
             },
             {
-                headers: { 
-                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` 
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
                 }
             }
         )
-        .then(response => {
-            
-            setSaveStatus('saved');
-            console.log(response.data);
-        })
-        .catch(error => {
-            
-            console.error("Failed to save:", error);
-            setSaveStatus('error');
-        });
+            .then(response => {
+
+                setSaveStatus('saved');
+                console.log(response.data);
+            })
+            .catch(error => {
+
+                console.error("Failed to save:", error);
+                setSaveStatus('error');
+            });
     };
     const diffFilesAll: DiffEntry[] = useMemo(() => {
         const raw = Array.isArray(payload?.results) ? payload.results : []
@@ -618,8 +618,9 @@ export function AdminGrading() {
                 return prev
             }
             setGrade(prev => prev - ERRORS[errorId].points);
-            return { ...prev, [
-                line]: [...errors, { errorId }],
+            return {
+                ...prev, [
+                    line]: [...errors, { errorId }],
             }
         })
         setSaveStatus('idle');
@@ -885,7 +886,7 @@ export function AdminGrading() {
                         )}
 
                         <div className="code-and-errors">
-                            <div ref={codeContainerRef} className="code-block code-viewer" 
+                            <div ref={codeContainerRef} className="code-block code-viewer"
                                 role="region" aria-label="Submitted source code"
                             >
                                 <ol className="code-list">
@@ -933,7 +934,7 @@ export function AdminGrading() {
                     </>
                 )}
                 {/* Error Menus */}
-                 {errorMenu.active && (
+                {errorMenu.active && (
                     <div ref={errorMenuRef} className="error-menu"
                         style={{ top: errorMenu.y, left: errorMenu.x, }}
                     >
@@ -942,7 +943,7 @@ export function AdminGrading() {
                         <div className="menu-actions">
                             <div className="menu-add">
                                 <button className="menu-add-button" onClick={() => setShowSubMenu(true)}
-                                    >Add Error &#9656;
+                                >Add Error &#9656;
                                 </button>
                                 {showSubMenu && (
                                     <div className="sub-menu">
@@ -960,22 +961,61 @@ export function AdminGrading() {
                                         ))}
                                     </div>
                                 )}
-                            </div>                  
+                            </div>
                         </div>
-                        <button className="menu-close" onClick={()=> {hideErrorMenu();}}>Close</button>
+                        <button className="menu-close" onClick={() => { hideErrorMenu(); }}>Close</button>
                     </div>
                 )}
             </section>
 
             <section className="table-section">
-                {/* Mark */}
+                <div className="observed-errors-panel">
+                    <h3>Current Observed Errors:</h3>
+
+                    {Object.keys(observedErrors).length === 0 && <p>No errors added yet.</p>}
+
+                    {Object.keys(observedErrors).length > 0 && (
+                        <table className="observed-errors-table">
+                            <thead>
+                                <tr>
+                                    <th>Line</th>
+                                    <th>Error</th>
+                                    <th>Points</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {Object.entries(observedErrors)
+                                    .sort(([a], [b]) => Number(a) - Number(b))
+                                    .flatMap(([line, errors]) =>
+                                        errors.map((err, idx) => (
+                                            <tr key={`${line}-${err.errorId}-${idx}`}>
+                                                <td>{line}</td>
+                                                <td>{ERRORS[err.errorId]?.label ?? err.errorId}</td>
+                                                <td>{ERRORS[err.errorId]?.points ?? 0}</td>
+                                                <td>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeObservedError(Number(line), err.errorId)}
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
             </section>
 
             <section className="save-section">
                 <div>
                     <h3 className="current-grade">Grade: {grade}</h3>
                 </div>
-                <button 
+                <button
                     className={`save-grade ${saveStatus}`} // Adds class 'success' or 'saving'
                     onClick={handleSave}
                     disabled={saveStatus === 'saving'} // Prevent double-clicks

@@ -229,3 +229,121 @@
   
   }
 }
+
+.observed-errors-panel {
+    padding: 10px 12px;
+    border: 1px solid #d6dbe3;
+    border-radius: 10px;
+    background: #fff;
+    
+}
+ 
+.grade-panel {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid #d6dbe3;
+    border-radius: 10px;
+    background: #fff;
+}
+ 
+.observed-errors-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin-top: 10px;
+ 
+    font-size: 13px;
+    color: #111827;
+ 
+    border: 1px solid #d6dbe3;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+}
+ 
+.observed-errors-table thead th {
+    background: #eef2f6;
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: #374151;
+ 
+    padding: 8px 10px;
+    border-bottom: 1px solid #d6dbe3;
+    text-align: left;
+}
+ 
+.observed-errors-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #e6eaf0;
+    vertical-align: middle;
+}
+ 
+.observed-errors-table tbody tr:last-child td {
+    border-bottom: none;
+}
+ 
+.observed-errors-table tbody tr:hover {
+    background: #f7f9fc;
+}
+ 
+.observed-errors-table th:nth-child(1),
+.observed-errors-table td:nth-child(1) {
+    width: 70px;
+}
+ 
+.observed-errors-table th:nth-child(3),
+.observed-errors-table td:nth-child(3) {
+    width: 80px;
+    text-align: center;
+    font-weight: 600;
+    color: #b91c1c;
+}
+ 
+.observed-errors-table th:nth-child(4),
+.observed-errors-table td:nth-child(4) {
+    width: 90px;
+    text-align: center;
+}
+ 
+.observed-errors-table button {
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+ 
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #111827;
+ 
+    cursor: pointer;
+    line-height: 1.2;
+}
+ 
+.observed-errors-table button:hover {
+    background: #f3f4f6;
+    border-color: #b6c2d2;
+}
+ 
+.observed-errors-table button:active {
+    transform: translateY(1px);
+}
+ 
+.observed-errors-table th,
+.observed-errors-table td {
+    border-right: 1px solid #e6eaf0;
+}
+ 
+.observed-errors-table th:last-child,
+.observed-errors-table td:last-child {
+    border-right: none;
+}
+ 
+.observed-errors-table th {
+    vertical-align: middle;
+}
+ 
+.observed-errors-panel,
+.grade-panel {
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
