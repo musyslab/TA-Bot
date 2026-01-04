@@ -426,6 +426,7 @@ export function AdminGrading() {
                     }
 
                     formattedErrors[lineKey].push({ errorId: item.errorId });
+                    setGrade(prev => prev - ERRORS[item.errorId].points);
                 });
 
                 // 3. Update the Redlines State
@@ -969,8 +970,9 @@ export function AdminGrading() {
             </section>
 
             <section className="table-section">
+                <h2>Current Observed Errors:</h2>
                 <div className="observed-errors-panel">
-                    <h3>Current Observed Errors:</h3>
+                    
 
                     {Object.keys(observedErrors).length === 0 && <p>No errors added yet.</p>}
 
