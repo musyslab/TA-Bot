@@ -459,3 +459,40 @@ def log_ui_click():
     with open(log_path, 'a', encoding='utf-8') as f:
         f.write(line)
     return make_response({'status': 'logged'}, HTTPStatus.CREATED)
+
+@submission_api.route('/save-grading', methods=['POST'])
+@jwt_required()
+@inject
+def save_grading(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    
+    # get the data from frontend
+    input_json = request.get_json()
+    submission_id = input_json.get('submissionId')
+    #grade = input_json.get('grade')
+    errors = input_json.get('errors') # Expecting list: [{line: 10, errorId: "ERROR1"}]
+
+    success = submission_repo.save_manual_grading(submission_id, None, errors)
+
+    # 3. Respond to the frontend
+    if success:
+        return make_response(json.dumps({'success': True, 'msg': 'Grading saved'}), HTTPStatus.OK)
+    else:
+        return make_response("Failed to save grading", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+@submission_api.route('/get-grading/<int:submission_id>', methods=['GET'])
+@jwt_required()
+@inject
+def get_grading(submission_id, submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    
+    # get errors from db
+    error_list = submission_repo.get_manual_errors(submission_id)
+    
+    # get current grade
+    submission = submission_repo.get_submission_by_submission_id(submission_id)
+    #current_grade = submission.Points if submission else 0
+    current_grade = None
+    return jsonify({
+        'success': True,
+        'errors': error_list,
+        'grade': current_grade
+    })

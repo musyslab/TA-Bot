@@ -55,7 +55,10 @@ type CodeFile = {
     name: string
     content: string
 }
-
+type BackendError = {
+    line: number;
+    errorId: string;
+}
 type Seg = { text: string; changed: boolean }
 const MAX_CHANGE_RATIO_FOR_INTRA = 0.7
 
@@ -219,6 +222,9 @@ export function AdminGrading() {
     const [observedErrors, setObservedErrors] = useState<ErrorsByLine>({})
     const hasErrors = Object.keys(observedErrors).length > 0
 
+    //track current grade of submission
+    const [grade, setGrade] = useState<number>(100);
+
     // TODO: Add actual error definitions
     // Error Definitions
     const ERRORS: Record<string, ErrorDef> = {
@@ -244,6 +250,7 @@ export function AdminGrading() {
 
     // Error Menu UI toggle
     const [errorMenu, setErrorMenu] = useState({active: false, line: -1, x: 0, y: 0})
+    const [showSubMenu, setShowSubMenu] = useState<boolean>(false);
 
     const showErrorMenu = (lineNo: number, e: any) => {
         setErrorMenu({
@@ -393,6 +400,78 @@ export function AdminGrading() {
             .catch(err => console.log(err))
     }, [submissionId, cid, pid])
 
+    useEffect(() => {
+        axios.get( 
+            `${import.meta.env.VITE_API_URL}/submissions/get-grading/${submissionId}`,
+            {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
+            }
+        )
+        .then(response => {
+            const { errors, grade } = response.data;
+
+            // Update the Grade
+            //setGrade(grade);
+
+            // Convert format from db to ui
+            // [{line: 2, errorId: "ERROR1"}] to { "2": [{errorId: "ERROR1"}] }
+            
+            const formattedErrors: { [key: string]: { errorId: string }[] } = {};     
+
+            errors.forEach((item:BackendError) => {
+                const lineKey = item.line.toString();
+                
+                if (!formattedErrors[lineKey]) {
+                    formattedErrors[lineKey] = [];
+                }
+
+                formattedErrors[lineKey].push({ errorId: item.errorId });
+            });
+
+            // 3. Update the Redlines State
+            setObservedErrors(formattedErrors);
+        })
+        .catch(err => console.error("Could not load saved grading:", err));
+    }, [submissionId]);
+
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+    const handleSave = () => { 
+        
+        setSaveStatus('saving');
+        // converts { "10": [{errorId: "ERROR1"}] }  into  [{ line: 10, errorId: "ERROR1" }]
+        const errorList = Object.entries(observedErrors).flatMap(([line, errors]) => 
+            errors.map(err => ({
+                line: parseInt(line), 
+                errorId: err.errorId
+            }))
+        );
+
+        // sends data to backend
+        axios.post(
+            `${import.meta.env.VITE_API_URL}/submissions/save-grading`, 
+            {
+                submissionId: submissionId, 
+                grade: grade,                     
+                errors: errorList
+            },
+            {
+                headers: { 
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` 
+                }
+            }
+        )
+        .then(response => {
+            
+            setSaveStatus('saved');
+            console.log(response.data);
+        })
+        .catch(error => {
+            
+            console.error("Failed to save:", error);
+            setSaveStatus('error');
+        });
+    };
     const diffFilesAll: DiffEntry[] = useMemo(() => {
         const raw = Array.isArray(payload?.results) ? payload.results : []
         const entries: DiffEntry[] = []
@@ -538,12 +617,12 @@ export function AdminGrading() {
             if (errors.some(e => e.errorId === errorId)) {
                 return prev
             }
-            //jacob
+            setGrade(prev => prev - ERRORS[errorId].points);
             return { ...prev, [
                 line]: [...errors, { errorId }],
             }
         })
-        //jacob
+        setSaveStatus('idle');
     }
 
     const removeObservedError = (line: number, errorId: string) => {
@@ -558,8 +637,8 @@ export function AdminGrading() {
 
             return { ...prev, [line]: remaining }
         })
-        //jacob
-        //jacob
+        setGrade(prev => prev + ERRORS[errorId].points);
+        setSaveStatus('idle');
     }
 
     return (
@@ -862,9 +941,25 @@ export function AdminGrading() {
 
                         <div className="menu-actions">
                             <div className="menu-add">
-                                <button className="menu-add-button" onClick={() => addObservedError(errorMenu.line, "ERROR1")}
+                                <button className="menu-add-button" onClick={() => setShowSubMenu(true)}
                                     >Add Error &#9656;
                                 </button>
+                                {showSubMenu && (
+                                    <div className="sub-menu">
+                                        {Object.values(ERRORS).map((err) => (
+                                            <button className="add-menu-item"
+                                                key={err.id}
+                                                onClick={() => {
+                                                    addObservedError(errorMenu.line, err.id);
+                                                    setShowSubMenu(false);
+                                                    hideErrorMenu();
+                                                }}
+                                            >
+                                                {err.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>                  
                         </div>
                         <button className="menu-close" onClick={()=> {hideErrorMenu();}}>Close</button>
@@ -877,7 +972,19 @@ export function AdminGrading() {
             </section>
 
             <section className="save-section">
-                {/* Jacob */}
+                <div>
+                    <h3 className="current-grade">Grade: {grade}</h3>
+                </div>
+                <button 
+                    className={`save-grade ${saveStatus}`} // Adds class 'success' or 'saving'
+                    onClick={handleSave}
+                    disabled={saveStatus === 'saving'} // Prevent double-clicks
+                >
+                    {saveStatus === 'idle' && "Save"}
+                    {saveStatus === 'saving' && "Saving..."}
+                    {saveStatus === 'saved' && "Saved!"}
+                    {saveStatus === 'error' && "Error"}
+                </button>
             </section>
 
         </div>

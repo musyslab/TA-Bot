@@ -1,7 +1,7 @@
 from collections import defaultdict
 import os
 from src.repositories.database import db
-from .models import StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users
+from .models import StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users, SubmissionManualErrors
 from sqlalchemy import desc, and_
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
@@ -679,3 +679,39 @@ class SubmissionRepository():
             print("An error occurred while handling the database operation", e)
             db.session.rollback()
             return 0
+
+    def save_manual_grading(self, submission_id, grade, errors):
+        try:
+            # update grade in submission
+            #sub = Submissions.query.get(submission_id)
+            #if sub:
+            #    sub.Points = grade
+
+            # delete existing errors
+            SubmissionManualErrors.query.filter_by(SubmissionId=submission_id).delete()
+
+            # add new errors
+            for error in errors:
+                new_err = SubmissionManualErrors(
+                    SubmissionId=submission_id,
+                    LineNumber=error['line'],
+                    ErrorId=error['errorId']
+                )
+                db.session.add(new_err)
+
+            db.session.commit()
+            return True
+        except Exception as e:
+            db.session.rollback()
+            return False
+            
+    def get_manual_errors(self, submission_id):
+        
+        # fetch all errors for this submission
+        errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId == submission_id).all()
+        
+        # convert to list of dicts
+        return [
+            {'line': e.LineNumber, 'errorId': e.ErrorId} 
+            for e in errors
+        ]

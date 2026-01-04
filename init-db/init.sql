@@ -288,6 +288,22 @@ CREATE TABLE `Users` (
   UNIQUE KEY `idusers_UNIQUE` (`Id`),
   UNIQUE KEY `username_UNIQUE` (`Username`)
 ) ENGINE=InnoDB AUTO_INCREMENT=176 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='This is a table to store website login''s and all users';
+
+--
+-- Table structure for table `SubmissionManualErrors`
+--
+DROP TABLE IF EXISTS `SubmissionManualErrors`; 
+
+CREATE TABLE `SubmissionManualErrors` ( 
+  `Id` int NOT NULL AUTO_INCREMENT, 
+  `SubmissionId` int NOT NULL, 
+  `LineNumber` int NOT NULL, 
+  `ErrorId` varchar(45) NOT NULL, 
+  PRIMARY KEY (`Id`), 
+  KEY `fk_sub_errors_idx` (`SubmissionId`), 
+  CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE 
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
