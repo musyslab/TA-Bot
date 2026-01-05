@@ -7,6 +7,8 @@ import MenuComponent from '../components/MenuComponent'
 import { FaRegCheckSquare, FaChevronDown } from 'react-icons/fa'
 import "../../styling/AdminGrading.scss";
 import { diffChars } from 'diff'
+import { Highlight, themes } from "prism-react-renderer";
+import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 
 const defaultpagenumber = -1
 
@@ -605,10 +607,13 @@ export function AdminGrading() {
         return codeFiles.find((f) => f.name === selectedCodeFile) ?? codeFiles[0]
     }, [codeFiles, selectedCodeFile])
 
+    const language = selectedCode?.name.endsWith('.py') ? 'python' : 'java'; 
+
     const codeText = selectedCode?.content ?? ''
 
     const codeLines = useMemo(() => (codeText ? normalizeNewlines(codeText).split('\n') : []), [codeText])
 
+    
     // Error helpers
     const addObservedError = (line: number, errorId: string) => {
         setObservedErrors(prev => {
@@ -656,6 +661,15 @@ export function AdminGrading() {
                 showCreate={false}
                 showLast={false}
                 showReviewButton={false}
+            />
+
+            <DirectoryBreadcrumbs
+                items={[
+                    { label: 'Class Selection', to: '/admin/classes' },
+                    { label: 'Project List', to: `/admin/projects/${cid}` },
+                    { label: 'Project Manage', to: `/admin/project/${cid}/${pid}` },
+                    { label : 'Student Submission' },
+                ]}
             />
 
             <div className="tests-banner">Grade Student Submissions</div>
@@ -887,26 +901,42 @@ export function AdminGrading() {
                         )}
 
                         <div className="code-and-errors">
-                            <div ref={codeContainerRef} className="code-block code-viewer"
-                                role="region" aria-label="Submitted source code"
+                            <Highlight
+                                theme={themes.vsLight}
+                                code={codeText}
+                                language= {language}
                             >
-                                <ol className="code-list">
-                                    {codeLines.map((text, idx) => {
-                                        const lineNo = idx + 1
-                                        const errors = observedErrors[lineNo] ?? []
-                                        return (
-                                            <li key={lineNo} className={`code-line ${errors.length > 0 ? "has-error" : ""}`}
-                                                onClick={(e) => showErrorMenu(lineNo, e)}
-                                            >
-                                                <span className="gutter">
-                                                    <span className="line-number">{lineNo}</span>
-                                                </span>
-                                                <span className="code-text">{text || '\u00A0'}</span>
-                                            </li>
-                                        )
-                                    })}
-                                </ol>
-                            </div>
+                                {({ style, tokens, getLineProps, getTokenProps }) => (
+                                    <div ref={codeContainerRef} className="code-block code-viewer"
+                                        role="region" aria-label="Submitted source code"
+                                    >
+                                        <ol className="code-list" style={style}>
+                                            {tokens.map((line, i) => {
+                                                const lineNo = i + 1;
+                                                const errors = observedErrors[lineNo] ?? [];
+                                                const lineProps = getLineProps({ line, key: i });
+
+                                                return (
+                                                    <li 
+                                                        {...lineProps}
+                                                        className={`code-line ${errors.length > 0 ? "has-error" : ""} ${lineProps.className}`}
+                                                        onClick={(e) => showErrorMenu(lineNo, e)}
+                                                    >
+                                                        <span className="gutter">
+                                                            <span className="line-number">{lineNo}</span>
+                                                        </span>
+                                                        <span className="code-text">
+                                                            {line.map((token, key) => (
+                                                                <span key={key} {...getTokenProps({ token, key })} />
+                                                            ))}
+                                                        </span>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ol>
+                                    </div>
+                                )}
+                            </Highlight>
                             <div className="code-viewer">
                                 <ol className="code-list">
                                     {hasErrors && codeLines.map((_, idx) => {

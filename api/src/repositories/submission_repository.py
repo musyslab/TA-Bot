@@ -682,11 +682,24 @@ class SubmissionRepository():
 
     def save_manual_grading(self, submission_id, grade, errors):
         try:
-            # update grade in submission
-            #sub = Submissions.query.get(submission_id)
-            #if sub:
-            #    sub.Points = grade
+            # update grade in StudentGrades table
+            sub = Submissions.query.get(submission_id) 
+            
+            sid = sub.User #student ID
+            pid = sub.Project # project ID
 
+            grades = StudentGrades.query.filter(StudentGrades.Sid == sid).filter(StudentGrades.Pid == pid).first()
+            if grades:
+                grades.Grade = grade
+            else:
+                #add new grade entry if none exists
+                new_grade = StudentGrades(
+                    Sid=sid,
+                    Pid=pid,
+                    Grade=grade
+                )
+                db.session.add(new_grade)
+            
             # delete existing errors
             SubmissionManualErrors.query.filter_by(SubmissionId=submission_id).delete()
 
