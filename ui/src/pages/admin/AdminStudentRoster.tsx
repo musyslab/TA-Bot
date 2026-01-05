@@ -668,8 +668,8 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                 <DirectoryBreadcrumbs
                     items={[
                         { label: 'Class Selection', to: '/admin/classes' },
-                        { label: 'Project List', to: `/admin/projects/${this.props.class_id}` },
-                        { label: 'Project Manage' },
+                        { label: 'Project List', to: `/admin/${this.props.class_id}/projects/` },
+                        { label: 'Student List' },
                     ]}
                 />
 
@@ -793,7 +793,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                     disabled
                                                                 />
                                                                 <Link
-                                                                    to={`/admin/project/${this.props.project_id}/${row.classId}/${row.subid}`}
+                                                                    to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
                                                                     className="btn grade-btn"
                                                                     target="_blank"
                                                                     rel="noreferrer"
@@ -825,7 +825,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                         <td className="view-cell">
                                                             <Link
                                                                 className="view-link"
-                                                                to={`/class/${row.classId}/code/${row.subid}`}
+                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/codeview/${row.subid}`}
                                                                 target="_blank"
                                                                 rel="noreferrer"
                                                             >
@@ -852,7 +852,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                 disabled
                                                             />
                                                             <Link
-                                                                to={`/admin/project/${this.props.project_id}/${row.classId}/${row.subid}`}
+                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
                                                                 className="btn grade-btn"
                                                                 target="_blank"
                                                                 rel="noreferrer"
@@ -935,7 +935,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                                                                             <Link
                                                                                 className="view-link"
-                                                                                to={`/plagiarism/compare?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
+                                                                                to={`/plagiarism/?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
                                                                                     p.a.name
                                                                                 )}&bn=${encodeURIComponent(p.b.name)}`}
                                                                                 target="_blank"
@@ -951,234 +951,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                     </tbody>
                                                 </table>
                                             </section>
-                                        </div>
-                                    </div>
-                                </div>
-                            </>
-                        )}
-
-                        {this.state.modalIsOpen && (
-                            <>
-                                <div
-                                    className="modal-overlay"
-                                    onClick={() => this.setState({ modalIsOpen: false })}
-                                    aria-hidden="true"
-                                />
-                                <div className="testcase-modal" role="dialog" aria-modal="true" aria-labelledby="grading-modal-title">
-                                    <button
-                                        type="button"
-                                        className="modal-close-button"
-                                        aria-label="Close"
-                                        onClick={() => this.setState({ modalIsOpen: false })}
-                                    >
-                                        ✕
-                                    </button>
-
-                                    <div className="modal-body">
-                                        <div className="modal-header">
-                                            <div className="modal-title" id="grading-modal-title">
-                                                Student Name: {this.state.selectedStudentName}
-                                            </div>
-                                        </div>
-
-                                        <div className="tab-menu view-switch">
-                                            <button
-                                                className={this.state.activeView === 'table' ? 'active menu-item-table' : 'menu-item-table'}
-                                                onClick={() => this.setState({ activeView: 'table' })}
-                                                type="button"
-                                            >
-                                                Table View
-                                            </button>
-                                            <button
-                                                className={`menu-item-diff ${this.state.activeView === 'diff' ? 'active' : ''}`}
-                                                onClick={() => this.setState({ activeView: 'diff' })}
-                                                type="button"
-                                            >
-                                                File View
-                                            </button>
-                                        </div>
-
-                                        <div className="tab-content">
-                                            {this.state.activeView === 'table' && (
-                                                <section className="tests-section">
-                                                    <table className="results-table">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>Test Name</th>
-                                                                <th>Status</th>
-                                                                <th>Your Program&apos;s Output</th>
-                                                                <th>Expected Output</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {!testsLoaded && (
-                                                                <tr>
-                                                                    <td className="no-data-message" colSpan={5}>
-                                                                        Fetching tests…
-                                                                    </td>
-                                                                </tr>
-                                                            )}
-
-                                                            {testsLoaded && testRows.length === 0 && (
-                                                                <tr>
-                                                                    <td className="no-data-message" colSpan={5}>
-                                                                        No tests were returned for this submission.
-                                                                    </td>
-                                                                </tr>
-                                                            )}
-
-                                                            {testsLoaded &&
-                                                                testRows.map((row, i) => {
-                                                                    if (row.kind === 'info') {
-                                                                        return (
-                                                                            <tr className="info-row" key={`info-${i}`}>
-                                                                                <td colSpan={4}>{row.note}</td>
-                                                                            </tr>
-                                                                        )
-                                                                    }
-
-                                                                    const isPass = row.passed
-                                                                    return (
-                                                                        <tr key={`res-${row.test}-${i}`}>
-                                                                            <td>{row.test}</td>
-                                                                            <td
-                                                                                className={`status-cell status ${/^(pass|passed|ok|success)$/i.test(row.status) ? 'passed' : 'failed'
-                                                                                    }`}
-                                                                            >
-                                                                                {row.status}
-                                                                            </td>
-                                                                            <td className={isPass ? 'status-cell passed' : undefined}>
-                                                                                {isPass ? row.status : <pre className="cell-pre">{row.outputExcerpt}</pre>}
-                                                                            </td>
-                                                                            <td className={isPass ? 'status-cell passed' : undefined}>
-                                                                                {isPass ? row.status : <pre className="cell-pre">{row.expectedExcerpt}</pre>}
-                                                                            </td>
-                                                                        </tr>
-                                                                    )
-                                                                })}
-                                                        </tbody>
-                                                    </table>
-                                                </section>
-                                            )}
-
-                                            {this.state.activeView === 'diff' && (
-                                                <section className="diff-view">
-                                                    <aside className="diff-sidebar">
-                                                        <ul className="diff-file-list">
-                                                            {!testsLoaded && <li className="muted">Loading…</li>}
-                                                            {testsLoaded && diffFilesAll.length === 0 && <li className="muted">No tests.</li>}
-
-                                                            {diffFilesAll.map((f) => (
-                                                                <li
-                                                                    key={f.id}
-                                                                    className={
-                                                                        'file-item ' +
-                                                                        (f.id === derivedSelectedDiffId ? 'selected ' : '') +
-                                                                        (f.passed ? 'passed' : 'failed')
-                                                                    }
-                                                                    onClick={() => this.setState({ selectedDiffId: f.id })}
-                                                                    title={f.test}
-                                                                >
-                                                                    <div className="file-name">{f.test}</div>
-                                                                    <div className="file-sub">
-                                                                        <span className={'status-dot ' + (f.passed ? 'is-pass' : 'is-fail')} />
-                                                                        {f.status}
-                                                                    </div>
-                                                                </li>
-                                                            ))}
-                                                        </ul>
-                                                    </aside>
-
-                                                    <div className="diff-pane">
-                                                        <div className="diff-toolbar">
-                                                            <div className="diff-title">
-                                                                {selectedFile ? `Testcase Name: ${selectedFile.test}` : 'No selection'}
-                                                            </div>
-                                                            <div className="spacer" />
-                                                        </div>
-
-                                                        <div className="diff-code">
-                                                            {!selectedFile && (
-                                                                <div className="muted">Select a test on the left to view its diff.</div>
-                                                            )}
-                                                            {selectedFile &&
-                                                                (selectedFile.passed ? (
-                                                                    <div className="diff-line ctx">No differences.</div>
-                                                                ) : (
-                                                                    selectedFile.unified.split('\n').map((line, i) => {
-                                                                        const cls = line.startsWith('+')
-                                                                            ? 'add'
-                                                                            : line.startsWith('-')
-                                                                                ? 'del'
-                                                                                : line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')
-                                                                                    ? 'meta'
-                                                                                    : 'ctx'
-                                                                        return (
-                                                                            <div key={i} className={`diff-line ${cls}`}>
-                                                                                {line || ' '}
-                                                                            </div>
-                                                                        )
-                                                                    })
-                                                                ))}
-                                                        </div>
-                                                    </div>
-                                                </section>
-                                            )}
-                                        </div>
-
-                                        <section className="code-section">
-                                            <h2 className="section-title">Submitted Code</h2>
-                                            {!code && <div className="no-data-message">Fetching submitted code…</div>}
-
-                                            {!!code && (
-                                                <div className="code-block code-viewer" role="region" aria-label="Submitted source code">
-                                                    <ol className="code-list">
-                                                        {codeLines.map((text, idx) => {
-                                                            const lineNo = idx + 1
-                                                            return (
-                                                                <li key={lineNo} className="code-line">
-                                                                    <span className="gutter">
-                                                                        <span className="line-number">{lineNo}</span>
-                                                                    </span>
-                                                                    <span className="code-text">{text || '\u00A0'}</span>
-                                                                </li>
-                                                            )
-                                                        })}
-                                                    </ol>
-                                                </div>
-                                            )}
-                                        </section>
-
-                                        <div className="modal-footer" role="group" aria-label="Submit grade">
-                                            <label className="footer-instruction" htmlFor="gradeInput">
-                                                Enter grade here:
-                                            </label>
-
-                                            <input
-                                                id="gradeInput"
-                                                className="grade-input"
-                                                type="number"
-                                                placeholder="0"
-                                                value={this.state.selectedStudentGrade ?? ''}
-                                                onChange={(e) => {
-                                                    const v = e.target.value
-                                                    this.setState({ selectedStudentGrade: v === '' ? undefined : Number(v) })
-                                                }}
-                                                onWheel={(e) => e.currentTarget.blur()}
-                                            />
-
-                                            <button
-                                                className="btn submit-grade-btn"
-                                                onClick={() =>
-                                                    this.submitGrades(
-                                                        this.state.selectedStudent,
-                                                        String(this.state.selectedStudentGrade ?? 0)
-                                                    )
-                                                }
-                                                type="button"
-                                            >
-                                                Submit
-                                            </button>
                                         </div>
                                     </div>
                                 </div>

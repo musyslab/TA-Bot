@@ -81,7 +81,7 @@ class StudentPastSubmissions extends Component<{}, ProjectsState> {
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: "Class Selection", to: "/class/classes" },
+                        { label: "Class Selection", to: "/student/classes" },
                         { label: "Past Submissions" },
                     ]}
                 />
@@ -110,7 +110,7 @@ class StudentPastSubmissions extends Component<{}, ProjectsState> {
                                                 <Link
                                                     className="view-link"
                                                     target="_blank"
-                                                    to={`/class/${row.classid}/code/${row.id}`}
+                                                    to={`/student/${row.classid}/code/${row.id}`}
                                                 >
                                                     View
                                                 </Link>

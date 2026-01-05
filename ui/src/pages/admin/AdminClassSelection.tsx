@@ -82,7 +82,7 @@ class AdminClassSelection extends Component<{}, ClassState> {
                             {classes.map((classObj: ClassObject) => (
                                 <Link
                                     key={classObj.Id}
-                                    to={`/admin/projects/${classObj.Id}`}
+                                    to={`/admin/${classObj.Id}/projects`}
                                     className="clickableRow"
                                 >
                                     <div>

@@ -966,7 +966,7 @@ const AdminProjectManage = () => {
             <DirectoryBreadcrumbs
                 items={[
                     { label: 'Class Selection', to: '/admin/classes' },
-                    { label: 'Project List', to: `/admin/projects/${classId}` },
+                    { label: 'Project List', to: `/admin/${classId}/projects/` },
                     { label: 'Project Manage' },
                 ]}
             />

@@ -286,7 +286,7 @@ class OfficeHoursComponent extends Component<OfficeHoursProps, OfficeHoursState>
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: "Class Selection", to: "/class/classes" },
+                        { label: "Class Selection", to: "/student/classes" },
                         { label: "Office Hours" },
                     ]}
                 />

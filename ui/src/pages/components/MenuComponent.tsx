@@ -29,21 +29,20 @@ class MenuComponent extends Component<MenuComponentProps> {
             })
             .then((res) => {
                 const role = parseInt(res.data, 10);
-                const path = role === 1 ? "/admin/classes" : "/class/classes";
+                const path = role === 1 ? "/admin/classes" : "/student/classes";
                 window.location.replace(path);
             });
     };
 
     // Compute dynamic class upload ID (more general: any /class/:id/... path)
     getClassIdFromUrl(): string | null {
-        const match = window.location.href.match(/\/class\/(\d+)/);
+        const match = window.location.href.match(/\/student\/(\d+)/);
         return match ? match[1] : null;
     }
 
     render() {
         const classId = this.getClassIdFromUrl();
-        const recentPath = classId ? `/class/${classId}/code` : "/class/classes";
-        const officeHoursPath = classId ? `/class/OfficeHours/${classId}` : "/class/classes";
+        const officeHoursPath = classId ? `/student/${classId}/OfficeHours` : "/student/classes";
 
         return (
             <nav className="menu menu--top menu--inverted menu--borderless menu--huge">
@@ -73,7 +72,7 @@ class MenuComponent extends Component<MenuComponentProps> {
                                 <span className="menu__text">Office Hours</span>
                             </a>
 
-                            <a className="menu__item" href="/submissions">
+                            <a className="menu__item" href="/student/PastSubmissions">
                                 <FaClipboardList className="menu__icon" aria-hidden="true" />
                                 <span className="menu__text">Submissions</span>
                             </a>

@@ -33,7 +33,7 @@ const ClassSelectionPage: React.FC = () => {
             })
             .catch(() => {
                 window.alert("Invalid entry")
-                window.location.href = "/class/classes"
+                window.location.href = "/student/classes"
             })
     }
 
@@ -100,7 +100,7 @@ const ClassSelectionPage: React.FC = () => {
                             {studentClassNames.map((name, index) => (
                                 <a
                                     key={index}
-                                    href={`/class/${studentClassNumbers[index]}/upload`}
+                                    href={`/student/${studentClassNumbers[index]}/upload`}
                                     className="clickableRow"
                                 >
                                     <div>

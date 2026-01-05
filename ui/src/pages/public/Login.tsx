@@ -239,7 +239,7 @@ class Login extends Component<{}, LoginPageState> {
       })
       .then((res) => {
         localStorage.setItem("AUTOTA_AUTH_TOKEN", res.data.access_token);
-        window.location.href = "/class/classes";
+        window.location.href = "/student/classes";
       })
       .catch((err) => {
         const msg = err.response?.data?.message || "Account creation failed.";
@@ -249,7 +249,7 @@ class Login extends Component<{}, LoginPageState> {
 
   render() {
     if (this.state.isLoggedIn) {
-      const redirectPath = this.state.role === 0 ? "/class/classes" : "/admin/classes";
+      const redirectPath = this.state.role === 0 ? "/student/classes" : "/admin/classes";
       return <Navigate to={redirectPath} replace />;
     }
 

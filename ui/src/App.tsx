@@ -20,6 +20,7 @@ import AdminProjectList from './pages/admin/AdminProjectList';
 import AdminProjectManage from './pages/admin/AdminProjectManage';
 import AdminStudentRoster from './pages/admin/AdminStudentRoster';
 import AdminUpload from './pages/admin/AdminUpload';
+import AdminViewStudentCode from './pages/admin/AdminViewStudentCode';
 
 import ProtectedRoute from './pages/components/ProtectedRoute';
 
@@ -43,60 +44,39 @@ class App extends Component {
                 <Routes>
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/" element={<LandingPage />} />
-
-                    <Route path="/submissions" element={
-                        <ProtectedRoute>
-                            <StudentPastSubmissions />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/class/:class_id/upload" element={
-                        <ProtectedRoute>
-                            <StudentUpload />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/class/:class_id/code/:id?" element={
-                        <ProtectedRoute>
-                            <StudentOutputDiff />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/class/classes" element={
-                        <ProtectedRoute>
-                            <StudentClassSelection />
-                        </ProtectedRoute>
-                    } />
                     <Route path="/admin/classes" element={
                         <ProtectedRoute>
                             <AdminClassSelection />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/projects/:id/*" element={
+                    <Route path="/admin/:id/projects/*" element={
                         <ProtectedRoute>
                             <AdminProjectList />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/project/:class_id/:id" element={
+                    <Route path="/admin/:class_id/project/:id" element={
                         <ProtectedRoute>
                             <AdminStudentRoster />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/project/:project_id/:class_id/:id" element={
-                        <ProtectedRoute>
-                            <AdminGrading />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/admin/upload" element={
-                        <ProtectedRoute>
-                            <AdminUpload />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/admin/project/edit/:class_id/:id" element={
+                    <Route path="/admin/:class_id/project/manage/:id" element={
                         <ProtectedRoute>
                             <AdminProjectManage />
                         </ProtectedRoute>
                     } />
-                    <Route path="/class/OfficeHours/:id" element={
+                    <Route path="/admin/:class_id/project/:project_id/grade/:id" element={
                         <ProtectedRoute>
-                            <StudentOfficeHours />
+                            <AdminGrading />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:project_id/codeview/:id" element={
+                        <ProtectedRoute>
+                            <AdminViewStudentCode />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/plagiarism" element={
+                        <ProtectedRoute>
+                            <AdminPlagiarism />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/OfficeHours" element={
@@ -104,9 +84,35 @@ class App extends Component {
                             <AdminOfficeHours />
                         </ProtectedRoute>
                     } />
-                    <Route path="/plagiarism/compare" element={
+                    <Route path="/admin/upload" element={
                         <ProtectedRoute>
-                            <AdminPlagiarism />
+                            <AdminUpload />
+                        </ProtectedRoute>
+                    } />
+
+                    <Route path="/student/classes" element={
+                        <ProtectedRoute>
+                            <StudentClassSelection />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/:class_id/upload" element={
+                        <ProtectedRoute>
+                            <StudentUpload />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/:class_id/code/:id?" element={
+                        <ProtectedRoute>
+                            <StudentOutputDiff />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/PastSubmissions" element={
+                        <ProtectedRoute>
+                            <StudentPastSubmissions />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/:id/OfficeHours" element={
+                        <ProtectedRoute>
+                            <StudentOfficeHours />
                         </ProtectedRoute>
                     } />
                     {/* Catch-all for 404 */}

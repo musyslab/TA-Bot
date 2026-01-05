@@ -172,14 +172,14 @@ export default function AdminProjectList() {
                                 <td className="project-total-submissions">{project.TotalSubmissions}</td>
 
                                 <td className="project-review">
-                                    <Link className="button button-review" to={`/admin/project/${classId}/${project.Id}`}>
+                                    <Link className="button button-review" to={`/admin/${classId}/project/${project.Id}`}>
                                         <FaEye aria-hidden="true" />
                                         <span className="button-text">Review</span>
                                     </Link>
                                 </td>
 
                                 <td className="project-edit">
-                                    <Link className="button button-edit" to={`/admin/project/edit/${classId}/${project.Id}`}>
+                                    <Link className="button button-edit" to={`/admin/${classId}/project/manage/${project.Id}`}>
                                         <FaEdit aria-hidden="true" />
                                         <span className="button-text">Edit</span>
                                     </Link>
@@ -201,7 +201,7 @@ export default function AdminProjectList() {
                 </tbody>
             </table>
 
-            <Link className="button button-create-assignment" to={`/admin/project/edit/${classId}/0`}>
+            <Link className="button button-create-assignment" to={`/admin/${classId}/project/manage/0`}>
                 <FaPlusCircle aria-hidden="true" />
                 <span className="button-text">Create new assignment</span>
             </Link>

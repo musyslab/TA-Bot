@@ -320,9 +320,9 @@ const StudentUpload = () => {
           | undefined
 
         if (sid !== undefined && class_id !== undefined) {
-          window.location.href = `/class/${class_id}/code/${sid}`
+          window.location.href = `/student/${class_id}/code/${sid}`
         } else if (class_id !== undefined) {
-          window.location.href = `/class/${class_id}/code`
+          window.location.href = `/student/${class_id}/code`
         } else {
           window.location.href = 'code'
         }
@@ -378,7 +378,7 @@ const StudentUpload = () => {
 
       <DirectoryBreadcrumbs
         items={[
-          { label: "Class Selection", to: "/class/classes" },
+          { label: "Class Selection", to: "/student/classes" },
           { label: "Project Upload" },
         ]}
       />
