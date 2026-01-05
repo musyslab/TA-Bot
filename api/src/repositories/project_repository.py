@@ -163,7 +163,7 @@ class ProjectRepository():
         )
 
         add_path = getattr(project, "AdditionalFilePath", "") or ""
-        # Expand stored names to absolute paths under the teacher project folder for grade.py/piston.
+        # Expand stored names to absolute paths under the teacher project folder for grade.py
         try:
             base_dir = project_base if os.path.isdir(project_base) else os.path.dirname(project_base)
             raw = (add_path or "").strip()
@@ -239,7 +239,7 @@ class ProjectRepository():
         except Exception:
             add_list = []
 
-        # Expand stored names to absolute paths under the teacher solution folder (needed by piston).
+        # Expand stored names to absolute paths under the teacher solution folder.
         try:
             base_dir = ""
             if proj and getattr(proj, "solutionpath", ""):

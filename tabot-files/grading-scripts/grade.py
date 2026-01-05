@@ -22,7 +22,7 @@ import re
 import sys
 from typing import Any, Dict, List, Tuple
 
-from piston_runner import execute_test
+from judge0 import execute_test
 
 
 def normalize_newlines(text: str) -> str:
@@ -81,7 +81,7 @@ def build_unified_diff(student_text: str, expected_text: str, context_lines: int
     return diff_str + ("\n" if diff_str else "")
 
 
-def build_short_diff(student_text: str, expected_text: str, from_name: str = "actual", to_name: str = "expected") -> str: 
+def build_short_diff(student_text: str, expected_text: str, from_name: str = "actual", to_name: str = "expected") -> str:
     """
     "Short" diff for the UI:
       - only changed lines
@@ -128,12 +128,13 @@ def build_short_diff(student_text: str, expected_text: str, from_name: str = "ac
     out.extend(changed)
     return "\n".join(out).rstrip("\n") + "\n"
 
-def build_long_diff(student_text: str, expected_text: str, from_name: str = "actual", to_name: str = "expected") -> str:    
+
+def build_long_diff(student_text: str, expected_text: str, from_name: str = "actual", to_name: str = "expected") -> str:
     """
-    Include *every* line from both student and reference, emitting in the usual replacement order:
+    Include every line from both student and reference, emitting in the usual replacement order:
       -actual line
       +expected line
-    across the whole output.    
+    across the whole output.
     """
     student_lines = normalize_newlines(student_text).splitlines()
     expected_lines = normalize_newlines(expected_text).splitlines()
@@ -149,6 +150,7 @@ def build_long_diff(student_text: str, expected_text: str, from_name: str = "act
         if i < len(expected_lines):
             out.append(f"+{expected_lines[i]}")
     return "\n".join(out).rstrip("\n") + "\n"
+
 
 def pick_output_directory(path: str, root: str) -> str:
     if os.path.isdir(path):
@@ -213,7 +215,6 @@ def parse_entry_class_and_additional_files(value: Any) -> Tuple[str, Any]:
 
 
 def admin_run(language: str, user_input: str, path: str, additional_files: Any) -> str:
-    
     # Accept JSON-encoded additional files from the repo/db.
     if isinstance(additional_files, str):
         raw = additional_files.strip()
@@ -223,11 +224,11 @@ def admin_run(language: str, user_input: str, path: str, additional_files: Any) 
             except Exception:
                 pass
 
-    piston_response = execute_test(path, user_input, language, additional_files)
+    runner_response = execute_test(path, user_input, language, additional_files)
     combined = (
-        piston_response.get("stdout")
-        or piston_response.get("stderr")
-        or piston_response.get("compile_output")
+        runner_response.get("stdout")
+        or runner_response.get("stderr")
+        or runner_response.get("compile_output")
         or ""
     )
     combined = normalize_newlines(combined)
@@ -267,7 +268,7 @@ def run(student_name: str, language: str, testcases_json: str, path: str, root: 
 
         entry_class, testcase_additional_files = parse_entry_class_and_additional_files(value)
 
-        piston_resp = execute_test(
+        runner_resp = execute_test(
             path,
             testcase_in,
             language,
@@ -276,9 +277,9 @@ def run(student_name: str, language: str, testcases_json: str, path: str, root: 
         )
 
         student_text = normalize_newlines(
-            piston_resp.get("stdout")
-            or piston_resp.get("stderr")
-            or piston_resp.get("compile_output")
+            runner_resp.get("stdout")
+            or runner_resp.get("stderr")
+            or runner_resp.get("compile_output")
             or ""
         )
         expected_text = normalize_newlines(testcase_expected or "")
