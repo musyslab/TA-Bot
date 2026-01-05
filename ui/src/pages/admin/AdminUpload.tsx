@@ -4,6 +4,7 @@ import { useNavigate, NavigateFunction } from 'react-router-dom'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
+import { FaAlignJustify, FaCode, FaExchangeAlt, FaRegFile, FaTimes } from 'react-icons/fa'
 import '../../styling/AdminUploadPage.scss'
 import '../../styling/FileUploadCommon.scss'
 
@@ -270,13 +271,13 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
     // - Code (java, python, c, racket) => code icon
     // - Text (text, word, pdf) => two-line text icon
     // - Otherwise => alternate icon
-    private getFileIconName(filename: string): string {
+    private getFileIcon(filename: string): React.ReactElement {
         const CODE_ICON_RE = /\.(java|py|c|h|rkt|scm)$/i
         const TEXT_ICON_RE = /\.(txt|doc|docx|pdf)$/i
 
-        if (CODE_ICON_RE.test(filename)) return 'code'
-        if (TEXT_ICON_RE.test(filename)) return 'align justify'
-        return 'x icon'
+        if (CODE_ICON_RE.test(filename)) return <FaCode className="file-language-icon" aria-hidden="true" />
+        if (TEXT_ICON_RE.test(filename)) return <FaAlignJustify className="file-language-icon" aria-hidden="true" />
+        return <FaTimes className="file-language-icon" aria-hidden="true" />
     }
 
     handleFilesChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -497,7 +498,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                         title="Clear selected files"
                                                         disabled={disableUpload}
                                                     >
-                                                        <i className="exchange icon" aria-hidden="true"></i>
+                                                        <FaExchangeAlt aria-hidden="true" />
                                                     </button>
 
                                                     <div className="file-preview-list" title="Selected files">
@@ -511,8 +512,8 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                             return this.state.files.map((f) => (
                                                                 <div key={f.name} className="file-preview-row solution-file-card">
                                                                     <span className="file-icon-wrapper" aria-hidden="true">
-                                                                        <i className="file outline icon file-outline-icon" />
-                                                                        <i className={`${this.getFileIconName(f.name)} icon file-language-icon`} />
+                                                                        <FaRegFile className="file-outline-icon" aria-hidden="true" />
+                                                                        {this.getFileIcon(f.name)}
                                                                     </span>
                                                                     <span className="file-name">
                                                                         {f.name}

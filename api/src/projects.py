@@ -95,104 +95,6 @@ def seed_version_dir(dest_dir: str, *, seed_from_dir: str | None, seed_solution_
         if p and os.path.isfile(p):
             shutil.copy2(p, os.path.join(dest_dir, os.path.basename(p)))
 
-def extract_ts(name: str, base_proj: str) -> str:
-    """
-    Extract timestamp "YYYYMMDD_HHMMSS" from the **new** naming scheme:
-      "{ts}__{file}__{base_proj}[.ext]"
-    """
-    if f"__{base_proj}" not in name:
-        return ""
-    first_seg = name.split("__", 1)[0]
-    if (
-        len(first_seg) == 15 and first_seg[8] == "_" and
-        first_seg[:8].isdigit() and first_seg[9:].isdigit()
-    ):
-        return first_seg
-    return ""
-
-# NEW: restrict which entries can be considered solutions
-def is_solution_candidate(entry: str, full: str) -> bool:
-    # never treat assignment descriptions or export folders as solutions
-    if entry.startswith("assignment__"):
-        return False
-    if "-out" in entry:
-        return False
-    # extracted ZIPs are directories; accept them
-    if os.path.isdir(full):
-        return True
-    # otherwise, only allow source files
-    _, ext = os.path.splitext(entry)
-    return ext.lower() in ALLOWED_SOURCE_EXTS
-
-
-def pick_latest_solution(proj_dir: str, base_proj: str):
-    """Return absolute path to the newest (by embedded timestamp) solution file/dir in proj_dir."""
-    try:
-        best_ts = ""
-        best_path = None
-        for entry in os.listdir(proj_dir):
-            full = os.path.join(proj_dir, entry)
-            if not is_solution_candidate(entry, full):
-                continue
-            ts = extract_ts(entry, base_proj) 
-            if not ts:
-                continue
-            if best_ts == "" or ts > best_ts:
-                best_ts = ts
-                best_path = full
-        return best_path
-    except Exception:
-        return None
-
-def collect_files_for_piston(root_path: str, language: str, preferred_first: str | None = None):
-     """
-     Build the `files` payload for Piston.
-     - If `root_path` is a file, send that single file.
-     - If it's a directory, include relevant sources; for Java, put the main class first if found.
-     - If `preferred_first` is provided, put that file first and rename it to Piston's expected
-       entrypoint name (e.g., main.py / Main.java / main.c / main.cpp / main.rkt) in the payload.
-     """
-     def read_file(path: str) -> str:
-         with open(path, "r", encoding="utf-8", errors="replace") as f:
-             return f.read()
-     # allow a few extras that are commonly needed at build time
-     extra_exts = {".h", ".hpp", ".cpp", ".scm"}  # headers, C++, Scheme
-     def entry_name_for(language: str, path: str) -> str:
-         lang = (language or "").lower()
-         _, ext = os.path.splitext(path)
-         if "java" in lang:
-             return "Main.java"
-         if "c++" in lang or "cpp" in lang:
-             return "main.cpp"
-         if lang == "c":
-             return "main.c"
-         if "racket" in lang or "scheme" in lang:
-             return "main.rkt"
-         return "main.py"
-     if os.path.isfile(root_path):
-         actual = preferred_first if (preferred_first and os.path.isfile(preferred_first)) else root_path
-         return [{"name": entry_name_for(language, actual), "content": read_file(actual)}]
-     java_mains, regular = [], []
-     preferred_blob = None
-     for base, _, fnames in os.walk(root_path):
-         for fname in fnames:
-             full = os.path.join(base, fname)
-             _, ext = os.path.splitext(fname)
-             if (ext.lower() in ALLOWED_SOURCE_EXTS) or (ext.lower() in extra_exts):
-                 content = read_file(full)
-                 if preferred_first and os.path.abspath(full) == os.path.abspath(preferred_first):
-                     preferred_blob = {"name": entry_name_for(language, full), "content": content}
-                 elif "java" in (language or "").lower() and "public static void main(" in content:
-                     java_mains.append({"name": os.path.basename(full), "content": content})
-                 else:
-                     regular.append({"name": os.path.basename(full), "content": content})
-     ordered = []
-     if preferred_blob:
-         ordered.append(preferred_blob)
-     ordered.extend(java_mains)
-     ordered.extend(regular)
-     return ordered
-
 @projects_api.route('/all_projects', methods=['GET'])
 @jwt_required()
 @inject
@@ -331,18 +233,6 @@ def get_projects_by_user(project_repo: ProjectRepository = Provide[Container.pro
             sub = subs[current_user.Id]
             student_submissions[project.Name]=[sub.Id, 0, sub.Time.strftime("%x %X"), class_name, str(project.ClassId)]
     return jsonify(student_submissions)
-
-@projects_api.route('/submission-by-user-most-recent-project', methods=['GET'])
-@jwt_required()
-@inject
-def get_submission_by_user_most_recent_project(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    projectId = str(request.args.get("projectId"))
-    subs = submission_repo.get_most_recent_submission_by_project(projectId, [current_user.Id])
-    temp =[]
-    temp.append(subs[current_user.Id].Id)
-    return make_response(json.dumps(temp), HTTPStatus.OK)
-    
-
 
 @projects_api.route('/create_project', methods=['POST'])
 @jwt_required()
