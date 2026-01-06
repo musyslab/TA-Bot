@@ -256,8 +256,9 @@ export function AdminGrading() {
                 ]}
             />
 
-            <div className="pageTitle">Student Submission Grader</div>
-            <h2 className="student-name">Student Name: <span className="name-value">{studentName}</span></h2>
+            <div className="pageTitle">
+                Grade Submission: {studentName || 'Unknown Student'}
+            </div>
 
             <DiffView
                 submissionId={submissionId}

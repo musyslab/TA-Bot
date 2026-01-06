@@ -38,7 +38,7 @@ export function StudentOutputDiff() {
                 ]}
             />
 
-            <div className="pageTitle">Submission Output Viewer</div>
+            <div className="pageTitle">Your Program Output Results</div>
 
             <DiffView submissionId={submissionId} classId={cid} />
         </div>

@@ -1,5 +1,6 @@
 // ui/src/pages/admin/AdminViewStudentCode.tsx
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import axios from 'axios'
 import { useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
@@ -13,9 +14,37 @@ export function AdminViewStudentCode() {
 
     const submissionId = id !== undefined ? parseInt(id, 10) : defaultpagenumber
     const cid = class_id !== undefined ? parseInt(class_id, 10) : -1
+    const pid = project_id !== undefined ? parseInt(project_id, 10) : -1
+
+    const [studentName, setStudentName] = useState<string>('')
 
     const classIdStr = class_id ?? ''
     const projectIdStr = project_id ?? ''
+
+    useEffect(() => {
+        if (submissionId < 0 || pid < 0) return
+        axios
+            .post(
+                `${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
+                { project_id: pid },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            .then((res) => {
+                const data = res.data
+                const entry = Object.entries(data).find(
+                    ([_, value]) => parseInt((value as Array<string>)[7], 10) === submissionId
+                )
+                if (entry) {
+                    const studentData = entry[1] as Array<string>
+                    setStudentName(`${studentData[1]} ${studentData[0]}`)
+                }
+            })
+            .catch((err) => console.log(err))
+    }, [submissionId, pid])
 
     return (
         <div className="page-container" id="admin-view-student-code">
@@ -41,7 +70,9 @@ export function AdminViewStudentCode() {
                 ]}
             />
 
-            <div className="pageTitle">Submission Output Viewer</div>
+            <div className="pageTitle">
+                View Submission Code: {studentName || 'Unknown Student'}
+            </div>
 
             <DiffView submissionId={submissionId} classId={cid} />
         </div>
