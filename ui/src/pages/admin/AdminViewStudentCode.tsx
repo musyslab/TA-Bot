@@ -36,7 +36,7 @@ export function AdminViewStudentCode() {
                 items={[
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${classIdStr}/projects` },
-                    { label: 'Project Manage', to: `/admin/${classIdStr}/project/${projectIdStr}` },
+                    { label: 'Student List', to: `/admin/${classIdStr}/project/${projectIdStr}` },
                     { label: 'Code View' },
                 ]}
             />

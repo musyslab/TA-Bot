@@ -6,7 +6,6 @@ import { Link, useParams } from 'react-router-dom'
 import MenuComponent from '../components/MenuComponent'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import '../../styling/AdminStudentRoster.scss'
-import '../../styling/StudentOutputDiff.scss'
 
 import { FaClone, FaDownload, FaEye } from 'react-icons/fa'
 

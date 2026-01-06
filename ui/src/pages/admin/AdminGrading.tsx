@@ -251,8 +251,8 @@ export function AdminGrading() {
                 items={[
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${cid}/projects` },
-                    { label: 'Project Manage', to: `/admin/${cid}/project/${pid}` },
-                    { label: 'Student Submission' },
+                    { label: 'Student List', to: `/admin/${cid}/project/${pid}` },
+                    { label: 'Grade Submission' },
                 ]}
             />
 
