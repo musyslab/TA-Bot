@@ -348,7 +348,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                     },
                 })
                 .then((res) => {
-                    window.location.href = `/class/${this.state.class_id.toString()}/code/${res.data.sid.toString()}`
+                    window.location.href = `/admin/${this.state.class_id.toString()}/project/${this.state.project_id.toString()}/codeview/${res.data.sid.toString()}`
                 })
                 .catch((err) => {
                     this.setState({

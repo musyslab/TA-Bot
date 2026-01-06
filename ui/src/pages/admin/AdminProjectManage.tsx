@@ -568,7 +568,7 @@ const AdminProjectManage = () => {
             const newId = res.data
 
             window.alert('Your project has been created! Next, open the "Test Cases" tab to add test cases.')
-            window.location.href = `/admin/project/edit/${classId}/${newId}`
+            window.location.href = `/admin/${classId}/project/manage/${newId}`
         } catch (error) {
             console.log(error)
             setSubmittingProject(false)
