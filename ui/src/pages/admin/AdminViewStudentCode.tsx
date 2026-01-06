@@ -41,7 +41,7 @@ export function AdminViewStudentCode() {
                 ]}
             />
 
-            <div className="tests-banner">Submission Output Viewer</div>
+            <div className="pageTitle">Submission Output Viewer</div>
 
             <DiffView submissionId={submissionId} classId={cid} />
         </div>

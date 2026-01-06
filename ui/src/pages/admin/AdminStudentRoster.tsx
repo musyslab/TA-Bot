@@ -935,7 +935,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                                                                             <Link
                                                                                 className="view-link"
-                                                                                to={`/plagiarism/?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
+                                                                                to={`/admin/plagiarism/?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
                                                                                     p.a.name
                                                                                 )}&bn=${encodeURIComponent(p.b.name)}`}
                                                                                 target="_blank"

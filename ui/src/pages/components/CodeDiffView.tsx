@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { FaRegCheckSquare, FaChevronDown } from 'react-icons/fa'
 import { diffChars } from 'diff'
+import { Highlight, themes } from 'prism-react-renderer'
 import '../../styling/CodeDiffView.scss'
 
 type DiffMode = 'short' | 'long'
@@ -169,8 +170,37 @@ function renderSegs(segs: Seg[], cls: 'add-ch' | 'del-ch') {
     )
 }
 
-export default function DiffView(props: { submissionId: number; classId: number }) {
-    const { submissionId, classId } = props
+type DiffViewProps = {
+    submissionId: number
+    classId: number
+
+    // Optional: enable grading-like behaviors (AdminGrading uses these)
+    codeSectionTitle?: string
+    codeContainerRef?: React.RefObject<HTMLDivElement | null>
+    lineRefs?: React.MutableRefObject<Record<number, HTMLLIElement | null>>
+    getLineClassName?: (lineNo: number) => string
+    onLineClick?: (lineNo: number, e: React.MouseEvent) => void
+    onLineMouseEnter?: (lineNo: number) => void
+    onLineMouseLeave?: (lineNo: number) => void
+    codeRightPanel?: React.ReactNode
+}
+
+export default function DiffView(props: DiffViewProps) {
+    const {
+        submissionId,
+        classId,
+        codeSectionTitle = 'Submitted Code',
+        codeContainerRef,
+        lineRefs,
+        getLineClassName,
+        onLineClick,
+        onLineMouseEnter,
+        onLineMouseLeave,
+        codeRightPanel,
+    } = props
+
+    const internalCodeContainerRef = useRef<HTMLDivElement | null>(null)
+    const effectiveCodeContainerRef = codeContainerRef ?? internalCodeContainerRef
 
     const copyBlockHandlers = {
         onCopy: (e: React.ClipboardEvent) => e.preventDefault(),
@@ -430,7 +460,12 @@ export default function DiffView(props: { submissionId: number; classId: number 
     }, [codeFiles, selectedCodeFile])
 
     const codeText = selectedCode?.content ?? ''
-    const codeLines = useMemo(() => (codeText ? normalizeNewlines(codeText).split('\n') : []), [codeText])
+    const language =
+        selectedCode?.name?.endsWith('.py')
+            ? 'python'
+            : selectedCode?.name?.endsWith('.java')
+                ? 'java'
+                : 'clike'
 
     return (
         <>
@@ -549,8 +584,8 @@ export default function DiffView(props: { submissionId: number; classId: number 
                                             const headerCls = line.startsWith('---')
                                                 ? 'del header'
                                                 : line.startsWith('+++')
-                                                  ? 'add header'
-                                                  : 'meta header'
+                                                    ? 'add header'
+                                                    : 'meta header'
                                             out.push(
                                                 <div key={i} className={`diff-line ${headerCls}`}>
                                                     {line || ' '}
@@ -627,7 +662,7 @@ export default function DiffView(props: { submissionId: number; classId: number 
 
             {/* ==================== CODE SECTION (BOTTOM) ==================== */}
             <section className="code-section">
-                <h2 className="section-title">Submitted Code</h2>
+                <h2 className="section-title">{codeSectionTitle}</h2>
                 {codeFiles.length === 0 && <div className="no-data-message">Fetching submitted code…</div>}
 
                 {codeFiles.length > 0 && (
@@ -655,21 +690,103 @@ export default function DiffView(props: { submissionId: number; classId: number 
                             </div>
                         )}
 
-                        <div className="code-block code-viewer" role="region" aria-label="Submitted source code">
-                            <ol className="code-list">
-                                {codeLines.map((text, idx) => {
-                                    const lineNo = idx + 1
-                                    return (
-                                        <li key={lineNo} className="code-line">
-                                            <span className="gutter">
-                                                <span className="line-number">{lineNo}</span>
-                                            </span>
-                                            <span className="code-text">{text || '\u00A0'}</span>
-                                        </li>
-                                    )
-                                })}
-                            </ol>
-                        </div>
+                        {codeRightPanel ? (
+                            <div className="code-and-errors">
+                                <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
+                                    {({ style, tokens, getLineProps, getTokenProps }) => (
+                                        <div
+                                            className="code-block code-viewer"
+                                            ref={effectiveCodeContainerRef}
+                                            role="region"
+                                            aria-label="Submitted source code"
+                                        >
+                                            <ol className="code-list" style={style}>
+                                                {tokens.map((line, i) => {
+                                                    const lineNo = i + 1
+                                                    const { key: lineKey, ...lineProps } = getLineProps({ line, key: i })
+                                                    const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
+                                                    return (
+                                                        <li
+                                                            key={lineNo}
+                                                            ref={(el) => {
+                                                                if (lineRefs) lineRefs.current[lineNo] = el
+                                                            }}
+                                                            {...lineProps}
+                                                            className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
+                                                            onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
+                                                            onMouseEnter={
+                                                                onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined
+                                                            }
+                                                            onMouseLeave={
+                                                                onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined
+                                                            }
+                                                        >
+                                                            <span className="gutter">
+                                                                <span className="line-number">{lineNo}</span>
+                                                            </span>
+                                                            <span className="code-text">
+                                                                {line.map((token, key) => {
+                                                                    const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key })
+                                                                    return <span key={tokenKey ?? key} {...tokenProps} />
+                                                                })}
+                                                            </span>
+                                                        </li>
+                                                    )
+                                                })}
+                                            </ol>
+                                        </div>
+                                    )}
+                                </Highlight>
+
+                                {codeRightPanel}
+                            </div>
+                        ) : (
+                            <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
+                                {({ style, tokens, getLineProps, getTokenProps }) => (
+                                    <div
+                                        className="code-block code-viewer"
+                                        ref={effectiveCodeContainerRef}
+                                        role="region"
+                                        aria-label="Submitted source code"
+                                    >
+                                        <ol className="code-list" style={style}>
+                                            {tokens.map((line, i) => {
+                                                const lineNo = i + 1
+                                                const { key: lineKey, ...lineProps } = getLineProps({ line, key: i })
+                                                const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
+                                                return (
+                                                    <li
+                                                        key={lineNo}
+                                                        ref={(el) => {
+                                                            if (lineRefs) lineRefs.current[lineNo] = el
+                                                        }}
+                                                        {...lineProps}
+                                                        className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
+                                                        onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
+                                                        onMouseEnter={
+                                                            onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined
+                                                        }
+                                                        onMouseLeave={
+                                                            onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined
+                                                        }
+                                                    >
+                                                        <span className="gutter">
+                                                            <span className="line-number">{lineNo}</span>
+                                                        </span>
+                                                        <span className="code-text">
+                                                            {line.map((token, key) => {
+                                                                const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key })
+                                                                return <span key={tokenKey ?? key} {...tokenProps} />
+                                                            })}
+                                                        </span>
+                                                    </li>
+                                                )
+                                            })}
+                                        </ol>
+                                    </div>
+                                )}
+                            </Highlight>
+                        )}
                     </>
                 )}
             </section>

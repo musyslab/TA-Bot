@@ -43,23 +43,6 @@
     }
 }
 
-/* Big grey title bar – match the reference .title-row + .page-title */
-.tests-banner {
-    width: 90%;
-    margin: 125px auto 30px;
-    /* clear fixed menu + space above tabs/table */
-    background: #d1d5db;
-    /* darker gray, still readable with black text */
-    border: 1px solid #9ca3af;
-    /* slightly darker border for balance */
-    border-radius: 12px;
-    padding: 1.1rem 1.25rem;
-    font-weight: 700;
-    font-size: 1.45rem;
-    line-height: 1.2;
-    text-align: center;
-}
-
 /* Keep code section readable */
 .code-section {
     width: 90%;
