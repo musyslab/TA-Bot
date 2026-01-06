@@ -224,7 +224,7 @@ export function AdminGrading() {
     const [observedErrors, setObservedErrors] = useState<ErrorsByLine>({})
     const hasErrors = Object.keys(observedErrors).length > 0
 
-    //track current grade of submission
+    // Track current grade of submission
     const [grade, setGrade] = useState<number>(100);
 
     // TODO: Add actual error definitions
@@ -264,12 +264,15 @@ export function AdminGrading() {
     }
 
     const hideErrorMenu = () => {
+        setShowSubMenu(false)
         setErrorMenu(prev => ({ ...prev, active: false }))
     }
 
     // References for Error Menus
     const codeContainerRef = useRef<HTMLDivElement | null>(null)
     const errorMenuRef = useRef<HTMLDivElement | null>(null)
+
+    const lineRefs = useRef<Record<number, HTMLLIElement | null>>({})
 
     // Handles clicking outside of the codeblock
     useEffect(() => {
@@ -279,7 +282,6 @@ export function AdminGrading() {
                 errorMenuRef.current?.contains(target)) {
                 return
             }
-            // jacob
             hideErrorMenu()
         }
         document.addEventListener("mousedown", handleClickOutside)
@@ -287,6 +289,9 @@ export function AdminGrading() {
             document.removeEventListener("mousedown", handleClickOutside)
         }
     }, [])
+
+    // Helps with line hovering
+    const [hoveredLine, setHoveredLine] = useState<number | null>(null);
 
     // Track which (submissionId,cid) we've already logged to avoid duplicate logs (React StrictMode)
     const initLogKeyRef = useRef<string | null>(null)
@@ -393,7 +398,6 @@ export function AdminGrading() {
             .then(res => {
                 const data = res.data
                 const entry = Object.entries(data).find(([_, value]) => parseInt((value as Array<string>)[7]) === submissionId)
-                console.log(data)
                 if (entry) {
                     const studentData = entry[1] as Array<string>
                     setStudentName(`${studentData[1]} ${studentData[0]}`)
@@ -623,12 +627,12 @@ export function AdminGrading() {
             if (errors.some(e => e.errorId === errorId)) {
                 return prev
             }
-            setGrade(prev => prev - ERRORS[errorId].points);
             return {
                 ...prev, [
                     line]: [...errors, { errorId }],
             }
         })
+        setGrade(prev => prev - ERRORS[errorId].points);
         setSaveStatus('idle');
     }
 
@@ -672,7 +676,7 @@ export function AdminGrading() {
                 ]}
             />
 
-            <div className="tests-banner">Grade Student Submissions</div>
+            <div className="tests-banner">Student Submission Grader</div>
             <h2 className="student-name">Student Name: <span className="name-value">{studentName}</span></h2>
 
             <section className="diff-view no-user-select" {...copyBlockHandlers}>
@@ -907,7 +911,7 @@ export function AdminGrading() {
                                 language= {language}
                             >
                                 {({ style, tokens, getLineProps, getTokenProps }) => (
-                                    <div ref={codeContainerRef} className="code-block code-viewer"
+                                    <div className="code-block code-viewer" ref={codeContainerRef}
                                         role="region" aria-label="Submitted source code"
                                     >
                                         <ol className="code-list" style={style}>
@@ -918,9 +922,16 @@ export function AdminGrading() {
 
                                                 return (
                                                     <li 
+                                                        ref={(el) => {lineRefs.current[lineNo] = el}}
                                                         {...lineProps}
-                                                        className={`code-line ${errors.length > 0 ? "has-error" : ""} ${lineProps.className}`}
+                                                        className={`code-line
+                                                            ${errors.length > 0 ? "has-error" : ""}
+                                                            ${hoveredLine === lineNo ? "is-hovered" : ""}
+                                                            ${lineProps.className}
+                                                        `}
                                                         onClick={(e) => showErrorMenu(lineNo, e)}
+                                                        onMouseEnter={() => setHoveredLine(lineNo)}
+                                                        onMouseLeave={() => setHoveredLine(null)}
                                                     >
                                                         <span className="gutter">
                                                             <span className="line-number">{lineNo}</span>
@@ -937,30 +948,64 @@ export function AdminGrading() {
                                     </div>
                                 )}
                             </Highlight>
-                            <div className="code-viewer">
-                                <ol className="code-list">
-                                    {hasErrors && codeLines.map((_, idx) => {
-                                        const lineNo = idx + 1
-                                        const errors = observedErrors[lineNo] ?? []
-                                        return (
-                                            <li key={lineNo} className="error-line">
-                                                {errors.length > 0 && (
-                                                    <div className="error-block error-tag">
-                                                        <div className="error-text">{ERRORS[errors[0].errorId].label}</div>
-                                                        <div className="error-points">-{ERRORS[errors[0].errorId].points}</div>
-                                                        <button className="error-close"
-                                                            onClick={() => removeObservedError(lineNo, errors[0].errorId)}
-                                                        >X</button>
-                                                    </div>
-                                                )}
-                                                {errors.length === 0 && (
-                                                    <div>{'\u00A0'}</div>
-                                                )}
-                                            </li>
-                                        )
-                                    })}
-                                </ol>
-                            </div>
+                            <div className={`error-container ${hasErrors ? "err-exists" : ""}`}>
+                                {hasErrors && (
+                                    <div className="error-block" >
+                                        {Object.entries(observedErrors).map(([lineStr, errors]) => {
+                                            const lineNo = Number(lineStr)
+                                            const lineEl = lineRefs.current[lineNo]
+                                            if (!lineEl || !codeContainerRef.current) return null
+
+                                            const rect = lineEl.getBoundingClientRect()
+                                            const codeRect = codeContainerRef.current.getBoundingClientRect()
+                                            const blockHeight = (rect.bottom - rect.top) * 3
+                                            const top = rect.top - codeRect.top
+
+                                            const len = errors.length
+                                            const totalPoints = errors.reduce(
+                                                (sum, err) => sum + ERRORS[err.errorId].points, 0
+                                            )
+                                            return (
+                                                <div
+                                                    key={lineNo}
+                                                    className={`error-tag ${hoveredLine === lineNo ? "is-hovered" : ""}`}
+                                                    style={{ top, minHeight: blockHeight }}
+                                                    onMouseEnter={() => setHoveredLine(lineNo)}
+                                                    onMouseLeave={() => setHoveredLine(null)}
+                                                >
+                                                    {errors.map((error, idx) => {
+                                                        const meta = ERRORS[error.errorId]
+                                                        const multi = idx === 0 && len > 1
+                                                        return (
+                                                            <div className={idx !== 0 ? "hide" : ""}>
+                                                                <div className="error-header">
+                                                                    <span className="error-label">
+                                                                        {meta.label}
+                                                                        {multi && <span className="add-err">+{len - 1}</span>}
+                                                                    </span>
+                                                                    <button className="error-remove"
+                                                                        onClick={() => removeObservedError(lineNo, error.errorId)}
+                                                                    >x</button>
+                                                                </div>
+                                                                <div className="error-body">{meta.description}</div>
+                                                                <div className="error-footer">
+                                                                    <span className="arrow">{multi && ">"}</span>
+                                                                    <span className="error-points">-{meta.points}</span>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                    {len > 1 &&
+                                                        <div className="error-point-total hide">
+                                                            Total: -{totalPoints}
+                                                        </div>
+                                                    }
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                             </div>
                         </div>
                     </>
                 )}
@@ -973,8 +1018,9 @@ export function AdminGrading() {
 
                         <div className="menu-actions">
                             <div className="menu-add">
-                                <button className="menu-add-button" onClick={() => setShowSubMenu(true)}
-                                >Add Error &#9656;
+                                <button className="menu-add-button"
+                                    onClick={() => showSubMenu ? setShowSubMenu(false) : setShowSubMenu(true)}
+                                    >Add Error
                                 </button>
                                 {showSubMenu && (
                                     <div className="sub-menu">
@@ -982,9 +1028,8 @@ export function AdminGrading() {
                                             <button className="add-menu-item"
                                                 key={err.id}
                                                 onClick={() => {
-                                                    addObservedError(errorMenu.line, err.id);
-                                                    setShowSubMenu(false);
-                                                    hideErrorMenu();
+                                                    addObservedError(errorMenu.line, err.id)
+                                                    hideErrorMenu()
                                                 }}
                                             >
                                                 {err.label}
@@ -994,13 +1039,13 @@ export function AdminGrading() {
                                 )}
                             </div>
                         </div>
-                        <button className="menu-close" onClick={() => { hideErrorMenu(); }}>Close</button>
+                        <button className="menu-close" onClick={() => { hideErrorMenu() }}>Close</button>
                     </div>
                 )}
             </section>
 
             <section className="table-section">
-                <h2>Current Observed Errors:</h2>
+                <h2 className="section-title">Current Observed Errors</h2>
                 <div className="observed-errors-panel">
                     
 
