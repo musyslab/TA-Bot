@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, Link } from "react-router-dom";
 import axios from "axios";
 import "../../styling/AdminPlagiarism.scss";
+import { FaColumns, FaList } from "react-icons/fa";
 import { diffChars } from "diff";
-import MenuComponent from '../components/MenuComponent'
-import { Helmet } from 'react-helmet'
+import MenuComponent from "../components/MenuComponent";
+import { Helmet } from "react-helmet";
+import { Highlight, themes } from "prism-react-renderer";
 
 type CodeSide = { code: string; label: string };
 
@@ -37,13 +39,36 @@ export default function AdminPlagiarism() {
     useEffect(() => {
         async function fetchCode(classId: string | null, subId: string | null): Promise<string> {
             if (!classId || !subId) return "";
-            const url = `${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${subId}&class_id=${classId}`;
-            const res = await axios.get<string | string[]>(url, {
+            const baseUrl = `${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${subId}&class_id=${classId}`;
+
+            // Try text first (works for single-file submissions)
+            const res = await axios.get<string | string[]>(baseUrl, {
                 headers: { Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` },
                 responseType: "text",
             });
+
+            const first = Array.isArray(res.data) ? res.data[0] ?? "" : res.data ?? "";
+
+            if (typeof first === "string" && first.startsWith("PK")) {
+                const res2 = await axios.get<any>(baseUrl + "&format=json", {
+                    headers: { Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}` },
+                });
+
+                const data = res2.data as any;
+
+                if (data && typeof data === "object" && Array.isArray(data.files)) {
+                    return data.files
+                        .map((f: any) => `// ===== ${String(f.name ?? "file")} =====\n${String(f.content ?? "")}`)
+                        .join("\n\n");
+                }
+
+                if (typeof data === "string") return data;
+                return "";
+            }
+
             return Array.isArray(res.data) ? res.data[0] ?? "" : res.data ?? "";
         }
+
         (async () => {
             try {
                 setLoading(true);
@@ -60,6 +85,35 @@ export default function AdminPlagiarism() {
     }, [ac, asid, bc, bsid, initialALabel, initialBLabel]);
 
     const toLines = (s: string) => (s || "").replace(/\r\n/g, "\n").split("\n");
+
+    function detectLanguageFromCombinedCode(code: string): "python" | "java" | "clike" {
+        const txt = code ?? "";
+        const m = txt.match(/^\/\/ =====\s*(.+?)\s*=====\s*$/m);
+        const name = (m?.[1] ?? "").toLowerCase();
+        if (name.endsWith(".py")) return "python";
+        if (name.endsWith(".java")) return "java";
+        return "clike";
+    }
+
+    const leftLanguage = useMemo(() => detectLanguageFromCombinedCode(left.code), [left.code]);
+    const rightLanguage = useMemo(() => detectLanguageFromCombinedCode(right.code), [right.code]);
+
+    function renderInlineHighlighted(text: string, language: "python" | "java" | "clike") {
+        const t = text ?? "";
+        if (!t) return "\u00A0";
+        return (
+            <Highlight theme={themes.vsLight} code={t} language={language as any}>
+                {({ tokens, getTokenProps }) => (
+                    <>
+                        {(tokens[0] ?? []).map((token, key) => {
+                            const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key });
+                            return <span key={tokenKey ?? key} {...tokenProps} />;
+                        })}
+                    </>
+                )}
+            </Highlight>
+        );
+    }
 
     // Similarity Finder (highlights common substrings on both sides)
     function wrapPlainLines(s: string): Seg[][] {
@@ -81,32 +135,31 @@ export default function AdminPlagiarism() {
         };
 
         for (const p of parts) {
-            if (p.added) {
-                push(rightArr, p.value, false);
-            } else if (p.removed) {
-                push(leftArr, p.value, false);
+            if ((p as any).added) {
+                push(rightArr, (p as any).value, false);
+            } else if ((p as any).removed) {
+                push(leftArr, (p as any).value, false);
             } else {
                 // common segment -> highlight on both sides
-                push(leftArr, p.value, true);
-                push(rightArr, p.value, true);
+                push(leftArr, (p as any).value, true);
+                push(rightArr, (p as any).value, true);
             }
         }
         return { left: leftArr, right: rightArr };
     }
 
-    const simData = useMemo(
-        () => (simEnabled ? buildSimilarityLines(left.code, right.code) : null),
-        [simEnabled, left.code, right.code]
-    );
+    const simData = useMemo(() => (simEnabled ? buildSimilarityLines(left.code, right.code) : null), [simEnabled, left.code, right.code]);
 
     const leftLines: Seg[][] = simData ? simData.left : wrapPlainLines(left.code);
     const rightLines: Seg[][] = simData ? simData.right : wrapPlainLines(right.code);
 
     return (
         <div className="plagiarism-container">
+
             <Helmet>
                 <title>[Admin] TA-Bot</title>
             </Helmet>
+            
             <MenuComponent
                 showUpload={false}
                 showAdminUpload={true}
@@ -114,8 +167,8 @@ export default function AdminPlagiarism() {
                 showCreate={false}
                 showLast={false}
                 showReviewButton={false}
-                showAdminForum={true}
             />
+
             <div className="back-btn">
                 <Link to="/admin/classes" className="back-link">
                     Return to Class Selection
@@ -145,7 +198,7 @@ export default function AdminPlagiarism() {
                     title="Toggle layout: side-by-side vs top/bottom"
                 >
                     <span className="btn-icon neutral-icon" aria-hidden="true">
-                        <Icon name={stacked ? "list layout" : "columns"} />
+                        {stacked ? <FaList /> : <FaColumns />}
                     </span>
                     Layout: {stacked ? "Top/Bottom" : "Side-by-Side"}
                 </button>
@@ -158,58 +211,144 @@ export default function AdminPlagiarism() {
                 <div className={`panels ${stacked ? "stacked" : "side"}`}>
                     <div>
                         <h2 className="section-title">{left.label}</h2>
-                        <div className="code-block code-viewer" role="region" aria-label={`${left.label} source code`}>
-                            <ol className="code-list">
-                                {leftLines.map((segs, i) => (
-                                    <li key={`a-${i + 1}`} className="code-line">
-                                        <span className="gutter">
-                                            <span className="line-number">{i + 1}</span>
-                                        </span>
-                                        <span className="code-text">
-                                            {segs.length === 0
-                                                ? "\u00A0"
-                                                : segs.map((seg, idx) =>
-                                                    seg.similar ? (
-                                                        <span key={idx} className="similar-ch">
-                                                            {seg.text || "\u00A0"}
+
+                        {!simEnabled ? (
+                            <Highlight theme={themes.vsLight} code={left.code ?? ""} language={leftLanguage as any}>
+                                {({ style, tokens, getLineProps, getTokenProps }) => (
+                                    <div
+                                        className="code-block code-viewer"
+                                        style={style}
+                                        role="region"
+                                        aria-label={`${left.label} source code`}
+                                    >
+                                        <ol className="code-list">
+                                            {tokens.map((line, i) => {
+                                                const { key: lineKey, ...lineProps } = getLineProps({ line, key: i });
+                                                return (
+                                                    <li key={lineKey ?? `a-${i + 1}`} {...lineProps} className="code-line">
+                                                        <span className="gutter">
+                                                            <span className="line-number">{i + 1}</span>
                                                         </span>
-                                                    ) : (
-                                                        <span key={idx}>{seg.text || "\u00A0"}</span>
-                                                    )
-                                                )}
-                                        </span>
-                                    </li>
-                                ))}
-                            </ol>
-                        </div>
+                                                        <span className="code-text">
+                                                            {line.map((token, key) => {
+                                                                const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key });
+                                                                return <span key={tokenKey ?? key} {...tokenProps} />;
+                                                            })}
+                                                        </span>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ol>
+                                    </div>
+                                )}
+                            </Highlight>
+                        ) : (
+                            <Highlight theme={themes.vsLight} code={left.code ?? ""} language={leftLanguage as any}>
+                                {({ style }) => (
+                                    <div
+                                        className="code-block code-viewer"
+                                        style={style}
+                                        role="region"
+                                        aria-label={`${left.label} source code`}
+                                    >
+                                        <ol className="code-list">
+                                            {leftLines.map((segs, i) => (
+                                                <li key={`a-${i + 1}`} className="code-line">
+                                                    <span className="gutter">
+                                                        <span className="line-number">{i + 1}</span>
+                                                    </span>
+                                                    <span className="code-text">
+                                                        {segs.length === 0
+                                                            ? "\u00A0"
+                                                            : segs.map((seg, idx) =>
+                                                                  seg.similar ? (
+                                                                      <span key={idx} className="similar-ch">
+                                                                          {renderInlineHighlighted(seg.text, leftLanguage)}
+                                                                      </span>
+                                                                  ) : (
+                                                                      <span key={idx}>{renderInlineHighlighted(seg.text, leftLanguage)}</span>
+                                                                  )
+                                                              )}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ol>
+                                    </div>
+                                )}
+                            </Highlight>
+                        )}
                     </div>
 
                     <div>
                         <h2 className="section-title">{right.label}</h2>
-                        <div className="code-block code-viewer" role="region" aria-label={`${right.label} source code`}>
-                            <ol className="code-list">
-                                {rightLines.map((segs, i) => (
-                                    <li key={`b-${i + 1}`} className="code-line">
-                                        <span className="gutter">
-                                            <span className="line-number">{i + 1}</span>
-                                        </span>
-                                        <span className="code-text">
-                                            {segs.length === 0
-                                                ? "\u00A0"
-                                                : segs.map((seg, idx) =>
-                                                    seg.similar ? (
-                                                        <span key={idx} className="similar-ch">
-                                                            {seg.text || "\u00A0"}
+
+                        {!simEnabled ? (
+                            <Highlight theme={themes.vsLight} code={right.code ?? ""} language={rightLanguage as any}>
+                                {({ style, tokens, getLineProps, getTokenProps }) => (
+                                    <div
+                                        className="code-block code-viewer"
+                                        style={style}
+                                        role="region"
+                                        aria-label={`${right.label} source code`}
+                                    >
+                                        <ol className="code-list">
+                                            {tokens.map((line, i) => {
+                                                const { key: lineKey, ...lineProps } = getLineProps({ line, key: i });
+                                                return (
+                                                    <li key={lineKey ?? `b-${i + 1}`} {...lineProps} className="code-line">
+                                                        <span className="gutter">
+                                                            <span className="line-number">{i + 1}</span>
                                                         </span>
-                                                    ) : (
-                                                        <span key={idx}>{seg.text || "\u00A0"}</span>
-                                                    )
-                                                )}
-                                        </span>
-                                    </li>
-                                ))}
-                            </ol>
-                        </div>
+                                                        <span className="code-text">
+                                                            {line.map((token, key) => {
+                                                                const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key });
+                                                                return <span key={tokenKey ?? key} {...tokenProps} />;
+                                                            })}
+                                                        </span>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ol>
+                                    </div>
+                                )}
+                            </Highlight>
+                        ) : (
+                            <Highlight theme={themes.vsLight} code={right.code ?? ""} language={rightLanguage as any}>
+                                {({ style }) => (
+                                    <div
+                                        className="code-block code-viewer"
+                                        style={style}
+                                        role="region"
+                                        aria-label={`${right.label} source code`}
+                                    >
+                                        <ol className="code-list">
+                                            {rightLines.map((segs, i) => (
+                                                <li key={`b-${i + 1}`} className="code-line">
+                                                    <span className="gutter">
+                                                        <span className="line-number">{i + 1}</span>
+                                                    </span>
+                                                    <span className="code-text">
+                                                        {segs.length === 0
+                                                            ? "\u00A0"
+                                                            : segs.map((seg, idx) =>
+                                                                  seg.similar ? (
+                                                                      <span key={idx} className="similar-ch">
+                                                                          {renderInlineHighlighted(seg.text, rightLanguage)}
+                                                                      </span>
+                                                                  ) : (
+                                                                      <span key={idx}>
+                                                                          {renderInlineHighlighted(seg.text, rightLanguage)}
+                                                                      </span>
+                                                                  )
+                                                              )}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ol>
+                                    </div>
+                                )}
+                            </Highlight>
+                        )}
                     </div>
                 </div>
             )}
