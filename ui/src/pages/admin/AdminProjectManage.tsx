@@ -316,8 +316,7 @@ const AdminProjectManage = () => {
         return d
     })()
 
-    //const [ProjectStartDate, setProjectStartDate] = useState<Date | null>(() => (project_id === 0 ? defaultStart : null))
-    //const [ProjectEndDate, setProjectEndDate] = useState<Date | null>(() => (project_id === 0 ? defaultEnd : null))
+    
     const [ProjectStartDate, setProjectStartDate] = useState<Date | null>(null)
     const [ProjectEndDate, setProjectEndDate] = useState<Date | null>(null)
     
@@ -338,8 +337,12 @@ const AdminProjectManage = () => {
                         }
                     }
                 );
-                setProjects(response.data);
-                console.log("Projects loaded:", response.data);
+                const otherProjects = response.data.filter((pStr) => {
+                    const p = JSON.parse(pStr);
+                    return p.Id !== project_id;
+                });
+                setProjects(otherProjects);
+                console.log("Projects loaded:", otherProjects);
             } catch (err) {
                 console.log(err);
             }
@@ -347,7 +350,7 @@ const AdminProjectManage = () => {
 
         fetchProjects();
     }, []);
-
+    
     const blockedDates = useMemo(() => {
         const dates = [];
 
@@ -369,7 +372,7 @@ const AdminProjectManage = () => {
                     dayStart.setHours(0, 0, 0, 0); // 00:00:00
                     
                     const dayEnd = new Date(currentDay);
-                    dayEnd.setHours(23, 59, 59, 999); // 23:59:59
+                    dayEnd.setHours(23, 59, 0, 0); // 23:59
 
                     const isFullyOccupied = (projectStart <= dayStart) && (projectEnd >= dayEnd);
 
