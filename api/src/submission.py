@@ -258,7 +258,20 @@ def Submit_OH_Question(submission_repo: SubmissionRepository = Provide[Container
 @jwt_required()
 @inject
 def Get_OH_Questions(submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    questions = submission_repo.Get_all_OH_questions()
+    if current_user.Role != ADMIN_ROLE:
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    def fmt_dt(dt_val):
+        if dt_val is None:
+            return ""
+        try:
+            return dt_val.strftime("%x %X")
+        except Exception:
+            return str(dt_val)
+
+    # Admin view needs ALL OHVisits entries (active + dismissed) so the UI can split
+    # into Current Queue vs History.
+    questions = submission_repo.Get_all_OH_questions(include_dismissed=True)
     question_list = []
     #Need class ID and submission ID
     for question in questions:
@@ -268,11 +281,86 @@ def Get_OH_Questions(submission_repo: SubmissionRepository = Provide[Container.s
         class_id = project_repo.get_class_id_by_name(class_name)
         subs = submission_repo.get_most_recent_submission_by_project(question.projectId, [question.StudentId])
         try:
-            question_list.append([question.Sqid,question.StudentQuestionscol, question.TimeSubmitted.strftime("%x %X"), Student_name, question.ruling, question.projectId, class_id, subs[question.StudentId].Id])
+            question_list.append([
+                question.Sqid,
+                question.StudentQuestionscol,
+                fmt_dt(question.TimeSubmitted),
+                Student_name,
+                question.ruling,
+                int(getattr(question, "dismissed", 0) or 0),
+                fmt_dt(getattr(question, "TimeAccepted", None)),
+                fmt_dt(getattr(question, "TimeCompleted", None)),
+                question.projectId,
+                class_id,
+                subs[question.StudentId].Id
+            ])
         except:
-            question_list.append([question.Sqid,question.StudentQuestionscol, question.TimeSubmitted.strftime("%x %X"), Student_name, question.ruling, question.projectId, class_id, -1])
+            question_list.append([
+                question.Sqid,
+                question.StudentQuestionscol,
+                fmt_dt(question.TimeSubmitted),
+                Student_name,
+                question.ruling,
+                int(getattr(question, "dismissed", 0) or 0),
+                fmt_dt(getattr(question, "TimeAccepted", None)),
+                fmt_dt(getattr(question, "TimeCompleted", None)),
+                question.projectId,
+                class_id,
+                -1
+            ])
     return make_response(json.dumps(question_list), HTTPStatus.OK)
 
+@submission_api.route('/getOHqueue', methods=['GET'])
+@jwt_required()
+@inject
+def Get_OH_Queue(submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
+    """
+    Student-safe queue endpoint.
+    Returns only ACTIVE (dismissed == 0) OHVisits for a single project.
+    Accepts either:
+      - project_id=<int>
+      - class_id=<int>  (uses current project for that class)
+    Response (list rows): [Sqid, question, time_submitted, student_name]
+    """
+    def fmt_dt(dt_val):
+        if dt_val is None:
+            return ""
+        try:
+            return dt_val.strftime("%x %X")
+        except Exception:
+            return str(dt_val)
+
+    project_id = None
+    pid_raw = (request.args.get("project_id", "") or "").strip()
+    if pid_raw.isdigit():
+        project_id = int(pid_raw)
+    else:
+        cid_raw = request.args.get("class_id", None)
+        try:
+            class_id = int(cid_raw) if cid_raw is not None else None
+        except (TypeError, ValueError):
+            class_id = None
+        if class_id is not None:
+            try:
+                proj = project_repo.get_current_project_by_class(class_id)
+                project_id = int(getattr(proj, "Id", 0) or 0) if proj else None
+            except Exception:
+                project_id = None
+
+    if not project_id:
+        return make_response(json.dumps([]), HTTPStatus.OK)
+
+    questions = submission_repo.Get_active_OH_questions_for_project(int(project_id))
+    out = []
+    for q in (questions or []):
+        try:
+            user = user_repo.get_user(q.StudentId)
+            student_name = (user.Firstname + " " + user.Lastname) if user else "Unknown"
+        except Exception:
+            student_name = "Unknown"
+        out.append([q.Sqid, q.StudentQuestionscol, fmt_dt(q.TimeSubmitted), student_name])
+
+    return make_response(json.dumps(out), HTTPStatus.OK)
 
 @submission_api.route('/submitOHQuestionRuling', methods=['GET'])
 @jwt_required()

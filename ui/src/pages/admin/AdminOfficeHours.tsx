@@ -16,35 +16,62 @@ import {
 interface OfficeHoursState {
     question: string
     Student_questions: Array<OHQuestion>
+    historyPage: number
 }
 
 interface OHQuestion {
     question: string
     question_time: string
+    accepted_time: string
+    completed_time: string
     Student_name: string
     Question_id: number
     ruled: number
+    dismissed: number
     submission_id: number
     class_id: number
     project_id: number
 }
 
 class AdminOfficeHours extends Component<{}, OfficeHoursState> {
+
+    private fetchIntervalId: number | undefined
+
     constructor(props: {}) {
         super(props)
         this.state = {
             question: '',
             Student_questions: [],
+            historyPage: 1,
         }
         this.handleComplete = this.handleComplete.bind(this)
         this.handleRuling = this.handleRuling.bind(this)
         this.fetchOHQuestions = this.fetchOHQuestions.bind(this)
         this.startFetchingInterval = this.startFetchingInterval.bind(this)
         this.downloadAssignment = this.downloadAssignment.bind(this)
+        this.setHistoryPage = this.setHistoryPage.bind(this)
     }
 
     componentDidMount() {
         this.startFetchingInterval()
+    }
+
+    componentDidUpdate(_prevProps: {}, prevState: OfficeHoursState) {
+        // Clamp history page if the history size shrinks (after completing/rejecting, etc.)
+        if (prevState.Student_questions !== this.state.Student_questions) {
+            const history = this.state.Student_questions.filter((q) => (q.dismissed ?? 0) === 1)
+            const totalPages = Math.max(1, Math.ceil(history.length / 5))
+            if (this.state.historyPage > totalPages) {
+                // eslint-disable-next-line react/no-did-update-set-state
+                this.setState({ historyPage: totalPages })
+            }
+        }
+    }
+
+    componentWillUnmount() {
+        if (this.fetchIntervalId) {
+            window.clearInterval(this.fetchIntervalId)
+        }
     }
 
     downloadAssignment(projectId: number) {
@@ -107,9 +134,12 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
                     question_time: item[2],
                     Student_name: item[3],
                     ruled: item[4],
-                    project_id: item[5],
-                    class_id: item[6],
-                    submission_id: item[7],
+                    dismissed: item[5],
+                    accepted_time: item[6],
+                    completed_time: item[7],
+                    project_id: item[8],
+                    class_id: item[9],
+                    submission_id: item[10],
                 }))
                 this.setState({ Student_questions: formattedQuestions })
             })
@@ -159,11 +189,27 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
 
     startFetchingInterval() {
         this.fetchOHQuestions()
-        setInterval(this.fetchOHQuestions, 300000) // 5 minutes
+        this.fetchIntervalId = window.setInterval(this.fetchOHQuestions, 300000) // 5 minutes
+    }
+
+    setHistoryPage(nextPage: number) {
+        this.setState({ historyPage: nextPage })
     }
 
     render() {
         const { Student_questions } = this.state
+
+        const queueQuestions = Student_questions.filter((q) => (q.dismissed ?? 0) === 0)
+        const historyQuestions = Student_questions
+            .filter((q) => (q.dismissed ?? 0) === 1)
+            // newest first (higher id first)
+            .sort((a, b) => (b.Question_id ?? 0) - (a.Question_id ?? 0))
+
+        const pageSize = 5
+        const totalHistoryPages = Math.max(1, Math.ceil(historyQuestions.length / pageSize))
+        const historyPage = Math.min(this.state.historyPage, totalHistoryPages)
+        const historyStart = (historyPage - 1) * pageSize
+        const historySlice = historyQuestions.slice(historyStart, historyStart + pageSize)
 
         return (
             <div className="oh-page">
@@ -187,155 +233,272 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
 
                     <div className="pageTitle">Office Hours</div>
 
-                    <table border={1} className="question-queue-table">
-                        <thead className="table-head">
-                            <tr className="head-row">
-                                <th className="col-status">Status</th>
-                                <th className="col-position">Queue</th>
-                                <th className="col-student">Student Name</th>
-                                <th className="col-question">Question</th>
-                                <th className="col-wait">Time in Queue</th>
-                                <th className="col-feedback">Decision</th>
-                                <th className="col-code">Student Code</th>
-                                <th className="col-assignment">Assignment</th>
-                                <th className="col-complete">Complete</th>
-                            </tr>
-                        </thead>
+                    <div className="table-section">
+                        <div className="tableTitle">Current Queue</div>
+                        <table border={1} className="question-queue-table oh-table">
+                            <thead className="table-head">
+                                <tr className="head-row">
+                                    <th className="col-status">Status</th>
+                                    <th className="col-position">Queue</th>
+                                    <th className="col-student">Student Name</th>
+                                    <th className="col-question">Question</th>
+                                    <th className="col-wait">Time in Queue</th>
+                                    <th className="col-feedback">Decision</th>
+                                    <th className="col-code">Student Code</th>
+                                    <th className="col-assignment">Assignment</th>
+                                    <th className="col-complete">Complete</th>
+                                </tr>
+                            </thead>
 
-                        <tbody className="table-body">
-                            {Student_questions.map((item: OHQuestion, index) => (
-                                <tr
-                                    key={item.Question_id}
-                                    className={`data-row ${item.ruled === 1 ? 'is-in-oh' : ''}`}
-                                >
-                                    <td
-                                        className="cell-status"
-                                        aria-label={item.ruled === 1 ? 'In office hours' : 'Waiting in queue'}
-                                    >
-                                        {item.ruled === 1 ? (
-                                            <span className="status in-oh" aria-hidden="true">
-                                                <FaHandshake />
-                                            </span>
-                                        ) : (
-                                            <span className="status waiting" aria-hidden="true">
-                                                <FaRegClock />
-                                            </span>
-                                        )}
-                                    </td>
-
-                                    <td className="cell-position">{index + 1}</td>
-                                    <td className="cell-student">{item.Student_name}</td>
-                                    <td className="cell-question">{item.question}</td>
-                                    <td className="cell-wait">
-                                        {'In queue for ' + this.calculateTimeDifference(item.question_time)} minutes
-                                    </td>
-
-                                    <td className="cell-feedback">
-                                        {item.ruled === -1 ? (
-                                            <div className="feedback-actions">
-                                                <button
-                                                    className="button button-reject"
-                                                    onClick={() => this.handleRuling(item.Question_id, 0)}
-                                                >
-                                                    <FaTimesCircle aria-hidden="true" /> Reject
-                                                </button>
-                                                <button
-                                                    className="button button-accept"
-                                                    onClick={() => this.handleRuling(item.Question_id, 1)}
-                                                >
-                                                    <FaCheckCircle aria-hidden="true" /> Accept
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <div className="feedback-actions is-disabled">
-                                                <button className="button button-reject" disabled>
-                                                    <FaTimesCircle aria-hidden="true" /> Reject
-                                                </button>
-                                                <button className="button button-accept" disabled>
-                                                    <FaCheckCircle aria-hidden="true" /> Accept
-                                                </button>
-                                            </div>
-                                        )}
-                                    </td>
-
-                                    <td className="cell-code">
-                                        {item.ruled === -1 ? (
-                                            <div className="locked-box">
-                                                <button
-                                                    className="button button-view-code is-locked"
-                                                    disabled
-                                                    aria-disabled="true"
-                                                    aria-describedby={`lock-${item.Question_id}-code`}
-                                                    title="Locked until you Accept or Reject"
-                                                >
-                                                    <FaEye aria-hidden="true" /> View
-                                                </button>
-                                            </div>
-                                        ) : item.submission_id !== -1 ? (
-                                            <Link
-                                                target="_blank"
-                                                to={`/class/${item.class_id}/code/${item.submission_id}`}
-                                                className="link-code"
+                            <tbody className="table-body">
+                                {queueQuestions.length === 0 ? (
+                                    <tr className="empty-row">
+                                        <td className="empty-cell" colSpan={9}>
+                                            No students are currently in the office hours queue.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    queueQuestions.map((item: OHQuestion, index) => (
+                                        <tr
+                                            key={item.Question_id}
+                                            className={`data-row ${item.ruled === 1 ? 'is-in-oh' : ''}`}
+                                        >
+                                            <td
+                                                className="cell-status"
+                                                aria-label={item.ruled === 1 ? 'In office hours' : 'Waiting in queue'}
                                             >
-                                                <button className="button button-view-code">View</button>
-                                            </Link>
-                                        ) : (
-                                            <button className="button button-view-code">
-                                                <FaEye aria-hidden="true" /> View
-                                            </button>
-                                        )}
-                                    </td>
+                                                {item.ruled === 1 ? (
+                                                    <span className="status in-oh" aria-hidden="true">
+                                                        <FaHandshake />
+                                                    </span>
+                                                ) : (
+                                                    <span className="status waiting" aria-hidden="true">
+                                                        <FaRegClock />
+                                                    </span>
+                                                )}
+                                            </td>
 
-                                    <td className="cell-assignment">
-                                        {item.ruled === -1 ? (
-                                            <div className="locked-box">
+                                            <td className="cell-position">{index + 1}</td>
+                                            <td className="cell-student">{item.Student_name}</td>
+                                            <td className="cell-question">{item.question}</td>
+                                            <td className="cell-wait">
+                                                {'In queue for ' + this.calculateTimeDifference(item.question_time)} minutes
+                                            </td>
+
+                                            <td className="cell-feedback">
+                                                {item.ruled === -1 ? (
+                                                    <div className="feedback-actions">
+                                                        <button
+                                                            className="button button-reject"
+                                                            onClick={() => this.handleRuling(item.Question_id, 0)}
+                                                        >
+                                                            <FaTimesCircle aria-hidden="true" /> Reject
+                                                        </button>
+                                                        <button
+                                                            className="button button-accept"
+                                                            onClick={() => this.handleRuling(item.Question_id, 1)}
+                                                        >
+                                                            <FaCheckCircle aria-hidden="true" /> Accept
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="feedback-actions is-disabled">
+                                                        <button className="button button-reject" disabled>
+                                                            <FaTimesCircle aria-hidden="true" /> Reject
+                                                        </button>
+                                                        <button className="button button-accept" disabled>
+                                                            <FaCheckCircle aria-hidden="true" /> Accept
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </td>
+
+                                            <td className="cell-code">
+                                                {item.ruled === -1 ? (
+                                                    <div className="locked-box">
+                                                        <button
+                                                            className="button button-view-code is-locked"
+                                                            disabled
+                                                            aria-disabled="true"
+                                                            aria-describedby={`lock-${item.Question_id}-code`}
+                                                            title="Locked until you Accept or Reject"
+                                                        >
+                                                            <FaEye aria-hidden="true" /> View
+                                                        </button>
+                                                    </div>
+                                                ) : item.submission_id !== -1 ? (
+                                                    <Link
+                                                        target="_blank"
+                                                        to={`/class/${item.class_id}/code/${item.submission_id}`}
+                                                        className="link-code"
+                                                    >
+                                                        <button className="button button-view-code">View</button>
+                                                    </Link>
+                                                ) : (
+                                                    <button className="button button-view-code">
+                                                        <FaEye aria-hidden="true" /> View
+                                                    </button>
+                                                )}
+                                            </td>
+
+                                            <td className="cell-assignment">
+                                                {item.ruled === -1 ? (
+                                                    <div className="locked-box">
+                                                        <button
+                                                            className="button button-assignment is-locked"
+                                                            disabled
+                                                            aria-disabled="true"
+                                                            aria-describedby={`lock-${item.Question_id}-assignment`}
+                                                            title="Locked until you Accept or Reject"
+                                                        >
+                                                            <FaDownload aria-hidden="true" />
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        className="button button-assignment"
+                                                        onClick={() => this.downloadAssignment(item.project_id)}
+                                                        title="Download assignment description"
+                                                    >
+                                                        <FaDownload aria-hidden="true" />
+                                                    </button>
+                                                )}
+                                            </td>
+
+                                            <td className="cell-complete">
+                                                {item.ruled === -1 ? (
+                                                    <div className="locked-box">
+                                                        <button
+                                                            className="button button-completed is-locked"
+                                                            disabled
+                                                            aria-disabled="true"
+                                                            aria-describedby={`lock-${item.Question_id}-complete`}
+                                                            title="Locked until you Accept or Reject"
+                                                        >
+                                                            <FaCheckCircle aria-hidden="true" /> Completed
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        className="button button-completed"
+                                                        onClick={this.handleComplete(item.Question_id)}
+                                                    >
+                                                        <FaCheckCircle aria-hidden="true" /> Completed
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div className="table-section">
+                        <div className="tableTitle">History</div>
+                        <table border={1} className="question-queue-table oh-table history-table">
+                            <thead className="table-head">
+                                <tr className="head-row">
+                                    <th className="col-status">Outcome</th>
+                                    <th className="col-position">#</th>
+                                    <th className="col-student">Student Name</th>
+                                    <th className="col-question">Question</th>
+                                    <th className="col-wait">Submitted</th>
+                                    <th className="col-feedback">Decision</th>
+                                    <th className="col-code">Student Code</th>
+                                    <th className="col-assignment">Assignment</th>
+                                </tr>
+                            </thead>
+
+                            <tbody className="table-body">
+                                {historyQuestions.length === 0 ? (
+                                    <tr className="empty-row">
+                                        <td className="empty-cell" colSpan={8}>
+                                            No office hours history yet.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    historySlice.map((item: OHQuestion, index) => (
+                                        <tr key={`hist-${item.Question_id}`} className="data-row is-history">
+                                            <td className="cell-status" aria-label="Outcome">
+                                                {item.ruled === 1 ? (
+                                                    <span className="status outcome-accepted" aria-hidden="true">
+                                                        <FaCheckCircle />
+                                                    </span>
+                                                ) : item.ruled === 0 ? (
+                                                    <span className="status outcome-rejected" aria-hidden="true">
+                                                        <FaTimesCircle />
+                                                    </span>
+                                                ) : (
+                                                    <span className="status outcome-unknown" aria-hidden="true">
+                                                        <FaRegClock />
+                                                    </span>
+                                                )}
+                                            </td>
+
+                                            <td className="cell-position">{historyStart + index + 1}</td>
+                                            <td className="cell-student">{item.Student_name}</td>
+                                            <td className="cell-question">{item.question}</td>
+                                            <td className="cell-wait">{item.question_time || '—'}</td>
+
+                                            <td className="cell-feedback">
+                                                {item.ruled === 1 ? 'Accepted' : item.ruled === 0 ? 'Rejected' : 'No decision'}
+                                            </td>
+
+                                            <td className="cell-code">
+                                                {item.submission_id !== -1 ? (
+                                                    <Link
+                                                        target="_blank"
+                                                        to={`/class/${item.class_id}/code/${item.submission_id}`}
+                                                        className="link-code"
+                                                    >
+                                                        <button className="button button-view-code">View</button>
+                                                    </Link>
+                                                ) : (
+                                                    <button className="button button-view-code" disabled>
+                                                        <FaEye aria-hidden="true" /> View
+                                                    </button>
+                                                )}
+                                            </td>
+
+                                            <td className="cell-assignment">
                                                 <button
-                                                    className="button button-assignment is-locked"
-                                                    disabled
-                                                    aria-disabled="true"
-                                                    aria-describedby={`lock-${item.Question_id}-assignment`}
-                                                    title="Locked until you Accept or Reject"
+                                                    className="button button-assignment"
+                                                    onClick={() => this.downloadAssignment(item.project_id)}
+                                                    title="Download assignment description"
                                                 >
                                                     <FaDownload aria-hidden="true" />
                                                 </button>
-                                            </div>
-                                        ) : (
-                                            <button
-                                                className="button button-assignment"
-                                                onClick={() => this.downloadAssignment(item.project_id)}
-                                                title="Download assignment description"
-                                            >
-                                                <FaDownload aria-hidden="true" />
-                                            </button>
-                                        )}
-                                    </td>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
 
-                                    <td className="cell-complete">
-                                        {item.ruled === -1 ? (
-                                            <div className="locked-box">
-                                                <button
-                                                    className="button button-completed is-locked"
-                                                    disabled
-                                                    aria-disabled="true"
-                                                    aria-describedby={`lock-${item.Question_id}-complete`}
-                                                    title="Locked until you Accept or Reject"
-                                                >
-                                                    <FaCheckCircle aria-hidden="true" /> Completed
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <button
-                                                className="button button-completed"
-                                                onClick={this.handleComplete(item.Question_id)}
-                                            >
-                                                <FaCheckCircle aria-hidden="true" /> Completed
-                                            </button>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                        {historyQuestions.length > pageSize && (
+                            <div className="pagination-controls" aria-label="History pagination">
+                                <button
+                                    className="button"
+                                    onClick={() => this.setHistoryPage(Math.max(1, historyPage - 1))}
+                                    disabled={historyPage <= 1}
+                                >
+                                    Prev
+                                </button>
+                                <div className="pagination-meta">
+                                    Page {historyPage} of {totalHistoryPages}
+                                </div>
+                                <button
+                                    className="button"
+                                    onClick={() => this.setHistoryPage(Math.min(totalHistoryPages, historyPage + 1))}
+                                    disabled={historyPage >= totalHistoryPages}
+                                >
+                                    Next
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
                 </>
             </div>
         )

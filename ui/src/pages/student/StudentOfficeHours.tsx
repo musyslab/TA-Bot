@@ -226,8 +226,24 @@ class OfficeHoursComponent extends Component<OfficeHoursProps, OfficeHoursState>
     }
 
     fetchOHQuestions() {
+        const projectId = this.state.selectedProject
+        const raw = this.props.class_id
+        const classId = raw ? Number.parseInt(raw, 10) : NaN
+
+        // Student view should only fetch the ACTIVE queue for the current project/class
+        let url = ''
+        if (Number.isInteger(projectId as number)) {
+            url = `${import.meta.env.VITE_API_URL}/submissions/getOHqueue?project_id=${projectId}`
+        } else if (!Number.isNaN(classId)) {
+            url = `${import.meta.env.VITE_API_URL}/submissions/getOHqueue?class_id=${classId}`
+        } else {
+            // No scope yet (no class_id and no project detected)
+            this.setState({ Student_questions: [] })
+            return
+        }
+
         axios
-            .get(import.meta.env.VITE_API_URL + '/submissions/getOHquestions', {
+            .get(url, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then((res) => {

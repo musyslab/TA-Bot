@@ -214,9 +214,25 @@ class SubmissionRepository():
         question.TimeCompleted = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
         db.session.commit()
         return [question.StudentId, classId]
-    def Get_all_OH_questions(self):
-        #get all questions that have not been dismissed
-        questions = OHVisits.query.filter(OHVisits.dismissed == 0).all()
+    def Get_all_OH_questions(self, include_dismissed: bool = False):
+        """
+        include_dismissed=False (default): only active (dismissed == 0)
+        include_dismissed=True: ALL OHVisits rows (active + dismissed) for admin history
+        """
+        q = OHVisits.query
+        if not include_dismissed:
+            q = q.filter(OHVisits.dismissed == 0)
+        questions = q.order_by(desc(OHVisits.Sqid)).all()
+        return questions
+
+    def Get_active_OH_questions_for_project(self, project_id: int):
+        """
+        Student-safe queue: only active (dismissed == 0) for one project, FIFO order.
+        """
+        questions = (OHVisits.query
+            .filter(and_(OHVisits.projectId == int(project_id), OHVisits.dismissed == 0))
+            .order_by(OHVisits.Sqid.asc())
+            .all())
         return questions
 
     def get_active_question(self, user_id, accepted_only: bool = False):

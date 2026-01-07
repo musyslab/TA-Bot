@@ -8,11 +8,24 @@
 /* Keep Directory, title, and table the same width and centered */
 .oh-page .directory,
 .oh-page .pageTitle,
-.oh-page .question-queue-table {
+.oh-page .question-queue-table,
+.oh-page .table-section {
     width: 95vw;
     margin-left: auto;
     margin-right: auto;
     box-sizing: border-box;
+}
+
+/* Section wrappers for the two tables */
+.table-section {
+    margin-top: 12px;
+}
+
+.tableTitle {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 12px 0 8px;
+    color: #111827;
 }
 
 /* Ensure the table actually centers as a block/table element */
@@ -259,5 +272,62 @@
                 }
             }
         }
+
+        /* Empty state row */
+        tr.empty-row {
+            background: #ffffff;
+
+            td.empty-cell {
+                padding: 1.25rem 0.75rem;
+                text-align: center;
+                color: #6b7280;
+                font-style: italic;
+            }
+        }
+
+    }
+}
+
+/* History-specific tweaks */
+.history-table {
+    .table-body {
+        tr.data-row.is-history {
+            background: #ffffff;
+
+            &:nth-child(even) {
+                background: #f9fafb;
+            }
+
+            &:hover {
+                background: #f3f4f6;
+            }
+
+            .status.outcome-accepted svg {
+                font-size: 1.35rem;
+            }
+
+            .status.outcome-rejected svg {
+                font-size: 1.35rem;
+            }
+
+            .status.outcome-unknown svg {
+                font-size: 1.35rem;
+                opacity: 0.7;
+            }
+        }
+    }
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: -10px;
+    margin-bottom: 20px;
+
+    .pagination-meta {
+        color: #374151;
+        font-weight: 600;
     }
 }
