@@ -5,7 +5,7 @@ import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
 import { FaAlignJustify, FaCode, FaExchangeAlt, FaRegFile, FaTimes } from 'react-icons/fa'
-import FullScreenLoader from '../components/FullScreenLoader'
+import LoadingAnimation from '../components/LoadingAnimation'
 import '../../styling/AdminUploadPage.scss'
 import '../../styling/FileUploadCommon.scss'
 
@@ -384,7 +384,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         return (
             <>
 
-                <FullScreenLoader show={this.state.isUploading} message="Uploading..." />
+<LoadingAnimation show={this.state.isUploading} message="Uploading..." />
 
                 <DirectoryBreadcrumbs
                     items={[

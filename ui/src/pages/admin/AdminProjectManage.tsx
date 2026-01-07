@@ -9,7 +9,7 @@ import 'react-datepicker/dist/react-datepicker.css'
 import '../../styling/AdminProjectManage.scss'
 import '../../styling/FileUploadCommon.scss'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
-import FullScreenLoader from '../components/FullScreenLoader'
+import LoadingAnimation from '../components/LoadingAnimation'
 
 import {
     FaAlignJustify,
@@ -1688,7 +1688,7 @@ const AdminProjectManage = () => {
                     )}
                 </>
             </div>
-            <FullScreenLoader show={showFullScreenLoader} message={loaderMessage} />
+            <LoadingAnimation show={showFullScreenLoader} message={loaderMessage} />
         </div>
     )
 }
