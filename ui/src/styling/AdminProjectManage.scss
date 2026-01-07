@@ -154,9 +154,15 @@ body {
               cursor: pointer;
             }
           }
+          &.input-error {
+            input {
+              border-color: #e74c3c;
+              box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.15);
+            }
+          }
         }
       }
-
+      
       .form-group {
         display: flex;
         gap: 1rem;
@@ -1285,4 +1291,33 @@ body:has(.preview-modal) {
       }
     }
   }
+}
+
+.react-datepicker__day--highlighted-red {
+    background-color: #b4b0b0 !important; /* Light Red Background */
+    color: #474040 !important;            /* Dark Red Text */
+    border-radius: 0.3rem;
+    font-weight: bold;
+
+    &:hover {
+        background-color: #302e2e !important;
+    }
+}
+
+.react-datepicker__time--highlighted-red {
+    background-color: #b4b0b0 !important;
+    color: #555252 !important;
+    font-weight: bold;
+
+    /* Optional: Change color slightly on hover */
+    &:hover {
+        background-color: #302e2e !important;
+    }
+}
+
+.overlap-error-text {
+  color: #e74c3c;
+  font-size: 0.95rem;
+  margin-top: -0.75rem;
+  margin-bottom: 0.5rem;
 }

@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React, { use, useEffect, useMemo, useState } from 'react'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import { useNavigate, useParams } from 'react-router-dom'
-import { eachDayOfInterval } from 'date-fns'
+import { eachDayOfInterval, set } from 'date-fns'
 import axios from 'axios'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -316,11 +316,103 @@ const AdminProjectManage = () => {
         return d
     })()
 
-    const [ProjectStartDate, setProjectStartDate] = useState<Date | null>(() => (project_id === 0 ? defaultStart : null))
-    const [ProjectEndDate, setProjectEndDate] = useState<Date | null>(() => (project_id === 0 ? defaultEnd : null))
+    //const [ProjectStartDate, setProjectStartDate] = useState<Date | null>(() => (project_id === 0 ? defaultStart : null))
+    //const [ProjectEndDate, setProjectEndDate] = useState<Date | null>(() => (project_id === 0 ? defaultEnd : null))
+    const [ProjectStartDate, setProjectStartDate] = useState<Date | null>(null)
+    const [ProjectEndDate, setProjectEndDate] = useState<Date | null>(null)
+    
+    const [overlapError, setOverlapError] = useState<boolean>(false)
 
     const highlightDates: Date[] =
         ProjectStartDate && ProjectEndDate ? eachDayOfInterval({ start: ProjectStartDate, end: ProjectEndDate }) : []
+
+    const [projects, setProjects] = useState([]);
+    useEffect(() => {
+        const fetchProjects = async () => {
+            try {
+                const response = await axios.get(
+                    `${import.meta.env.VITE_API_URL}/projects/get_projects_by_class_id?id=${classId}`,
+                    {
+                        headers: {
+                            Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
+                        }
+                    }
+                );
+                setProjects(response.data);
+                console.log("Projects loaded:", response.data);
+            } catch (err) {
+                console.log(err);
+            }
+        };
+
+        fetchProjects();
+    }, []);
+
+    const blockedDates = useMemo(() => {
+        const dates = [];
+
+        if (projects && projects.length > 0) {
+            projects.forEach((projectStr) => {
+                const project = JSON.parse(projectStr);
+                const projectStart = new Date(project.Start);
+                const projectEnd = new Date(project.End);
+
+                let currentDay = new Date(projectStart);
+                currentDay.setHours(0, 0, 0, 0);
+
+                const lastDay = new Date(projectEnd);
+                lastDay.setHours(0, 0, 0, 0);
+
+                while (currentDay <= lastDay) {
+                    
+                    const dayStart = new Date(currentDay);
+                    dayStart.setHours(0, 0, 0, 0); // 00:00:00
+                    
+                    const dayEnd = new Date(currentDay);
+                    dayEnd.setHours(23, 59, 59, 999); // 23:59:59
+
+                    const isFullyOccupied = (projectStart <= dayStart) && (projectEnd >= dayEnd);
+
+                    if (isFullyOccupied) {
+                        dates.push(new Date(currentDay));
+                    }
+
+                    currentDay.setDate(currentDay.getDate() + 1);
+                }
+            });
+        }
+        return dates;
+    }, [projects]);
+
+    const projectRanges = useMemo(() => {
+        if (!projects) return [];
+        return projects.map((pStr) => {
+            const p = JSON.parse(pStr);
+            return {
+                start: new Date(p.Start),
+                end: new Date(p.End)
+            };
+        });
+    }, [projects]);
+
+    
+    const handleTimeColors = (time) => {
+        const isBlocked = projectRanges.some((range) => {
+            return time >= range.start && time <= range.end;
+        });
+
+        return isBlocked ? "react-datepicker__time--highlighted-red" : null;
+    };
+
+    const getInjectedTimes = (dateValue) => {
+        if (!dateValue) return [];
+        
+        const endOfDay = new Date(dateValue);
+        
+        endOfDay.setHours(23, 59, 0, 0);
+        
+        return [endOfDay];
+    };
 
     useEffect(() => {
         axios
@@ -487,6 +579,80 @@ const AdminProjectManage = () => {
             .catch(err => {
                 console.log(err)
             })
+    }
+
+    function setDate(date: Date | null, isStart: boolean) {
+        let finalDate = date;
+
+        const previousDate = isStart ? ProjectStartDate : ProjectEndDate;
+        const isNewDay = !previousDate || (date && date.toDateString() !== previousDate.toDateString());
+
+        if (finalDate && isNewDay) {
+            const isBlocked = projectRanges.some(range => 
+                finalDate >= range.start && finalDate <= range.end
+            );
+
+            if (isBlocked) {
+                let candidate = new Date(finalDate);
+                candidate.setHours(0, 0, 0, 0);
+
+                let foundSafeTime = false;
+
+                const checkTime = (t) => projectRanges.some(r => t >= r.start && t <= r.end);
+
+                while (candidate.getDate() === finalDate.getDate()) {
+                    if (!checkTime(candidate)) {
+                        finalDate = candidate; 
+                        foundSafeTime = true;
+                        break;
+                    }
+                    candidate.setMinutes(candidate.getMinutes() + 15);
+                }
+
+                //checks 11:59 if loop failed
+                if (!foundSafeTime) {
+                    let endOfDay = new Date(finalDate);
+                    endOfDay.setHours(23, 59, 0, 0);
+                    if (!checkTime(endOfDay)) {
+                        finalDate = endOfDay;
+                    }
+                }
+            }
+        }
+
+        if (isStart) {
+            setProjectStartDate(finalDate);
+        } else {
+            setProjectEndDate(finalDate);
+        }
+
+        if (!finalDate) {
+            setOverlapError(false);
+            return;
+        }
+
+        
+        const startToCheck = isStart ? finalDate : ProjectStartDate;
+        const endToCheck   = isStart ? ProjectEndDate : finalDate;
+
+        let overlap = false;
+        for (const project of projectRanges) {
+            
+            
+            if (finalDate >= project.start && finalDate <= project.end) {
+                overlap = true;
+                break;
+            }
+
+            if (startToCheck && endToCheck) {
+                if (startToCheck < project.end && endToCheck > project.start) {
+                    overlap = true;
+                    break;
+                }
+            }
+        }
+
+        setOverlapError(overlap);
     }
 
     async function handleJsonSubmit() {
@@ -1021,34 +1187,54 @@ const AdminProjectManage = () => {
                                             </div>
 
                                             <div className="form-group date-range-group">
-                                                <div className="form-field input-field">
+                                                <div className={`form-field input-field ${overlapError ? 'input-error' : ''}`}>
                                                     <label>Start Date</label>
                                                     <DatePicker
                                                         selected={ProjectStartDate}
-                                                        onChange={(date: Date | null) => setProjectStartDate(date)}
+                                                        onChange={(date: Date | null) => setDate(date, true)}
                                                         showTimeSelect
                                                         timeFormat="h:mm aa"
-                                                        timeIntervals={1}
+                                                        timeIntervals={15}
+                                                        injectTimes={getInjectedTimes(ProjectStartDate || new Date())}
                                                         timeCaption="Time"
                                                         dateFormat="yyyy-MM-dd h:mm aa"
-                                                        highlightDates={highlightDates}
+                                                        highlightDates={[
+                                                            {
+                                                                "react-datepicker__day--highlighted": highlightDates 
+                                                            },
+            
+                                                            {
+                                                                "react-datepicker__day--highlighted-red": blockedDates
+                                                            }
+                                                        ]}
+                                                        timeClassName={handleTimeColors}                                                   
                                                         selectsStart
                                                         startDate={ProjectStartDate}
                                                         endDate={ProjectEndDate}
                                                         placeholderText="Select start date"
                                                     />
                                                 </div>
-                                                <div className="form-field input-field">
+                                                <div className={`form-field input-field ${overlapError ? 'input-error' : ''}`}>
                                                     <label>End Date</label>
                                                     <DatePicker
                                                         selected={ProjectEndDate}
-                                                        onChange={(date: Date | null) => setProjectEndDate(date)}
+                                                        onChange={(date: Date | null) => setDate(date, false)}
                                                         showTimeSelect
                                                         timeFormat="h:mm aa"
-                                                        timeIntervals={1}
+                                                        timeIntervals={15}
+                                                        injectTimes={getInjectedTimes(ProjectEndDate || new Date())}
                                                         timeCaption="Time"
                                                         dateFormat="yyyy-MM-dd h:mm aa"
-                                                        highlightDates={highlightDates}
+                                                        highlightDates={[
+                                                            {
+                                                                highlightDates 
+                                                            },
+                                                            
+                                                            {
+                                                                "react-datepicker__day--highlighted-red": blockedDates
+                                                            }
+                                                        ]}
+                                                        timeClassName={handleTimeColors}
                                                         selectsEnd
                                                         startDate={ProjectStartDate}
                                                         endDate={ProjectEndDate}
@@ -1056,6 +1242,11 @@ const AdminProjectManage = () => {
                                                     />
                                                 </div>
                                             </div>
+                                            {overlapError && (
+                                                <span className="overlap-error-text">
+                                                    Error: Dates overlap with another project
+                                                </span>
+                                            )}
 
                                             <div className="form-group language-group">
                                                 <label>Language</label>
