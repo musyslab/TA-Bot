@@ -138,6 +138,55 @@
             overflow-wrap: normal;
             word-break: normal;
         }
+
+        /* ===== Clickable lines (grading mode) ===== */
+        &.line-clickable {
+            .code-line {
+                cursor: pointer;
+            }
+
+            /* Small visual hint in the gutter on hover */
+            .code-line .gutter::after {
+                content: '+';
+                position: absolute;
+                left: 1.35rem;
+                top: 50%;
+                transform: translateY(-50%);
+                width: 16px;
+                height: 16px;
+                border-radius: 999px;
+                display: grid;
+                place-items: center;
+                font-weight: 800;
+                font-size: 12px;
+                color: #4b5563;
+                background: #eef2f6;
+                border: 1px solid #d1d5db;
+                opacity: 0;
+                transition: opacity 0.12s ease, transform 0.12s ease;
+                pointer-events: none;
+            }
+
+            .code-line:hover .gutter::after {
+                opacity: 1;
+                transform: translateY(-50%) scale(1.06);
+            }
+
+            /* Always-on indicator when a line has an error */
+            .code-line.has-error .gutter::before {
+                content: '';
+                position: absolute;
+                left: 0.55rem;
+                top: 50%;
+                transform: translateY(-50%);
+                width: 8px;
+                height: 8px;
+                border-radius: 999px;
+                background: #ef4444;
+                box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
+                pointer-events: none;
+            }
+        }
     }
 
     .code-file-picker {
@@ -225,7 +274,7 @@
 
                 &:hover {
                     background: #f6fbfe;
-                    /* Hover highlight  */
+                    /* Hover highlight */
                 }
 
                 &:last-child {
@@ -273,7 +322,7 @@
                 }
             }
 
-            /* Input/Output <pre> blocks — your markup uses .cell-pre */
+            /* Input/Output <pre> blocks - your markup uses .cell-pre */
             .cell-pre {
                 background: #f6fbfe;
                 border-radius: 4px;
@@ -423,9 +472,7 @@
                 padding: 1rem 1rem 1rem 0rem;
                 border-radius: 999px;
                 border: 1px solid #9ca3af;
-                /* darker default border */
                 background: #f9fafb;
-                /* slightly tinted base */
                 color: #111827;
                 font-weight: 700;
                 font-size: 0.95rem;
@@ -433,25 +480,18 @@
                 cursor: pointer;
                 user-select: none;
                 box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04), 0 2px 6px rgba(0, 0, 0, 0.04);
-                transition:
-                    background 0.2s ease,
-                    border-color 0.2s ease,
-                    color 0.2s ease,
-                    box-shadow 0.2s ease,
+                transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease,
                     transform 0.06s ease;
 
-                /* switch metrics */
                 --track-w: 40px;
                 --track-h: 22px;
                 --knob: 18px;
                 --gap: 2px;
                 --travel: calc(var(--track-w) - var(--knob) - var(--gap) * 2);
 
-                /* make room for the switch on the left */
                 padding-left: calc(0.7rem + var(--track-w) + 0.5rem);
             }
 
-            /* switch track */
             .toggle-intra::before {
                 content: '';
                 position: absolute;
@@ -463,16 +503,10 @@
                 border-radius: 999px;
                 background: #e5e7eb;
                 border: 1px solid #9ca3af;
-                box-shadow:
-                    inset 0 0 0 2px #ffffff,
-                    0 1px 0 rgba(0, 0, 0, 0.06);
-                transition:
-                    background 0.25s ease,
-                    border-color 0.25s ease,
-                    box-shadow 0.25s ease;
+                box-shadow: inset 0 0 0 2px #ffffff, 0 1px 0 rgba(0, 0, 0, 0.06);
+                transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
             }
 
-            /* switch knob */
             .toggle-intra::after {
                 content: '';
                 position: absolute;
@@ -483,24 +517,15 @@
                 transform: translateY(-50%);
                 border-radius: 999px;
                 background: #d1d5db;
-                /* darker knob when off */
                 border: 1px solid #6b7280;
-                /* stronger outline for knob */
-                box-shadow:
-                    inset 0 0 0 2px #ffffff,
-                    0 1px 0 rgba(0, 0, 0, 0.06);
-                transition:
-                    transform 0.25s ease,
-                    background 0.25s ease,
-                    border-color 0.25s ease;
+                box-shadow: inset 0 0 0 2px #ffffff, 0 1px 0 rgba(0, 0, 0, 0.06);
+                transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease;
                 will-change: transform;
             }
 
-            /* Explicit OFF state */
             .toggle-intra.off {
                 color: #111827;
                 background: #f3f4f6;
-                /* clearer contrast */
                 border-color: #6b7280;
             }
 
@@ -510,7 +535,6 @@
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
             }
 
-            /* ON state */
             .toggle-intra.on {
                 color: #065f46;
                 background: rgba(16, 185, 129, 0.12);
@@ -637,12 +661,10 @@
                     color: #1f2937;
                 }
 
-                /* Intraline highlight for changed segments */
                 .intra {
                     padding: 0 0.08rem;
                     border-radius: 2px;
                     white-space: inherit;
-                    /* preserve spaces we render as · */
                 }
 
                 .add-ch {
@@ -654,7 +676,6 @@
                     background: rgba(239, 68, 68, 0.35);
                     outline: 1px solid #ef4444;
                 }
-
             }
 
             .diff-empty {
@@ -693,7 +714,6 @@
                 font-size: 0.92rem;
                 opacity: 0.9;
             }
-
         }
     }
 }

@@ -183,6 +183,7 @@ type DiffViewProps = {
     onLineMouseEnter?: (lineNo: number) => void
     onLineMouseLeave?: (lineNo: number) => void
     codeRightPanel?: React.ReactNode
+    betweenDiffAndCode?: React.ReactNode
 }
 
 export default function DiffView(props: DiffViewProps) {
@@ -197,6 +198,7 @@ export default function DiffView(props: DiffViewProps) {
         onLineMouseEnter,
         onLineMouseLeave,
         codeRightPanel,
+        betweenDiffAndCode,
     } = props
 
     const internalCodeContainerRef = useRef<HTMLDivElement | null>(null)
@@ -467,6 +469,8 @@ export default function DiffView(props: DiffViewProps) {
                 ? 'java'
                 : 'clike'
 
+    const isLineClickable = Boolean(onLineClick)
+
     return (
         <>
             <section className="diff-view no-user-select" {...copyBlockHandlers}>
@@ -557,9 +561,7 @@ export default function DiffView(props: DiffViewProps) {
                                     </div>
                                     <div className="empty-text">
                                         <div className="empty-title">No differences found</div>
-                                        <div className="empty-subtitle">
-                                            Your program’s output matches the expected output.
-                                        </div>
+                                        <div className="empty-subtitle">Your program’s output matches the expected output.</div>
                                     </div>
                                 </div>
                             </div>
@@ -660,6 +662,8 @@ export default function DiffView(props: DiffViewProps) {
                 </div>
             </section>
 
+            {betweenDiffAndCode}
+
             {/* ==================== CODE SECTION (BOTTOM) ==================== */}
             <section className="code-section">
                 <h2 className="section-title">{codeSectionTitle}</h2>
@@ -695,7 +699,7 @@ export default function DiffView(props: DiffViewProps) {
                                 <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
                                     {({ style, tokens, getLineProps, getTokenProps }) => (
                                         <div
-                                            className="code-block code-viewer"
+                                            className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
                                             ref={effectiveCodeContainerRef}
                                             role="region"
                                             aria-label="Submitted source code"
@@ -707,18 +711,19 @@ export default function DiffView(props: DiffViewProps) {
                                                     const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
                                                     return (
                                                         <li
-                                                            key={lineNo}
+                                                            key={lineKey ?? lineNo}
                                                             ref={(el) => {
                                                                 if (lineRefs) lineRefs.current[lineNo] = el
                                                             }}
                                                             {...lineProps}
                                                             className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
                                                             onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
-                                                            onMouseEnter={
-                                                                onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined
-                                                            }
-                                                            onMouseLeave={
-                                                                onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined
+                                                            onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
+                                                            onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
+                                                            title={
+                                                                onLineClick
+                                                                    ? 'Click this line to add or view grading errors'
+                                                                    : undefined
                                                             }
                                                         >
                                                             <span className="gutter">
@@ -744,7 +749,7 @@ export default function DiffView(props: DiffViewProps) {
                             <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
                                 {({ style, tokens, getLineProps, getTokenProps }) => (
                                     <div
-                                        className="code-block code-viewer"
+                                        className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
                                         ref={effectiveCodeContainerRef}
                                         role="region"
                                         aria-label="Submitted source code"
@@ -756,18 +761,17 @@ export default function DiffView(props: DiffViewProps) {
                                                 const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
                                                 return (
                                                     <li
-                                                        key={lineNo}
+                                                        key={lineKey ?? lineNo}
                                                         ref={(el) => {
                                                             if (lineRefs) lineRefs.current[lineNo] = el
                                                         }}
                                                         {...lineProps}
                                                         className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
                                                         onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
-                                                        onMouseEnter={
-                                                            onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined
-                                                        }
-                                                        onMouseLeave={
-                                                            onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined
+                                                        onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
+                                                        onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
+                                                        title={
+                                                            onLineClick ? 'Click this line to add or view grading errors' : undefined
                                                         }
                                                     >
                                                         <span className="gutter">

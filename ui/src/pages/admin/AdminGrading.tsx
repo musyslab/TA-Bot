@@ -4,15 +4,15 @@ import axios from 'axios'
 import { useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
-import "../../styling/AdminGrading.scss";
+import '../../styling/AdminGrading.scss'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import DiffView from '../components/CodeDiffView'
 
 const defaultpagenumber = -1
 
 type BackendError = {
-    line: number;
-    errorId: string;
+    line: number
+    errorId: string
 }
 
 type ErrorDef = {
@@ -34,86 +34,71 @@ export function AdminGrading() {
     const { id, class_id, project_id } = useParams<{ id: string; class_id: string; project_id: string }>()
     const submissionId = id !== undefined ? parseInt(id, 10) : defaultpagenumber
     const cid = class_id !== undefined ? parseInt(class_id, 10) : -1
-    const pid = project_id !== undefined ? parseInt(project_id) : -1
+    const pid = project_id !== undefined ? parseInt(project_id, 10) : -1
 
-    const [studentName, setStudentName] = useState<string>('');
+    const [studentName, setStudentName] = useState<string>('')
 
     // Track which lines contain errors and if errors exist
     const [observedErrors, setObservedErrors] = useState<ErrorsByLine>({})
     const hasErrors = Object.keys(observedErrors).length > 0
 
-    // Track current grade of submission
-    const [grade, setGrade] = useState<number>(100);
-
     // TODO: Add actual error definitions
-    // Error Definitions
     const ERRORS: Record<string, ErrorDef> = {
         ERROR1: {
-            id: "ERROR1",
-            label: "Error 1",
-            description: "Error 1 description.",
-            points: 1
+            id: 'ERROR1',
+            label: 'Error 1',
+            description: 'Error 1 description.',
+            points: 1,
         },
         ERROR2: {
-            id: "ERROR2",
-            label: "Error 2",
-            description: "Error 2 description.",
-            points: 2
+            id: 'ERROR2',
+            label: 'Error 2',
+            description: 'Error 2 description.',
+            points: 2,
         },
         ERROR3: {
-            id: "ERROR3",
-            label: "Error 3",
-            description: "Error 3 description.",
-            points: 3
-        }
+            id: 'ERROR3',
+            label: 'Error 3',
+            description: 'Error 3 description.',
+            points: 3,
+        },
     }
 
-    // Error Menu UI toggle
-    const [errorMenu, setErrorMenu] = useState({ active: false, line: -1, x: 0, y: 0 })
-    const [showSubMenu, setShowSubMenu] = useState<boolean>(false);
+    const errorDefs = useMemo(() => Object.values(ERRORS), [])
 
-    const showErrorMenu = (lineNo: number, e: any) => {
-        setErrorMenu({
-            active: true,
-            line: lineNo,
-            x: e.clientX + window.scrollX,
-            y: e.clientY + window.scrollY,
-        })
-    }
+    const totalPoints = useMemo(() => {
+        return Object.values(observedErrors)
+            .flat()
+            .reduce((sum, err) => sum + (ERRORS[err.errorId]?.points ?? 0), 0)
+    }, [observedErrors])
 
-    const hideErrorMenu = () => {
-        setShowSubMenu(false)
-        setErrorMenu(prev => ({ ...prev, active: false }))
-    }
+    const grade = Math.max(0, 100 - totalPoints)
 
-    // References for Error Menus
+    // Line hover and selection
+    const [hoveredLine, setHoveredLine] = useState<number | null>(null)
+    const [selectedLine, setSelectedLine] = useState<number | null>(null)
+
+    // References for code lines
     const codeContainerRef = useRef<HTMLDivElement | null>(null)
-    const errorMenuRef = useRef<HTMLDivElement | null>(null)
-
     const lineRefs = useRef<Record<number, HTMLLIElement | null>>({})
 
-    // Handles clicking outside of the codeblock
-    useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            const target = event.target as Node
-            if (codeContainerRef.current?.contains(target) ||
-                errorMenuRef.current?.contains(target)) {
-                return
-            }
-            hideErrorMenu()
-        }
-        document.addEventListener("mousedown", handleClickOutside)
-        return () => {
-            document.removeEventListener("mousedown", handleClickOutside)
-        }
-    }, [])
+    const scrollToLine = (lineNo: number) => {
+        const el = lineRefs.current[lineNo]
+        if (!el) return
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
 
-    // Helps with line hovering
-    const [hoveredLine, setHoveredLine] = useState<number | null>(null);
+    const selectLine = (lineNo: number) => {
+        setSelectedLine(lineNo)
+    }
 
+    // Fetch student name for header
     useEffect(() => {
+        if (submissionId < 0 || pid < 0) return
+
         axios
-            .post(`${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
+            .post(
+                `${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
                 { project_id: pid },
                 {
                     headers: {
@@ -121,116 +106,111 @@ export function AdminGrading() {
                     },
                 }
             )
-            .then(res => {
+            .then((res) => {
                 const data = res.data
-                const entry = Object.entries(data).find(([_, value]) => parseInt((value as Array<string>)[7]) === submissionId)
+                const entry = Object.entries(data).find(
+                    ([_, value]) => parseInt((value as Array<string>)[7], 10) === submissionId
+                )
                 if (entry) {
                     const studentData = entry[1] as Array<string>
                     setStudentName(`${studentData[1]} ${studentData[0]}`)
                 }
             })
-            .catch(err => console.log(err))
-    }, [submissionId, cid, pid])
+            .catch((err) => console.log(err))
+    }, [submissionId, pid])
 
+    // Load saved grading (errors)
     useEffect(() => {
-        axios.get(
-            `${import.meta.env.VITE_API_URL}/submissions/get-grading/${submissionId}`,
-            {
-                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
-            }
-        )
-            .then(response => {
-                const { errors, grade } = response.data;
+        if (submissionId < 0) return
 
-                // Convert format from db to ui
-                // [{line: 2, errorId: "ERROR1"}] to { "2": [{errorId: "ERROR1"}] }
-                const formattedErrors: { [key: string]: { errorId: string }[] } = {};
-
-                const totalPoints = (errors as BackendError[]).reduce((sum, item) => {
-                    const lineKey = item.line.toString();
-                    if (!formattedErrors[lineKey]) formattedErrors[lineKey] = [];
-                    formattedErrors[lineKey].push({ errorId: item.errorId });
-                    return sum + (ERRORS[item.errorId]?.points ?? 0);
-                }, 0);
-
-                setGrade(100 - totalPoints);
-                setObservedErrors(formattedErrors);
+        axios
+            .get(`${import.meta.env.VITE_API_URL}/submissions/get-grading/${submissionId}`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
-            .catch(err => console.error("Could not load saved grading:", err));
-    }, [submissionId]);
+            .then((response) => {
+                const { errors } = response.data
 
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+                const formattedErrors: ErrorsByLine = {}
+
+                for (const item of errors as BackendError[]) {
+                    const lineNo = Number(item.line)
+                    if (!formattedErrors[lineNo]) formattedErrors[lineNo] = []
+                    formattedErrors[lineNo].push({ errorId: item.errorId })
+                }
+
+                setObservedErrors(formattedErrors)
+
+                const firstLine = Object.keys(formattedErrors)
+                    .map((k) => Number(k))
+                    .sort((a, b) => a - b)[0]
+
+                if (Number.isFinite(firstLine)) {
+                    setSelectedLine(firstLine)
+                }
+            })
+            .catch((err) => console.error('Could not load saved grading:', err))
+    }, [submissionId])
+
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
     const handleSave = () => {
+        setSaveStatus('saving')
 
-        setSaveStatus('saving');
-        // converts { "10": [{errorId: "ERROR1"}] }  into  [{ line: 10, errorId: "ERROR1" }]
+        // converts { 10: [{errorId: "ERROR1"}] } into [{ line: 10, errorId: "ERROR1" }]
         const errorList = Object.entries(observedErrors).flatMap(([line, errors]) =>
-            errors.map(err => ({
-                line: parseInt(line),
-                errorId: err.errorId
+            errors.map((err) => ({
+                line: parseInt(line, 10),
+                errorId: err.errorId,
             }))
-        );
-
-        // sends data to backend
-        axios.post(
-            `${import.meta.env.VITE_API_URL}/submissions/save-grading`,
-            {
-                submissionId: submissionId,
-                grade: grade,
-                errors: errorList
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
-                }
-            }
         )
-            .then(response => {
 
-                setSaveStatus('saved');
-                console.log(response.data);
+        axios
+            .post(
+                `${import.meta.env.VITE_API_URL}/submissions/save-grading`,
+                {
+                    submissionId: submissionId,
+                    grade: grade,
+                    errors: errorList,
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            .then((response) => {
+                setSaveStatus('saved')
+                console.log(response.data)
             })
-            .catch(error => {
+            .catch((error) => {
+                console.error('Failed to save:', error)
+                setSaveStatus('error')
+            })
+    }
 
-                console.error("Failed to save:", error);
-                setSaveStatus('error');
-            });
-    };
-
-    // Error helpers
     const addObservedError = (line: number, errorId: string) => {
-        setObservedErrors(prev => {
+        setObservedErrors((prev) => {
             const errors = prev[line] ?? []
-
-            // Don't add if error exists
-            if (errors.some(e => e.errorId === errorId)) {
-                return prev
-            }
-            return {
-                ...prev, [
-                    line]: [...errors, { errorId }],
-            }
+            if (errors.some((e) => e.errorId === errorId)) return prev
+            return { ...prev, [line]: [...errors, { errorId }] }
         })
-        setGrade(prev => prev - ERRORS[errorId].points);
-        setSaveStatus('idle');
+        setSaveStatus('idle')
     }
 
     const removeObservedError = (line: number, errorId: string) => {
-        setObservedErrors(prev => {
-            const remaining = prev[line]?.filter(e => e.errorId !== errorId) ?? []
+        setObservedErrors((prev) => {
+            const remaining = prev[line]?.filter((e) => e.errorId !== errorId) ?? []
 
-            // Delete key if no errors are left
             if (remaining.length === 0) {
                 const { [line]: _, ...rest } = prev
                 return rest
             }
-
             return { ...prev, [line]: remaining }
         })
-        setGrade(prev => prev + ERRORS[errorId].points);
-        setSaveStatus('idle');
+        setSaveStatus('idle')
     }
+
+    const selectedLineErrors = selectedLine !== null ? observedErrors[selectedLine] ?? [] : []
 
     return (
         <div className="page-container" id="student-output-diff">
@@ -256,188 +236,203 @@ export function AdminGrading() {
                 ]}
             />
 
-            <div className="pageTitle">
-                Grade Submission: {studentName || 'Unknown Student'}
-            </div>
+            <div className="pageTitle">Grade Submission: {studentName || 'Unknown Student'}</div>
 
             <DiffView
                 submissionId={submissionId}
                 classId={cid}
-                codeSectionTitle="Submitted Code"
+                codeSectionTitle="Submitted Code (click lines to mark errors)"
+                betweenDiffAndCode={
+                    <div className="grading-banner" role="note" aria-label="How to add errors">
+                        <div className="banner-title">How to mark errors</div>
+                        <div className="banner-text">
+                            Click a line in the submitted code. Use the Grading Panel on the right to add or remove error
+                            categories for that line.
+                        </div>
+                    </div>
+                }
                 codeContainerRef={codeContainerRef}
                 lineRefs={lineRefs}
                 getLineClassName={(lineNo) => {
                     const errors = observedErrors[lineNo] ?? []
                     return [
-                        errors.length > 0 ? "has-error" : "",
-                        hoveredLine === lineNo ? "is-hovered" : "",
+                        errors.length > 0 ? 'has-error' : '',
+                        hoveredLine === lineNo ? 'is-hovered' : '',
+                        selectedLine === lineNo ? 'is-selected' : '',
                     ]
                         .filter(Boolean)
-                        .join(" ")
+                        .join(' ')
                 }}
-                onLineClick={(lineNo, e) => showErrorMenu(lineNo, e)}
+                onLineClick={(lineNo) => selectLine(lineNo)}
                 onLineMouseEnter={(lineNo) => setHoveredLine(lineNo)}
                 onLineMouseLeave={() => setHoveredLine(null)}
                 codeRightPanel={
-                    <div className={`error-container ${hasErrors ? "err-exists" : ""}`}>
-                        {hasErrors && (
-                            <div className="error-block">
-                                {Object.entries(observedErrors).map(([lineStr, errors]) => {
+                    <aside className="grading-panel" aria-label="Grading panel">
+                        <div className="grading-panel-header">
+                            <div className="grading-title">Grading Panel</div>
+                            <div className="grading-hint">
+                                {selectedLine === null ? 'Select a line to start.' : 'Add errors to the selected line.'}
+                            </div>
+                        </div>
+
+                        <div className="grading-section">
+                            <div className="section-label">Selected line</div>
+                            <div className="selected-line-row">
+                                <span className={`selected-line-pill ${selectedLine !== null ? 'active' : 'inactive'}`}>
+                                    {selectedLine !== null ? `Line ${selectedLine}` : 'None'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="grading-section">
+                            <div className="section-label">Add an error</div>
+                            <div className="error-def-list">
+                                {errorDefs.map((err) => (
+                                    <button
+                                        key={err.id}
+                                        type="button"
+                                        className="error-def-btn"
+                                        disabled={selectedLine === null}
+                                        onClick={() => {
+                                            if (selectedLine === null) return
+                                            addObservedError(selectedLine, err.id)
+                                        }}
+                                    >
+                                        <div className="error-def-top">
+                                            <span className="error-def-label">{err.label}</span>
+                                            <span className="error-def-points">-{err.points}</span>
+                                        </div>
+                                        <div className="error-def-desc">{err.description}</div>
+                                    </button>
+                                ))}
+                            </div>
+                            {selectedLine === null && <div className="muted small">Select a line to enable adding.</div>}
+                        </div>
+
+                        <div className="grading-section">
+                            <div className="section-label">Errors on selected line</div>
+
+                            {selectedLine === null && <div className="muted">No line selected.</div>}
+
+                            {selectedLine !== null && selectedLineErrors.length === 0 && (
+                                <div className="muted">No errors on this line.</div>
+                            )}
+
+                            {selectedLine !== null && selectedLineErrors.length > 0 && (
+                                <div className="line-error-list">
+                                    {selectedLineErrors.map((err, idx) => {
+                                        const meta = ERRORS[err.errorId]
+                                        const label = meta?.label ?? err.errorId
+                                        const pts = meta?.points ?? 0
+                                        return (
+                                            <div key={`${selectedLine}-${err.errorId}-${idx}`} className="line-error-item">
+                                                <div className="line-error-main">
+                                                    <span className="line-error-label">{label}</span>
+                                                    <span className="line-error-points">-{pts}</span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    className="line-error-remove"
+                                                    onClick={() => removeObservedError(selectedLine, err.errorId)}
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="grading-panel-footer">
+                            <div className="grade-row">
+                                <span className="grade-label">Grade</span>
+                                <span className="grade-value">{grade}</span>
+                            </div>
+
+                            <button
+                                className={`save-grade ${saveStatus}`}
+                                onClick={handleSave}
+                                disabled={saveStatus === 'saving'}
+                            >
+                                {saveStatus === 'idle' && 'Save'}
+                                {saveStatus === 'saving' && 'Saving...'}
+                                {saveStatus === 'saved' && 'Saved!'}
+                                {saveStatus === 'error' && 'Error'}
+                            </button>
+
+                            {saveStatus === 'error' && (
+                                <div className="muted small">Save failed. Try again.</div>
+                            )}
+                            {saveStatus === 'saved' && (
+                                <div className="muted small">Saved to the database.</div>
+                            )}
+                        </div>
+                    </aside>
+                }
+            />
+
+            <section className="all-observed-section" aria-label="All observed errors">
+                <h2 className="section-title">All Observed Errors</h2>
+                <div className="all-observed-panel">
+                    {!hasErrors && <div className="muted">No errors added yet.</div>}
+
+                    {hasErrors && (
+                        <div className="all-errors">
+                            {Object.entries(observedErrors)
+                                .sort(([a], [b]) => Number(a) - Number(b))
+                                .map(([lineStr, errors]) => {
                                     const lineNo = Number(lineStr)
-                                    const lineEl = lineRefs.current[lineNo]
-                                    if (!lineEl || !codeContainerRef.current) return null
-
-                                    const rect = lineEl.getBoundingClientRect()
-                                    const codeRect = codeContainerRef.current.getBoundingClientRect()
-                                    const blockHeight = (rect.bottom - rect.top) * 3
-                                    const top = rect.top - codeRect.top
-
-                                    const len = errors.length
-                                    const totalPoints = errors.reduce(
-                                        (sum, err) => sum + (ERRORS[err.errorId]?.points ?? 0),
-                                        0
-                                    )
+                                    const lineTotal = errors.reduce((sum, e) => sum + (ERRORS[e.errorId]?.points ?? 0), 0)
 
                                     return (
                                         <div
                                             key={lineNo}
-                                            className={`error-tag ${hoveredLine === lineNo ? "is-hovered" : ""}`}
-                                            style={{ top, minHeight: blockHeight }}
-                                            onMouseEnter={() => setHoveredLine(lineNo)}
-                                            onMouseLeave={() => setHoveredLine(null)}
+                                            className={`all-errors-line ${selectedLine === lineNo ? 'is-selected' : ''}`}
                                         >
-                                            {errors.map((error, idx) => {
-                                                const meta = ERRORS[error.errorId]
-                                                const multi = idx === 0 && len > 1
-                                                return (
-                                                    <div key={`${lineNo}-${error.errorId}-${idx}`} className={idx !== 0 ? "hide" : ""}>
-                                                        <div className="error-header">
-                                                            <span className="error-label">
-                                                                {meta.label}
-                                                                {multi && <span className="add-err">+{len - 1}</span>}
-                                                            </span>
+                                            <button
+                                                type="button"
+                                                className="all-errors-line-header"
+                                                onClick={() => {
+                                                    setSelectedLine(lineNo)
+                                                    scrollToLine(lineNo)
+                                                }}
+                                                title="Select line"
+                                            >
+                                                <span className="all-errors-line-title">Line {lineNo}</span>
+                                                <span className="all-errors-line-meta">
+                                                    {errors.length} {errors.length === 1 ? 'error' : 'errors'}, -{lineTotal}
+                                                </span>
+                                            </button>
+
+                                            <div className="all-errors-line-body">
+                                                {errors.map((err, idx) => {
+                                                    const meta = ERRORS[err.errorId]
+                                                    const label = meta?.label ?? err.errorId
+                                                    const pts = meta?.points ?? 0
+
+                                                    return (
+                                                        <div key={`${lineNo}-${err.errorId}-${idx}`} className="all-errors-item">
+                                                            <span className="all-errors-item-label">{label}</span>
+                                                            <span className="all-errors-item-points">-{pts}</span>
                                                             <button
-                                                                className="error-remove"
-                                                                onClick={() => removeObservedError(lineNo, error.errorId)}
+                                                                type="button"
+                                                                className="all-errors-item-remove"
+                                                                onClick={() => removeObservedError(lineNo, err.errorId)}
                                                             >
-                                                                x
+                                                                Remove
                                                             </button>
                                                         </div>
-                                                        <div className="error-body">{meta.description}</div>
-                                                        <div className="error-footer">
-                                                            <span className="arrow">{multi && ">"}</span>
-                                                            <span className="error-points">-{meta.points}</span>
-                                                        </div>
-                                                    </div>
-                                                )
-                                            })}
-                                            {len > 1 && <div className="error-point-total hide">Total: -{totalPoints}</div>}
+                                                    )
+                                                })}
+                                            </div>
                                         </div>
                                     )
                                 })}
-                            </div>
-                        )}
-                    </div>
-                }
-            />
-
-            {/* Error Menus */}
-            {errorMenu.active && (
-                <div ref={errorMenuRef} className="error-menu" style={{ top: errorMenu.y, left: errorMenu.x }}>
-                    <div className="menu-line">Line: {errorMenu.line}</div>
-
-                    <div className="menu-actions">
-                        <div className="menu-add">
-                            <button
-                                className="menu-add-button"
-                                onClick={() => (showSubMenu ? setShowSubMenu(false) : setShowSubMenu(true))}
-                            >
-                                Add Error
-                            </button>
-                            {showSubMenu && (
-                                <div className="sub-menu">
-                                    {Object.values(ERRORS).map((err) => (
-                                        <button
-                                            className="add-menu-item"
-                                            key={err.id}
-                                            onClick={() => {
-                                                addObservedError(errorMenu.line, err.id)
-                                                hideErrorMenu()
-                                            }}
-                                        >
-                                            {err.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
                         </div>
-                    </div>
-                    <button className="menu-close" onClick={() => hideErrorMenu()}>
-                        Close
-                    </button>
-                </div>
-            )}
-
-            <section className="table-section">
-                <h2 className="section-title">Current Observed Errors</h2>
-                <div className="observed-errors-panel">
-
-
-                    {Object.keys(observedErrors).length === 0 && <p>No errors added yet.</p>}
-
-                    {Object.keys(observedErrors).length > 0 && (
-                        <table className="observed-errors-table">
-                            <thead>
-                                <tr>
-                                    <th>Line</th>
-                                    <th>Error</th>
-                                    <th>Points</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-
-                            <tbody>
-                                {Object.entries(observedErrors)
-                                    .sort(([a], [b]) => Number(a) - Number(b))
-                                    .flatMap(([line, errors]) =>
-                                        errors.map((err, idx) => (
-                                            <tr key={`${line}-${err.errorId}-${idx}`}>
-                                                <td>{line}</td>
-                                                <td>{ERRORS[err.errorId]?.label ?? err.errorId}</td>
-                                                <td>{ERRORS[err.errorId]?.points ?? 0}</td>
-                                                <td>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => removeObservedError(Number(line), err.errorId)}
-                                                    >
-                                                        Remove
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    )}
-                            </tbody>
-                        </table>
                     )}
                 </div>
             </section>
-
-            <section className="save-section">
-                <div>
-                    <h3 className="current-grade">Grade: {grade}</h3>
-                </div>
-                <button
-                    className={`save-grade ${saveStatus}`} // Adds class 'success' or 'saving'
-                    onClick={handleSave}
-                    disabled={saveStatus === 'saving'} // Prevent double-clicks
-                >
-                    {saveStatus === 'idle' && "Save"}
-                    {saveStatus === 'saving' && "Saving..."}
-                    {saveStatus === 'saved' && "Saved!"}
-                    {saveStatus === 'error' && "Error"}
-                </button>
-            </section>
-
         </div>
     )
 }
