@@ -132,6 +132,7 @@
     border: 1px solid #d6dbe3;
     background: #f9fafb;
 
+    font: inherit;
     font-weight: 800;
     font-size: 0.92rem;
     color: #111827;
@@ -140,12 +141,20 @@
 
     &.inactive {
         opacity: 0.8;
+
+        cursor: default;
     }
 
     &.active {
         border-color: rgba(0, 123, 255, 0.35);
         background: rgba(0, 123, 255, 0.08);
         color: #0b4ba0;
+
+        cursor: pointer;
+
+        &:hover {
+            background: rgba(0, 123, 255, 0.12);
+        }
     }
 }
 
@@ -283,6 +292,29 @@
     }
 }
 
+/* Navigation List */
+
+.navigation-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.navigation-item {
+    padding: 6px 0px;
+    font-weight: 700;
+    font-size: 0.9rem;
+
+    border-radius: 6px;
+    color: #111827;
+
+    cursor: pointer;
+
+    &:hover {
+        background: #f9fafb;
+    }
+}
+
 /* All errors grouped by line */
 .all-errors {
     display: flex;
@@ -389,6 +421,25 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+
+    .section-label {
+        font-weight: 700;
+        color: #374151;
+        font-size: 0.9rem;
+    }
+}
+
+.save-section {
+    width: 20%;
+    margin: 0 auto 2rem;
+}
+
+.save-panel {
+    border: 1px solid #e7eaf1;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 1px 6px rgba(80, 95, 126, 0.07);
+    padding: 12px;
 }
 
 .grade-row {

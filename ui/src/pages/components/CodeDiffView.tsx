@@ -176,6 +176,7 @@ type DiffViewProps = {
 
     // Optional: enable grading-like behaviors (AdminGrading uses these)
     codeSectionTitle?: string
+    diffViewRef?: React.RefObject<HTMLElement | null>
     codeContainerRef?: React.RefObject<HTMLDivElement | null>
     lineRefs?: React.MutableRefObject<Record<number, HTMLLIElement | null>>
     getLineClassName?: (lineNo: number) => string
@@ -190,6 +191,7 @@ export default function DiffView(props: DiffViewProps) {
     const {
         submissionId,
         classId,
+        diffViewRef,
         codeSectionTitle = 'Submitted Code',
         codeContainerRef,
         lineRefs,
@@ -473,7 +475,7 @@ export default function DiffView(props: DiffViewProps) {
 
     return (
         <>
-            <section className="diff-view no-user-select" {...copyBlockHandlers}>
+            <section className="diff-view no-user-select" {...copyBlockHandlers} ref={diffViewRef}>
                 <aside className="diff-sidebar">
                     <ul className="diff-file-list">
                         {!testsLoaded && <li className="muted">Loading…</li>}
