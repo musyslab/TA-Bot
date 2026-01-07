@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 import MenuComponent from '../components/MenuComponent'
 import ErrorMessage from '../components/ErrorMessage'
+import FullScreenLoader from '../components/FullScreenLoader'
 import Countdown from 'react-countdown'
 import { Helmet } from 'react-helmet'
 import { useParams } from 'react-router-dom'
@@ -363,6 +364,7 @@ const StudentUpload = () => {
 
   return (
     <div className="upload-page">
+      <FullScreenLoader show={isLoading} message="Uploading..." />
       <Helmet>
         <title>TA-Bot</title>
       </Helmet>
@@ -665,7 +667,7 @@ const StudentUpload = () => {
               >
                 FAQ’s.
               </a>
-              
+
             </p>
 
             <textarea

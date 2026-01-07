@@ -9,6 +9,7 @@ import 'react-datepicker/dist/react-datepicker.css'
 import '../../styling/AdminProjectManage.scss'
 import '../../styling/FileUploadCommon.scss'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
+import FullScreenLoader from '../components/FullScreenLoader'
 
 import {
     FaAlignJustify,
@@ -527,6 +528,7 @@ const AdminProjectManage = () => {
         }
 
         try {
+            setSubmittingProject(true)
             const conflictCheck = await axios.post(
                 `${import.meta.env.VITE_API_URL}/projects/check_time_conflict`,
                 {
@@ -548,7 +550,6 @@ const AdminProjectManage = () => {
                 return
             }
 
-            setSubmittingProject(true)
             const formData = new FormData()
             SolutionFiles.forEach(f => formData.append('solutionFiles', f))
             formData.append('assignmentdesc', AssignmentDesc)
@@ -571,6 +572,8 @@ const AdminProjectManage = () => {
             window.location.href = `/admin/${classId}/project/manage/${newId}`
         } catch (error) {
             console.log(error)
+        }
+        finally {
             setSubmittingProject(false)
         }
     }
@@ -582,6 +585,7 @@ const AdminProjectManage = () => {
                 return
             }
 
+            setSubmittingProject(true)
             const conflictCheck = await axios.post(
                 `${import.meta.env.VITE_API_URL}/projects/check_time_conflict`,
                 {
@@ -603,7 +607,6 @@ const AdminProjectManage = () => {
                 return
             }
 
-            setSubmittingProject(true)
             const formData = new FormData()
             formData.append('id', project_id.toString())
 
@@ -632,9 +635,11 @@ const AdminProjectManage = () => {
             })
 
             window.alert('Project information saved. Next, go to the "Test Cases" tab to create test cases.')
-            window.location.href = `/admin/project/edit/${classId}/${project_id}`
+            window.location.href = `/admin/${classId}/project/manage/${project_id}`
         } catch (error) {
             console.log(error)
+        }
+        finally {
             setSubmittingProject(false)
         }
     }
@@ -821,7 +826,7 @@ const AdminProjectManage = () => {
         }
 
         try {
-            if (modalDraft.id === -1) setSubmittingTestcase(true)
+            setSubmittingTestcase(true)
             await axios.post(import.meta.env.VITE_API_URL + `/projects/add_or_update_testcase`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
@@ -947,6 +952,12 @@ const AdminProjectManage = () => {
 
     const fsUniqueJavaNames = Array.from(new Set(directoryEntries.map(e => e.name).filter(isJavaFileName)))
     const fsShowMainTag = ProjectLanguage === 'java' && fsUniqueJavaNames.length > 1 && !!mainJavaFileName
+    const showFullScreenLoader = submittingProject || submittingTestcase || submittingJson
+    const loaderMessage =
+        (submittingProject && (edit ? 'Saving assignment...' : 'Creating assignment...')) ||
+        (submittingTestcase && 'Submitting test case...') ||
+        (submittingJson && 'Uploading test cases...') ||
+        'Loading...'
 
     return (
         <div>
@@ -1646,17 +1657,15 @@ const AdminProjectManage = () => {
                                                 type="button"
                                                 className="modal-submit-button"
                                                 onClick={() => buttonhandleClick(selectedTestCaseId!)}
-                                                disabled={selectedTestCaseId === -1 && submittingTestcase}
+                                                disabled={submittingTestcase}
                                             >
-                                                {selectedTestCaseId === -1 ? (
-                                                    submittingTestcase ? (
-                                                        <>
-                                                            <FaCircleNotch className="spin" aria-hidden="true" />
-                                                            &nbsp;Submitting...
-                                                        </>
-                                                    ) : (
-                                                        'Submit new testcase'
-                                                    )
+                                                {submittingTestcase ? (
+                                                    <>
+                                                        <FaCircleNotch className="spin" aria-hidden="true" />
+                                                        &nbsp;Submitting...
+                                                    </>
+                                                ) : selectedTestCaseId === -1 ? (
+                                                    'Submit new testcase'
                                                 ) : (
                                                     'Submit changes'
                                                 )}
@@ -1679,6 +1688,7 @@ const AdminProjectManage = () => {
                     )}
                 </>
             </div>
+            <FullScreenLoader show={showFullScreenLoader} message={loaderMessage} />
         </div>
     )
 }

@@ -5,6 +5,7 @@ import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
 import { FaAlignJustify, FaCode, FaExchangeAlt, FaRegFile, FaTimes } from 'react-icons/fa'
+import FullScreenLoader from '../components/FullScreenLoader'
 import '../../styling/AdminUploadPage.scss'
 import '../../styling/FileUploadCommon.scss'
 
@@ -24,6 +25,7 @@ interface UploadPageState {
     files: File[]
     mainJavaFileName: string
     isLoading: boolean
+    isUploading: boolean
     error_message: string
     isErrorMessageHidden: boolean
     class_id: number
@@ -115,6 +117,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         super(props)
         this.state = {
             isLoading: false,
+            isUploading: false,
             error_message: '',
             isErrorMessageHidden: true,
             project_name: '',
@@ -145,6 +148,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             project_id: 0,
             files: [],
             mainJavaFileName: '',
+            isUploading: false,
         })
     }
 
@@ -168,6 +172,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             projects: [],
             files: [],
             mainJavaFileName: '',
+            isUploading: false,
         })
 
         axios
@@ -333,7 +338,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         }
 
         if (this.state.files.length > 0) {
-            this.setState({ isErrorMessageHidden: true, isLoading: true })
+            this.setState({ isErrorMessageHidden: true, isLoading: true, isUploading: true })
 
             const formData = new FormData()
             this.state.files.forEach((f) => formData.append('files', f, f.name))
@@ -355,6 +360,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                         error_message: err.response?.data?.message ?? 'Upload failed',
                         isErrorMessageHidden: false,
                         isLoading: false,
+                        isUploading: false,
                     })
                 })
         } else {
@@ -377,6 +383,8 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
 
         return (
             <>
+
+                <FullScreenLoader show={this.state.isUploading} message="Uploading..." />
 
                 <DirectoryBreadcrumbs
                     items={[
@@ -535,8 +543,12 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                     &nbsp;
                                 </div>
 
-                                <button className="button upload-button" type="submit" disabled={disableUpload || this.state.isLoading}>
-                                    {this.state.isLoading ? 'Uploading…' : 'Upload'}
+                                <button
+                                    className="button upload-button"
+                                    type="submit"
+                                    disabled={disableUpload || this.state.isLoading || this.state.isUploading}
+                                >
+                                    {this.state.isUploading ? 'Uploading…' : 'Upload'}
                                 </button>
                             </form>
 
