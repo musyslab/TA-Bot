@@ -95,7 +95,6 @@ export function AdminGrading() {
     // References for Navigation
     const diffViewRef = useRef<HTMLElement | null>(null)
     const allObservedErrorsRef = useRef<HTMLElement | null>(null)
-    const gradeSaveRef = useRef<HTMLElement | null>(null)
 
     const scrollToSection = (section : HTMLElement) => {
         if (!section) return
@@ -227,7 +226,6 @@ export function AdminGrading() {
             <Helmet>
                 <title>TA-Bot</title>
             </Helmet>
-
             <MenuComponent
                 showUpload={false}
                 showAdminUpload={false}
@@ -277,13 +275,29 @@ export function AdminGrading() {
                 onLineClick={(lineNo) => selectLine(lineNo)}
                 onLineMouseEnter={(lineNo) => setHoveredLine(lineNo)}
                 onLineMouseLeave={() => setHoveredLine(null)}
-                codeRightPanel={
+                rightPanel={
                     <aside className="grading-panel" aria-label="Grading panel">
                         <div className="grading-panel-header">
                             <div className="grading-title">Grading Panel</div>
                             <div className="grading-hint">
                                 {selectedLine === null ? 'Select a line to start.' : 'Add errors to the selected line.'}
                             </div>
+                        </div>
+
+                        <div className="grading-section navigation-section">
+                            <div className="section-label">Navigation</div>
+                            <ul className="navigation-list">
+                                <li className="navigation-item"
+                                    onClick={() => diffViewRef.current !== null ? scrollToSection(diffViewRef.current) : null}
+                                >
+                                    Test Cases
+                                </li>
+                                <li className="navigation-item"
+                                    onClick={() => allObservedErrorsRef.current !== null ? scrollToSection(allObservedErrorsRef.current) : null}
+                                >
+                                    All Observed Errors
+                                </li>
+                            </ul>
                         </div>
 
                         <div className="grading-section">
@@ -359,27 +373,6 @@ export function AdminGrading() {
                                 </div>
                             )}
                         </div>
-
-                        <div className="grading-panel-footer">
-                            <div className="section-label">Navigation</div>
-                            <ul className="navigation-list">
-                                <li className="navigation-item"
-                                    onClick={() => diffViewRef.current !== null ? scrollToSection(diffViewRef.current) : null}
-                                >
-                                    Test Cases
-                                </li>
-                                <li className="navigation-item"
-                                    onClick={() => allObservedErrorsRef.current !== null ? scrollToSection(allObservedErrorsRef.current) : null}
-                                >
-                                    All Observed Errors
-                                </li>
-                                <li className="navigation-item"
-                                    onClick={() => gradeSaveRef.current !== null ? scrollToSection(gradeSaveRef.current) : null}
-                                >
-                                    Saving Grade
-                                </li>
-                            </ul>
-                        </div>
                     </aside>
                 }
             />
@@ -387,6 +380,35 @@ export function AdminGrading() {
             <section className="all-observed-section" aria-label="All observed errors" ref={allObservedErrorsRef}>
                 <h2 className="section-title">All Observed Errors</h2>
                 <div className="all-observed-panel">
+                    <div className="save-panel">
+                        <div className="grade-row">
+                            <span className="grade-label">Grade</span>
+                            <span className="grade-value">{grade}</span>
+                        </div>
+
+                        <button className="save-grade">
+                            Save as draft
+                        </button>
+
+                        <button
+                            className={`save-grade ${saveStatus}`}
+                            onClick={handleSave}
+                            disabled={saveStatus === 'saving'}
+                        >
+                            {saveStatus === 'idle' && 'Save'}
+                            {saveStatus === 'saving' && 'Saving...'}
+                            {saveStatus === 'saved' && 'Saved!'}
+                            {saveStatus === 'error' && 'Error'}
+                        </button>
+
+                        {saveStatus === 'error' && (
+                            <div className="muted small">Save failed. Try again.</div>
+                        )}
+                        {saveStatus === 'saved' && (
+                            <div className="muted small">Saved to the database.</div>
+                        )}
+                    </div>
+
                     {!hasErrors && <div className="muted">No errors added yet.</div>}
 
                     {hasErrors && (
@@ -443,36 +465,6 @@ export function AdminGrading() {
                                 })}
                         </div>
                     )}
-                </div>
-            </section>
-            <section className="save-section" ref={gradeSaveRef}>
-                <div className="save-panel">
-                    <div className="save-content">
-
-                        <div className="grade-row">
-                            <span className="grade-label">Grade</span>
-                            <span className="grade-value">{grade}</span>
-                        </div>
-
-                        <button
-                            className={`save-grade ${saveStatus}`}
-                            onClick={handleSave}
-                            disabled={saveStatus === 'saving'}
-                        >
-                            {saveStatus === 'idle' && 'Save'}
-                            {saveStatus === 'saving' && 'Saving...'}
-                            {saveStatus === 'saved' && 'Saved!'}
-                            {saveStatus === 'error' && 'Error'}
-                        </button>
-
-                        {saveStatus === 'error' && (
-                            <div className="muted small">Save failed. Try again.</div>
-                        )}
-                        {saveStatus === 'saved' && (
-                            <div className="muted small">Saved to the database.</div>
-                        )}
-                    </div>
-
                 </div>
             </section>
         </div>

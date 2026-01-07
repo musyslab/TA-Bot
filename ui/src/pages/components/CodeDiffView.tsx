@@ -183,7 +183,7 @@ type DiffViewProps = {
     onLineClick?: (lineNo: number, e: React.MouseEvent) => void
     onLineMouseEnter?: (lineNo: number) => void
     onLineMouseLeave?: (lineNo: number) => void
-    codeRightPanel?: React.ReactNode
+    rightPanel?: React.ReactNode
     betweenDiffAndCode?: React.ReactNode
 }
 
@@ -199,7 +199,7 @@ export default function DiffView(props: DiffViewProps) {
         onLineClick,
         onLineMouseEnter,
         onLineMouseLeave,
-        codeRightPanel,
+        rightPanel,
         betweenDiffAndCode,
     } = props
 
@@ -473,8 +473,8 @@ export default function DiffView(props: DiffViewProps) {
 
     const isLineClickable = Boolean(onLineClick)
 
-    return (
-        <>
+    const DiffViewSection = () => {
+        return (
             <section className="diff-view no-user-select" {...copyBlockHandlers} ref={diffViewRef}>
                 <aside className="diff-sidebar">
                     <ul className="diff-file-list">
@@ -663,139 +663,147 @@ export default function DiffView(props: DiffViewProps) {
                     </div>
                 </div>
             </section>
+        )
+    }
 
-            {betweenDiffAndCode}
-
-            {/* ==================== CODE SECTION (BOTTOM) ==================== */}
-            <section className="code-section">
-                <h2 className="section-title">{codeSectionTitle}</h2>
-                {codeFiles.length === 0 && <div className="no-data-message">Fetching submitted code…</div>}
-
-                {codeFiles.length > 0 && (
-                    <>
-                        {codeFiles.length > 1 && (
-                            <div className="code-file-picker">
-                                <label className="section-label" htmlFor="codefile-select">
-                                    File Selection
-                                </label>
-                                <div className="select-wrap">
-                                    <select
-                                        id="codefile-select"
-                                        className="select"
-                                        value={selectedCodeFile}
-                                        onChange={(e) => setSelectedCodeFile(e.target.value)}
+    const CodeSection = () => {
+        return (
+            <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
+                {({ style, tokens, getLineProps, getTokenProps }) => (
+                    <div
+                        className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
+                        ref={effectiveCodeContainerRef}
+                        role="region"
+                        aria-label="Submitted source code"
+                    >
+                        <ol className="code-list" style={style}>
+                            {tokens.map((line, i) => {
+                                const lineNo = i + 1
+                                const { key: lineKey, ...lineProps } = getLineProps({ line, key: i })
+                                const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
+                                return (
+                                    <li
+                                        key={lineKey ?? lineNo}
+                                        ref={(el) => {
+                                            if (lineRefs) lineRefs.current[lineNo] = el
+                                        }}
+                                        {...lineProps}
+                                        className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
+                                        onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
+                                        onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
+                                        onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
+                                        title={
+                                            onLineClick ? 'Click this line to add or view grading errors' : undefined
+                                        }
                                     >
-                                        {codeFiles.map((f) => (
-                                            <option key={f.name} value={f.name}>
-                                                {f.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <FaChevronDown className="select-icon" aria-hidden="true" />
-                                </div>
-                            </div>
-                        )}
+                                        <span className="gutter">
+                                            <span className="line-number">{lineNo}</span>
+                                        </span>
+                                        <span className="code-text">
+                                            {line.map((token, key) => {
+                                                const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key })
+                                                return <span key={tokenKey ?? key} {...tokenProps} />
+                                            })}
+                                        </span>
+                                    </li>
+                                )
+                            })}
+                        </ol>
+                    </div>
+                )}
+            </Highlight>
+        )
+    }
 
-                        {codeRightPanel ? (
-                            <div className="code-and-errors">
-                                <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
-                                    {({ style, tokens, getLineProps, getTokenProps }) => (
-                                        <div
-                                            className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
-                                            ref={effectiveCodeContainerRef}
-                                            role="region"
-                                            aria-label="Submitted source code"
-                                        >
-                                            <ol className="code-list" style={style}>
-                                                {tokens.map((line, i) => {
-                                                    const lineNo = i + 1
-                                                    const { key: lineKey, ...lineProps } = getLineProps({ line, key: i })
-                                                    const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
-                                                    return (
-                                                        <li
-                                                            key={lineKey ?? lineNo}
-                                                            ref={(el) => {
-                                                                if (lineRefs) lineRefs.current[lineNo] = el
-                                                            }}
-                                                            {...lineProps}
-                                                            className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
-                                                            onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
-                                                            onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
-                                                            onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
-                                                            title={
-                                                                onLineClick
-                                                                    ? 'Click this line to add or view grading errors'
-                                                                    : undefined
-                                                            }
-                                                        >
-                                                            <span className="gutter">
-                                                                <span className="line-number">{lineNo}</span>
-                                                            </span>
-                                                            <span className="code-text">
-                                                                {line.map((token, key) => {
-                                                                    const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key })
-                                                                    return <span key={tokenKey ?? key} {...tokenProps} />
-                                                                })}
-                                                            </span>
-                                                        </li>
-                                                    )
-                                                })}
-                                            </ol>
+    return (
+        <>
+            {rightPanel ? (
+                <div className="diff-code-panel">
+                    <div className="diff-and-code">
+                        <DiffViewSection/>
+
+                        {betweenDiffAndCode}
+
+                        {/* ==================== CODE SECTION (BOTTOM) ==================== */}
+                        <section className="code-section">
+                            <h2 className="section-title">{codeSectionTitle}</h2>
+                            {codeFiles.length === 0 && <div className="no-data-message">Fetching submitted code…</div>}
+
+                            {codeFiles.length > 0 && (
+                                <>
+                                    {codeFiles.length > 1 && (
+                                        <div className="code-file-picker">
+                                            <label className="section-label" htmlFor="codefile-select">
+                                                File Selection
+                                            </label>
+                                            <div className="select-wrap">
+                                                <select
+                                                    id="codefile-select"
+                                                    className="select"
+                                                    value={selectedCodeFile}
+                                                    onChange={(e) => setSelectedCodeFile(e.target.value)}
+                                                >
+                                                    {codeFiles.map((f) => (
+                                                        <option key={f.name} value={f.name}>
+                                                            {f.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <FaChevronDown className="select-icon" aria-hidden="true" />
+                                            </div>
                                         </div>
                                     )}
-                                </Highlight>
 
-                                {codeRightPanel}
-                            </div>
-                        ) : (
-                            <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
-                                {({ style, tokens, getLineProps, getTokenProps }) => (
-                                    <div
-                                        className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
-                                        ref={effectiveCodeContainerRef}
-                                        role="region"
-                                        aria-label="Submitted source code"
-                                    >
-                                        <ol className="code-list" style={style}>
-                                            {tokens.map((line, i) => {
-                                                const lineNo = i + 1
-                                                const { key: lineKey, ...lineProps } = getLineProps({ line, key: i })
-                                                const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
-                                                return (
-                                                    <li
-                                                        key={lineKey ?? lineNo}
-                                                        ref={(el) => {
-                                                            if (lineRefs) lineRefs.current[lineNo] = el
-                                                        }}
-                                                        {...lineProps}
-                                                        className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
-                                                        onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
-                                                        onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
-                                                        onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
-                                                        title={
-                                                            onLineClick ? 'Click this line to add or view grading errors' : undefined
-                                                        }
-                                                    >
-                                                        <span className="gutter">
-                                                            <span className="line-number">{lineNo}</span>
-                                                        </span>
-                                                        <span className="code-text">
-                                                            {line.map((token, key) => {
-                                                                const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key })
-                                                                return <span key={tokenKey ?? key} {...tokenProps} />
-                                                            })}
-                                                        </span>
-                                                    </li>
-                                                )
-                                            })}
-                                        </ol>
+                                    <CodeSection/>
+                                </>
+                            )}
+                        </section>
+                    </div>
+
+                    {rightPanel}
+                </div>
+            ) : (
+                <>
+                    <DiffViewSection/>
+
+                    {betweenDiffAndCode}
+
+                    {/* ==================== CODE SECTION (BOTTOM) ==================== */}
+                    <section className="code-section">
+                        <h2 className="section-title">{codeSectionTitle}</h2>
+                        {codeFiles.length === 0 && <div className="no-data-message">Fetching submitted code…</div>}
+
+                        {codeFiles.length > 0 && (
+                            <>
+                                {codeFiles.length > 1 && (
+                                    <div className="code-file-picker">
+                                        <label className="section-label" htmlFor="codefile-select">
+                                            File Selection
+                                        </label>
+                                        <div className="select-wrap">
+                                            <select
+                                                id="codefile-select"
+                                                className="select"
+                                                value={selectedCodeFile}
+                                                onChange={(e) => setSelectedCodeFile(e.target.value)}
+                                            >
+                                                {codeFiles.map((f) => (
+                                                    <option key={f.name} value={f.name}>
+                                                        {f.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <FaChevronDown className="select-icon" aria-hidden="true" />
+                                        </div>
                                     </div>
                                 )}
-                            </Highlight>
+
+                                <CodeSection/>
+                            </>
                         )}
-                    </>
-                )}
-            </section>
+                    </section>
+                </>
+            )}
         </>
     )
 }
