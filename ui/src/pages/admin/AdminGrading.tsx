@@ -222,7 +222,7 @@ export function AdminGrading() {
     const selectedLineErrors = selectedLine !== null ? observedErrors[selectedLine] ?? [] : []
 
     return (
-        <div className="page-container" id="student-output-diff">
+        <div className="page-container" id="admin-output-diff">
             <Helmet>
                 <title>TA-Bot</title>
             </Helmet>
@@ -284,8 +284,8 @@ export function AdminGrading() {
                             </div>
                         </div>
 
-                        <div className="grading-section navigation-section">
-                            <div className="section-label">Navigation</div>
+                        <div className="navigation-section">
+                            <div className="navigation-header">Jump To</div>
                             <ul className="navigation-list">
                                 <li className="navigation-item"
                                     onClick={() => diffViewRef.current !== null ? scrollToSection(diffViewRef.current) : null}

@@ -480,8 +480,7 @@ export default function DiffView(props: DiffViewProps) {
                     <ul className="diff-file-list">
                         {!testsLoaded && <li className="muted">Loading…</li>}
                         {testsLoaded && diffFilesAll.length === 0 && <li className="muted">No tests.</li>}
-
-                        {diffFilesAll.map((f) => (
+                        {diffFilesAll.sort((a, b) => a.num - b.num).map((f) => (
                             <li
                                 key={f.id}
                                 className={
