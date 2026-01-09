@@ -276,6 +276,11 @@
         color: #111827;
     }
 
+    .line-error-lines {
+        color: #374151;
+        font-size: 0.9rem;
+    }
+
     .line-error-points {
         font-weight: 800;
         color: #b91c1c;
@@ -452,7 +457,7 @@
     width: auto;
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 1rem;
+    gap: 12px;
     align-items: center;
     margin: 0 -12px 12px;
 
@@ -461,27 +466,19 @@
     padding: 12px;
 }
 
-.grade-row {
+.grade-column {
     height: 100%;
     display: flex;
-    justify-content: space-evenly;
-    align-items: baseline;
-    font-size: 1.5rem;
+    align-items: center;
+    justify-content: center;
+
     border: 1px solid #ccc;
     padding: 5px 14px;
     border-radius: 10px;
 
-    .grade-label {
-        font-weight: 900;
-        color: #374151;
-    }
-
-    .grade-value {
-        font-weight: 900;
-        color: #111827;
-        font-size: 1.6rem;
-        text-align: center
-    }
+    font-size: 1.5rem;
+    font-weight: 900;
+    color: #111827;
 }
 
 /* Save button states */

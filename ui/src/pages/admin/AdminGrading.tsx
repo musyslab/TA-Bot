@@ -10,11 +10,6 @@ import DiffView from '../components/CodeDiffView'
 
 const defaultpagenumber = -1
 
-type BackendError = {
-    line: number
-    errorId: string
-}
-
 type ErrorDef = {
     id: string
     label: string
@@ -23,11 +18,14 @@ type ErrorDef = {
 }
 
 type ObservedError = {
+    startLine: number
+    endLine: number
     errorId: string
 }
 
-type ErrorsByLine = {
-    [line: number]: ObservedError[]
+type LineRange = {
+    start: number
+    end: number
 }
 
 export function AdminGrading() {
@@ -39,8 +37,8 @@ export function AdminGrading() {
     const [studentName, setStudentName] = useState<string>('')
 
     // Track which lines contain errors and if errors exist
-    const [observedErrors, setObservedErrors] = useState<ErrorsByLine>({})
-    const hasErrors = Object.keys(observedErrors).length > 0
+    const [observedErrors, setObservedErrors] = useState<ObservedError[]>([])
+    const hasErrors = observedErrors.length > 0
 
     // TODO: Add actual error definitions
     const ERRORS: Record<string, ErrorDef> = {
@@ -67,8 +65,7 @@ export function AdminGrading() {
     const errorDefs = useMemo(() => Object.values(ERRORS), [])
 
     const totalPoints = useMemo(() => {
-        return Object.values(observedErrors)
-            .flat()
+        return observedErrors
             .reduce((sum, err) => sum + (ERRORS[err.errorId]?.points ?? 0), 0)
     }, [observedErrors])
 
@@ -76,7 +73,36 @@ export function AdminGrading() {
 
     // Line hover and selection
     const [hoveredLine, setHoveredLine] = useState<number | null>(null)
-    const [selectedLine, setSelectedLine] = useState<number | null>(null)
+    const [initialLine, setInitialLine] = useState<number | null>(null)
+    const [selectedRange, setSelectedRange] = useState<LineRange | null>(null)
+
+    const selectLines = (start: number, end: number) => {
+        setSelectedRange({start: start, end: end})
+    }
+
+    const isRangeSelected = (start: number, end: number) => {
+        if (selectedRange === null) return false
+        return start <= selectedRange.end && end >= selectedRange.start
+    }
+
+    // Handles code line selection
+    const handleMouseDown = (line : number) => {
+        setInitialLine(line)
+        selectLines(line, line)
+    }
+
+    const handleMouseEnter = (line : number) => {
+        setHoveredLine(line)
+        if (initialLine === null) return
+        setSelectedRange({
+            start: Math.min(initialLine, line),
+            end: Math.max(initialLine, line)
+        })
+    }
+
+    const handleMouseUp = () => {
+        setInitialLine(null)
+    }
 
     // References for code lines
     const codeContainerRef = useRef<HTMLDivElement | null>(null)
@@ -86,10 +112,6 @@ export function AdminGrading() {
         const el = lineRefs.current[lineNo]
         if (!el) return
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
-
-    const selectLine = (lineNo: number) => {
-        setSelectedLine(lineNo)
     }
 
     // References for Navigation
@@ -128,7 +150,7 @@ export function AdminGrading() {
             .catch((err) => console.log(err))
     }, [submissionId, pid])
 
-    // Load saved grading (errors)
+    // Fetch saved grading errors
     useEffect(() => {
         if (submissionId < 0) return
 
@@ -139,39 +161,20 @@ export function AdminGrading() {
             .then((response) => {
                 const { errors } = response.data
 
-                const formattedErrors: ErrorsByLine = {}
-
-                for (const item of errors as BackendError[]) {
-                    const lineNo = Number(item.line)
-                    if (!formattedErrors[lineNo]) formattedErrors[lineNo] = []
-                    formattedErrors[lineNo].push({ errorId: item.errorId })
-                }
-
-                setObservedErrors(formattedErrors)
-
-                const firstLine = Object.keys(formattedErrors)
-                    .map((k) => Number(k))
-                    .sort((a, b) => a - b)[0]
-
-                if (Number.isFinite(firstLine)) {
-                    setSelectedLine(firstLine)
+                for (const item of errors as ObservedError[]) {
+                    const start = Number(item.startLine)
+                    const end = Number(item.endLine)
+                    addError(start, end, item.errorId)
                 }
             })
             .catch((err) => console.error('Could not load saved grading:', err))
     }, [submissionId])
 
+    // Handles saving grading errors
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
     const handleSave = () => {
         setSaveStatus('saving')
-
-        // converts { 10: [{errorId: "ERROR1"}] } into [{ line: 10, errorId: "ERROR1" }]
-        const errorList = Object.entries(observedErrors).flatMap(([line, errors]) =>
-            errors.map((err) => ({
-                line: parseInt(line, 10),
-                errorId: err.errorId,
-            }))
-        )
 
         axios
             .post(
@@ -179,7 +182,7 @@ export function AdminGrading() {
                 {
                     submissionId: submissionId,
                     grade: grade,
-                    errors: errorList,
+                    errors: observedErrors,
                 },
                 {
                     headers: {
@@ -197,29 +200,54 @@ export function AdminGrading() {
             })
     }
 
-    const addObservedError = (line: number, errorId: string) => {
-        setObservedErrors((prev) => {
-            const errors = prev[line] ?? []
-            if (errors.some((e) => e.errorId === errorId)) return prev
-            return { ...prev, [line]: [...errors, { errorId }] }
+    // Groups and sorts errors for the All Errors table
+    const tableRows = useMemo(() => {
+        return Object.values(
+            observedErrors.reduce((table, err) => {
+                const key = `${err.startLine}-${err.endLine}`
+                if (!table[key]) table[key] = [err.startLine, err.endLine, []]
+
+                table[key][2].push(err)
+                return table
+            }, {} as Record<string, [number, number, ObservedError[]]>)
+        ).sort((a, b) => {
+            const [aStart, aEnd] = a
+            const [bStart, bEnd] = b
+            if (aStart !== bStart) return aStart - bStart
+            return (aEnd - aStart) - (bEnd - bStart)
+        })
+    }, [observedErrors])
+
+    const addError = (start: number, end: number, errorId: string) => {
+        setObservedErrors(prev => {
+            if (prev.some((err) => err.errorId === errorId &&
+                    err.startLine === start &&
+                    err.endLine === end))
+                return prev
+            return [...prev,
+                {errorId: errorId,
+                    startLine: start,
+                    endLine: end
+                }
+            ]
         })
         setSaveStatus('idle')
     }
 
-    const removeObservedError = (line: number, errorId: string) => {
-        setObservedErrors((prev) => {
-            const remaining = prev[line]?.filter((e) => e.errorId !== errorId) ?? []
-
-            if (remaining.length === 0) {
-                const { [line]: _, ...rest } = prev
-                return rest
-            }
-            return { ...prev, [line]: remaining }
-        })
+    const removeError = (start: number, end: number, errorId: string) => {
+        setObservedErrors(prev =>
+            prev.filter(err => !(
+                err.errorId === errorId &&
+                err.startLine === start &&
+                err.endLine === end
+            ))
+        )
         setSaveStatus('idle')
     }
 
-    const selectedLineErrors = selectedLine !== null ? observedErrors[selectedLine] ?? [] : []
+    const selectedRangeErrors = selectedRange !== null ? observedErrors.filter(err =>
+        isRangeSelected(err.startLine, err.endLine)
+    ) : []
 
     return (
         <div className="page-container" id="admin-output-diff">
@@ -255,32 +283,33 @@ export function AdminGrading() {
                     <div className="grading-banner" role="note" aria-label="How to add errors">
                         <div className="banner-title">How to mark errors</div>
                         <div className="banner-text">
-                            Click a line in the submitted code. Use the Grading Panel on the right to add or remove error
-                            categories for that line.
+                            Click a line or select multiple lines in the submitted code. Use the Grading Panel on the right to add or remove error
+                            categories for the selected line(s).
                         </div>
                     </div>
                 }
                 codeContainerRef={codeContainerRef}
                 lineRefs={lineRefs}
                 getLineClassName={(lineNo) => {
-                    const errors = observedErrors[lineNo] ?? []
+                    const errors = observedErrors.some(err => err.startLine <= lineNo && err.endLine >= lineNo)
                     return [
-                        errors.length > 0 ? 'has-error' : '',
+                        errors ? 'has-error' : '',
                         hoveredLine === lineNo ? 'is-hovered' : '',
-                        selectedLine === lineNo ? 'is-selected' : '',
+                        isRangeSelected(lineNo, lineNo) ? 'is-selected' : '',
                     ]
                         .filter(Boolean)
                         .join(' ')
                 }}
-                onLineClick={(lineNo) => selectLine(lineNo)}
-                onLineMouseEnter={(lineNo) => setHoveredLine(lineNo)}
+                onLineMouseDown={(lineNo) => handleMouseDown(lineNo)}
+                onLineMouseEnter={(lineNo) => handleMouseEnter(lineNo)}
                 onLineMouseLeave={() => setHoveredLine(null)}
+                onLineMouseUp={() => handleMouseUp()}
                 rightPanel={
                     <aside className="grading-panel" aria-label="Grading panel">
                         <div className="grading-panel-header">
                             <div className="grading-title">Grading Panel</div>
                             <div className="grading-hint">
-                                {selectedLine === null ? 'Select a line to start.' : 'Add errors to the selected line.'}
+                                {!selectedRange ? 'Select a line to start.' : 'Add errors to the selected line(s).'}
                             </div>
                         </div>
 
@@ -301,15 +330,18 @@ export function AdminGrading() {
                         </div>
 
                         <div className="grading-section">
-                            <div className="section-label">Selected line</div>
+                            <div className="section-label">Selected line(s)</div>
                             <div className="selected-line-row">
                                 <button
                                     type="button"
-                                    className={`selected-line-pill ${selectedLine !== null ? 'active' : 'inactive'}`}
-                                    disabled={selectedLine === null}
-                                    onClick={() => selectedLine !== null ? scrollToLine(selectedLine) : null}
+                                    className={`selected-line-pill ${selectedRange ? 'active' : 'inactive'}`}
+                                    disabled={!selectedRange}
+                                    onClick={() => selectedRange !== null ? scrollToLine(selectedRange?.start) : null}
+                                    title="Click to jump to selected line"
                                 >
-                                    {selectedLine !== null ? `Line ${selectedLine}` : 'None'}
+                                    {selectedRange === null ? 'None' :
+                                    selectedRange.start === selectedRange.end ? `Line ${selectedRange.start}` :
+                                    `Lines ${selectedRange.start}-${selectedRange.end}`}
                                 </button>
                             </div>
                         </div>
@@ -322,10 +354,10 @@ export function AdminGrading() {
                                         key={err.id}
                                         type="button"
                                         className="error-def-btn"
-                                        disabled={selectedLine === null}
+                                        disabled={selectedRange === null}
                                         onClick={() => {
-                                            if (selectedLine === null) return
-                                            addObservedError(selectedLine, err.id)
+                                            if (selectedRange === null) return
+                                            addError(selectedRange.start, selectedRange.end, err.id)
                                         }}
                                     >
                                         <div className="error-def-top">
@@ -336,34 +368,37 @@ export function AdminGrading() {
                                     </button>
                                 ))}
                             </div>
-                            {selectedLine === null && <div className="muted small">Select a line to enable adding.</div>}
+                            {selectedRange === null && <div className="muted small">Select a line to enable adding.</div>}
                         </div>
 
                         <div className="grading-section">
-                            <div className="section-label">Errors on selected line</div>
+                            <div className="section-label">Errors on selected line(s)</div>
 
-                            {selectedLine === null && <div className="muted">No line selected.</div>}
+                            {selectedRange === null && <div className="muted">No line selected.</div>}
 
-                            {selectedLine !== null && selectedLineErrors.length === 0 && (
+                            {selectedRange !== null && selectedRangeErrors.length === 0 && (
                                 <div className="muted">No errors on this line.</div>
                             )}
 
-                            {selectedLine !== null && selectedLineErrors.length > 0 && (
+                            {selectedRange !== null && selectedRangeErrors.length > 0 && (
                                 <div className="line-error-list">
-                                    {selectedLineErrors.map((err, idx) => {
+                                    {selectedRangeErrors.map((err, idx) => {
                                         const meta = ERRORS[err.errorId]
                                         const label = meta?.label ?? err.errorId
                                         const pts = meta?.points ?? 0
                                         return (
-                                            <div key={`${selectedLine}-${err.errorId}-${idx}`} className="line-error-item">
+                                            <div key={`${selectedRange.start}-${err.errorId}-${idx}`} className="line-error-item">
                                                 <div className="line-error-main">
                                                     <span className="line-error-label">{label}</span>
+                                                    <span className="line-error-lines">
+                                                        {err.startLine === err.endLine ? `${err.startLine}` : `${err.startLine}-${err.endLine}`}
+                                                    </span>
                                                     <span className="line-error-points">-{pts}</span>
                                                 </div>
                                                 <button
                                                     type="button"
                                                     className="line-error-remove"
-                                                    onClick={() => removeObservedError(selectedLine, err.errorId)}
+                                                    onClick={() => removeError(selectedRange.start, selectedRange.end, err.errorId)}
                                                 >
                                                     Remove
                                                 </button>
@@ -381,9 +416,8 @@ export function AdminGrading() {
                 <h2 className="section-title">All Observed Errors</h2>
                 <div className="all-observed-panel">
                     <div className="save-panel">
-                        <div className="grade-row">
-                            <span className="grade-label">Grade</span>
-                            <span className="grade-value">{grade}</span>
+                        <div className="grade-column">
+                            Grade: {grade}
                         </div>
 
                         <button className="save-grade">
@@ -413,56 +447,56 @@ export function AdminGrading() {
 
                     {hasErrors && (
                         <div className="all-errors">
-                            {Object.entries(observedErrors)
-                                .sort(([a], [b]) => Number(a) - Number(b))
-                                .map(([lineStr, errors]) => {
-                                    const lineNo = Number(lineStr)
-                                    const lineTotal = errors.reduce((sum, e) => sum + (ERRORS[e.errorId]?.points ?? 0), 0)
+                            {tableRows.map(([start, end, errors]) => {
+                                const totalPoints = errors.reduce((sum, e) => sum + (ERRORS[e.errorId]?.points ?? 0), 0)
 
-                                    return (
-                                        <div
-                                            key={lineNo}
-                                            className={`all-errors-line ${selectedLine === lineNo ? 'is-selected' : ''}`}
+                                return(
+                                    <div
+                                        key={`${start}-${end}`}
+                                        className={`
+                                            all-errors-line
+                                            ${selectedRange?.start === start && selectedRange.end === end ? 'is-selected' : ''}
+                                        `}
+                                    >
+                                        <button
+                                            type="button"
+                                            className="all-errors-line-header"
+                                            onClick={() => {
+                                                setSelectedRange({start: start, end: end})
+                                                scrollToLine(start)
+                                            }}
+                                            title="Select line(s)"
                                         >
-                                            <button
-                                                type="button"
-                                                className="all-errors-line-header"
-                                                onClick={() => {
-                                                    setSelectedLine(lineNo)
-                                                    scrollToLine(lineNo)
-                                                }}
-                                                title="Select line"
-                                            >
-                                                <span className="all-errors-line-title">Line {lineNo}</span>
-                                                <span className="all-errors-line-meta">
-                                                    {errors.length} {errors.length === 1 ? 'error' : 'errors'}, -{lineTotal}
-                                                </span>
-                                            </button>
+                                            <span className="all-errors-line-title">
+                                                {start === end ? `Line ${start}` : `Lines ${start}-${end}`}
+                                            </span>
+                                            <span className="all-errors-line-meta">
+                                                {errors.length} {errors.length === 1 ? 'error' : 'errors'}, -{totalPoints}
+                                            </span>
+                                        </button>
 
-                                            <div className="all-errors-line-body">
-                                                {errors.map((err, idx) => {
-                                                    const meta = ERRORS[err.errorId]
-                                                    const label = meta?.label ?? err.errorId
-                                                    const pts = meta?.points ?? 0
+                                        <div className="all-errors-line-body">
+                                            {errors.map((err, idx) => {
+                                                const meta = ERRORS[err.errorId]
 
-                                                    return (
-                                                        <div key={`${lineNo}-${err.errorId}-${idx}`} className="all-errors-item">
-                                                            <span className="all-errors-item-label">{label}</span>
-                                                            <span className="all-errors-item-points">-{pts}</span>
-                                                            <button
-                                                                type="button"
-                                                                className="all-errors-item-remove"
-                                                                onClick={() => removeObservedError(lineNo, err.errorId)}
-                                                            >
-                                                                Remove
-                                                            </button>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
+                                                return (
+                                                    <div key={`${start}-${end}-${err.errorId}-${idx}`} className="all-errors-item">
+                                                        <span className="all-errors-item-label">{meta.label}</span>
+                                                        <span className="all-errors-item-points">-{meta.points}</span>
+                                                        <button
+                                                            type="button"
+                                                            className="all-errors-item-remove"
+                                                            onClick={() => removeError(start, end, err.errorId)}
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
-                                    )
-                                })}
+                                    </div>
+                                )
+                            })}
                         </div>
                     )}
                 </div>

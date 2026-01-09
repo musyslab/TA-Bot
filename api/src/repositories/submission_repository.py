@@ -723,7 +723,8 @@ class SubmissionRepository():
             for error in errors:
                 new_err = SubmissionManualErrors(
                     SubmissionId=submission_id,
-                    LineNumber=error['line'],
+                    StartLine=error['startLine'],
+                    EndLine=error['endLine'],
                     ErrorId=error['errorId']
                 )
                 db.session.add(new_err)
@@ -741,6 +742,6 @@ class SubmissionRepository():
         
         # convert to list of dicts
         return [
-            {'line': e.LineNumber, 'errorId': e.ErrorId} 
+            {'startLine': e.StartLine, 'endLine': e.EndLine, 'errorId': e.ErrorId}
             for e in errors
         ]

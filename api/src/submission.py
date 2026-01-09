@@ -557,7 +557,7 @@ def save_grading(submission_repo: SubmissionRepository = Provide[Container.submi
     input_json = request.get_json()
     submission_id = input_json.get('submissionId')
     grade = input_json.get('grade')
-    errors = input_json.get('errors') # Expecting list: [{line: 10, errorId: "ERROR1"}]
+    errors = input_json.get('errors') # Expecting list: [{start: 10, end: 12, errorId: "ERROR1"}]
 
     success = submission_repo.save_manual_grading(submission_id, grade, errors)
 
