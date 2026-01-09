@@ -1,3 +1,5 @@
+SET FOREIGN_KEY_CHECKS=0;
+
 --
 -- Table structure for table `ClassAssignments`
 --
@@ -286,3 +288,5 @@ CREATE TABLE `SubmissionManualErrors` (
   KEY `fk_sub_errors_idx` (`SubmissionId`), 
   CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE 
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET FOREIGN_KEY_CHECKS=1;
