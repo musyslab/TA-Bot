@@ -38,10 +38,6 @@ Verify node/npm is working:
 
 ```npm -v```
 
-Install yarn:
-
-```npm install --global yarn```
-
 Install Docker (Follow instructions at: https://docs.docker.com/engine/install/ubuntu/)
 
 Make it so you don't have to run sudo everytime in docker:
@@ -61,8 +57,6 @@ Make it so you don't have to run sudo everytime in docker:
 Enter Github username and personal access token (not password)
 
 Go into UI folder:
-
-```yarn install```
 
 ```npm install``` 
 

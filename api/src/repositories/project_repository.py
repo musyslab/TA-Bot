@@ -8,7 +8,7 @@ from typing import Optional, Dict
 from flask import send_file
 
 from sqlalchemy.sql.expression import asc
-from .models import ChatLogs, Projects, Levels, StudentGrades, StudentProgress, Submissions, Testcases, Classes
+from .models import Projects, StudentGrades, Submissions, Testcases, Classes
 from src.repositories.database import db
 from sqlalchemy import desc, and_
 from datetime import datetime
@@ -20,7 +20,6 @@ import json
 
 class ProjectRepository():
 
-    #TODO: Remove
     def get_current_project(self) -> Optional[Projects]:
         """[Identifies the current project based on the start and end date]
         Returns:
@@ -44,7 +43,6 @@ class ProjectRepository():
         #Start and end time format: 2023-05-31 14:33:00
         return project
 
-    #TODO: Remove
     def get_all_projects(self) -> Projects:
         """Get all projects from the mySQL database and return a project object sorted by end date.
 
@@ -79,28 +77,6 @@ class ProjectRepository():
         class_projects = Projects.query.filter(Projects.ClassId==class_id)
         return class_projects
     
-    def get_levels(self, project_id: int) -> Dict[str, int]:
-        """
-        Returns a dictionary of level names and their corresponding points for a given project.
-
-        Args:
-            project_id (int): The ID of the project to retrieve levels for.
-
-        Returns:
-            Dict[str, int]: A dictionary where the keys are level names and the values are the corresponding points.
-        """
-        levels = Levels.query.filter(Levels.ProjectId == project_id).all()
-        level_score = {}
-        for level in levels:
-            level_score[level.Name] = level.Points
-
-        return level_score
-
-    def get_levels_by_project(self, project_id: int) -> Dict[str, int]:
-        levels = Levels.query.filter(Levels.ProjectId == project_id).order_by(asc(Levels.Order)).all()
-
-        return levels
-
     def create_project(self, name: str, start: datetime, end: datetime, language:str, class_id:int, file_path:str, description_path:str, additional_file_path:str):
         project = Projects(Name=name, Start=start, End=end, Language=language,
                             ClassId=class_id, solutionpath=file_path,
@@ -109,6 +85,7 @@ class ProjectRepository():
         db.session.add(project)
         db.session.commit()
         return project.Id
+        
     def get_project(self, project_id:int) -> Projects:
         project_data = Projects.query.filter(Projects.Id == project_id).first()
         project ={}
@@ -154,12 +131,11 @@ class ProjectRepository():
         testcase_info: Dict[int, list] = {}
         for test in testcases:
             testcase_data = []
-            testcase_data.append(test.LevelId)
-            testcase_data.append(test.Name)
-            testcase_data.append(test.Description)
-            testcase_data.append(test.input)
-            testcase_data.append(test.Output)
-            testcase_data.append(test.IsHidden)
+            testcase_data.append(test.Id)          
+            testcase_data.append(test.Name)        
+            testcase_data.append(test.Description) 
+            testcase_data.append(test.input)       
+            testcase_data.append(test.Output)      
             testcase_info[test.Id] = testcase_data
         return testcase_info
 
@@ -167,12 +143,10 @@ class ProjectRepository():
         self,
         project_id: int,
         testcase_id: int,
-        level_name: str,
         name: str,
         description: str,
         input_data: str,
         output: str,
-        is_hidden: bool,
         class_id: int,
     ):
         from flask import current_app
@@ -181,20 +155,39 @@ class ProjectRepository():
         project = Projects.query.filter(Projects.Id == project_id).first()
         teacher_base = current_app.config["TEACHER_FILES_DIR"]
         # Ensure solutionpath points to the teacher project folder
-        project_base = project.solutionpath  # e.g., /ta-bot/project-files/teacher-files/Project_XYZ
+        project_base = project.solutionpath  
 
         # Run grading-script to compute default output if none provided
         grading_script = os.path.join(
-            current_app.root_path, "..", "ta-bot", "grading-scripts", "tabot.py"
+            current_app.root_path, "..", "tabot-files", "grading-scripts", "grade.py"
         )
 
         add_path = getattr(project, "AdditionalFilePath", "") or ""
+        # Expand stored names to absolute paths under the teacher project folder for grade.py
+        try:
+            base_dir = project_base if os.path.isdir(project_base) else os.path.dirname(project_base)
+            raw = (add_path or "").strip()
+            if raw.startswith("[") or raw.startswith("{"):
+                lst = json.loads(raw)
+            else:
+                lst = [raw] if raw else []
+            abs_list = []
+            for p in (lst or []):
+                if not p:
+                    continue
+                if os.path.isabs(p):
+                    abs_list.append(p)
+                else:
+                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
+            add_path = json.dumps(abs_list)
+        except Exception:
+            pass
+        #   grade.py ADMIN <language> <input_text> <solution_path> [additional_files_json]
         result = subprocess.run(
             [
                 "python",
                 grading_script,
                 "ADMIN",
-                str(-1),
                 project.Language,
                 input_data,
                 project_base,
@@ -214,29 +207,21 @@ class ProjectRepository():
 
         # Handle creation or update of the testcase record
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
-        level = Levels.query.filter(
-            and_(Levels.ProjectId == project_id, Levels.Name == level_name)
-        ).first()
-        level_id = level.Id if level else None
 
         if testcase is None:
             testcase = Testcases(
                 ProjectId=project_id,
-                LevelId=level_id,
                 Name=name,
                 Description=description,
                 input=input_data,
                 Output=output,
-                IsHidden=is_hidden,
             )
             db.session.add(testcase)
         else:
-            testcase.LevelId = level_id
             testcase.Name = name
             testcase.Description = description
             testcase.input = input_data
             testcase.Output = output
-            testcase.IsHidden = is_hidden
 
         db.session.commit()
 
@@ -245,30 +230,7 @@ class ProjectRepository():
         db.session.delete(testcase)
         db.session.commit()
 
-    def get_testcase_input(self, testcase_id: int):
-        testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
-        return testcase.input
-
-    def get_testcase_project(self, testcase_id: int):
-        testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
-        return testcase.ProjectId
-
-    def get_project_id_by_name(self, projectname:str):
-        if(Projects.query.filter(Projects.Name==projectname).count() == 0):
-            return 0
-        project = Projects.query.filter(Projects.Name==projectname).first()
-        return project.Id
-    def levels_creator(self,project_id:int):
-        level_1=Levels(ProjectId=project_id,Name="Level 1",Points=20,Order=1)
-        level_2=Levels(ProjectId=project_id,Name="Level 2",Points=20,Order=2)
-        level_3=Levels(ProjectId=project_id,Name="Level 3",Points=20,Order=3)
-        db.session.add(level_1)
-        db.session.add(level_2)
-        db.session.add(level_3)
-        db.session.commit()
-
     def testcases_to_json(self, project_id: int) -> str:
-        """Return testcases as JSON with project-level AdditionalFilePath in slot 7."""
         testcase_holder: Dict[int, list] = {}
         proj = Projects.query.filter(Projects.Id == project_id).first()
         add_field = getattr(proj, "AdditionalFilePath", "") if proj else ""
@@ -276,82 +238,78 @@ class ProjectRepository():
             add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
         except Exception:
             add_list = []
+
+        # Expand stored names to absolute paths under the teacher solution folder.
+        try:
+            base_dir = ""
+            if proj and getattr(proj, "solutionpath", ""):
+                sp = getattr(proj, "solutionpath", "")
+                base_dir = sp if os.path.isdir(sp) else os.path.dirname(sp)
+            abs_list = []
+            for p in (add_list or []):
+                if not p:
+                    continue
+                if os.path.isabs(p):
+                    abs_list.append(p)
+                else:
+                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
+            add_list = abs_list
+        except Exception:
+            pass
+
         tests = Testcases.query.filter(Testcases.ProjectId == project_id).all()
         for test in tests:
-            level = Levels.query.filter(Levels.Id == test.LevelId).first()
-            level_name = level.Name if level else ""
             testcase_holder[test.Id] = [
                 test.Name,
-                level_name,
                 test.Description,
                 test.input,
                 test.Output,
-                test.IsHidden,
                 add_list,
             ]
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)
         return json_object
+
     def wipe_submissions(self, project_id:int):
         submissions = Submissions.query.filter(Submissions.Project == project_id).all()
-        student_progress = StudentProgress.query.filter(StudentProgress.ProjectId ==project_id).all()
         for student in student_progress:
             db.session.delete(student)
         db.session.commit()
         for submission in submissions:
             db.session.delete(submission)
         db.session.commit()
-
-    def delete_project(self, project_id:int):
-        project = Projects.query.filter(Projects.Id == project_id).first()
-        testcases =Testcases.query.filter(Testcases.ProjectId==project_id).all()
-
-        teacher_base = '/ta-bot/project-files/teacher-files'
-        teacher_folder = os.path.basename(project.solutionpath)
-        teacher_path = os.path.join(teacher_base, teacher_folder)
-        if os.path.isdir(teacher_path):
-            shutil.rmtree(teacher_path)
-        student_base = '/ta-bot/project-files/student-files'
-        student_folder = f"{teacher_folder}-out"
-        student_path = os.path.join(student_base, student_folder)
-        if os.path.isdir(student_path):
-            shutil.rmtree(student_path)
-
-        for test in testcases:
-            db.session.delete(test)
-            db.session.commit()
-        levels = Levels.query.filter(Levels.ProjectId==project_id).all()
-        for level in levels:
-            print(level, flush=True)
-            db.session.delete(level)
-            db.session.commit()
-        db.session.delete(project)
-        db.session.commit()
+    
     def get_className_by_projectId(self, project_id):
         project = Projects.query.filter(Projects.Id == project_id).first()
         class_obj = Classes.query.filter(Classes.Id ==project.ClassId).first()
         return class_obj.Name
-    #TODO: Move this call to class repository
+
+
     def get_class_id_by_name(self, class_name):
         class_id = Classes.query.filter(Classes.Name==class_name).first().Id
         return class_id
+
     def get_project_path(self, project_id):
         project = Projects.query.filter(Projects.Id==project_id).first()
         return project.solutionpath
+
     def get_project_desc_path(self, project_id):
         project = Projects.query.filter(Projects.Id==project_id).first()
         return project.AsnDescriptionPath
+
     def get_project_desc_file(self, project_id):
         project = Projects.query.filter(Projects.Id == project_id).first()
         filepath = project.AsnDescriptionPath
         with open(filepath, 'rb') as file:
             file_contents = file.read()
         return file_contents  # Return the contents of the PDF file
+
     def get_student_grade(self, project_id, user_id):
         student_progress = StudentGrades.query.filter(and_(StudentGrades.Sid==user_id, StudentGrades.Pid==project_id)).first()
         if student_progress is None:
             return 0
         return student_progress.Grade
+        
     def set_student_grade(self, project_id, user_id, grade):
         student_grade = StudentGrades.query.filter(and_(StudentGrades.Sid==user_id, StudentGrades.Pid==project_id)).first()
         if student_grade is not None:
@@ -362,34 +320,3 @@ class ProjectRepository():
         db.session.add(studentGrade)
         db.session.commit()
         return
-    def submit_student_chat(self, user_id, class_id, project_id, user_message, user_code, language, response_to):
-        dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        #Get User UserPseudonym
-        UserPseudonym = ChatLogs.query.filter(ChatLogs.UserId==user_id).first().UserPseudonym
-        new_flag = True
-        if UserPseudonym is None:
-            while new_flag:
-                adjectives = ['Agile', 'Brave', 'Calm', 'Diligent', 'Eager', 'Fierce', 'Gentle', 'Heroic', 'Inventive', 'Jovial', 'Keen', 'Lively', 'Mighty', 'Noble', 'Optimistic', 'Proud', 'Quick', 'Resilient', 'Strong', 'Tenacious', 'Unique', 'Vibrant', 'Wise', 'Xenial', 'Youthful', 'Zealous']
-                nouns = ['Lion', 'Eagle', 'Tiger', 'Leopard', 'Elephant', 'Bear', 'Fox', 'Wolf', 'Hawk', 'Shark', 'Dolphin', 'Cheetah', 'Panther', 'Falcon', 'Gazelle', 'Hippopotamus', 'Iguana', 'Jaguar', 'Kangaroo', 'Lemur', 'Mongoose', 'Narwhal', 'Octopus', 'Penguin', 'Quail', 'Raccoon', 'Squirrel', 'Tortoise', 'Urchin', 'Vulture', 'Walrus', 'Xerus', 'Yak', 'Zebra']
-                colors = ['Red', 'Blue', 'Green', 'Yellow', 'Purple', 'Orange', 'Pink', 'Brown', 'Black', 'White', 'Gray', 'Crimson', 'Cyan', 'Magenta', 'Lime', 'Maroon', 'Navy', 'Olive', 'Teal', 'Violet', 'Indigo', 'Gold', 'Silver', 'Bronze', 'Ruby', 'Emerald', 'Sapphire', 'Amethyst', 'Quartz', 'Onyx', 'Jade', 'Pearl', 'Topaz', 'Opal', 'Turquoise', 'Amber', 'Coral', 'Garnet', 'Jasper', 'Malachite', 'Peridot', 'Tourmaline', 'Zircon']
-                UserPseudonym = random.choice(colors) + random.choice(adjectives) + random.choice(nouns)
-                unique = ChatLogs.query.filter(ChatLogs.UserPseudonym==UserPseudonym).first()
-                if unique is None:
-                    new_flag = False
-        
-        chat = ChatLogs(UserId=user_id, 
-                        ClassId=class_id,
-                        project_id=project_id, 
-                        ResponseTo=response_to,
-                        UserPseudonym=UserPseudonym,
-                        UserImage="",
-                        Response=user_message, 
-                        Code=user_code, 
-                        Language=language, 
-                        TimeSubmitted=dt_string,
-                        MessageFlag=0,
-                        AcceptedFlag=0,
-                        Likes=0)
-        db.session.add(chat)
-        db.session.commit()
-        return "ok"

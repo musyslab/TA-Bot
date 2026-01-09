@@ -17,8 +17,6 @@ class Projects(db.Model):
     Language = Column(String)
 
     Submissions=relationship('Submissions') 
-    Levels=relationship('Levels')
-    StudentProgress=relationship('StudentProgress')
     StudentUnlocks=relationship('StudentUnlocks') 
     solutionpath=Column(String)
     AsnDescriptionPath = Column(String)
@@ -34,30 +32,21 @@ class Users(db.Model):
     StudentNumber = Column(String)
     Role = Column(Integer)
     IsLocked = Column(Boolean)
-    ResearchGroup = Column(Integer)
     Submissions=relationship('Submissions')
     ClassAssignments=relationship('ClassAssignments')
     LoginAttempts=relationship('LoginAttempts')
-    StudentProgress=relationship('StudentProgress')
     StudentUnlocks=relationship('StudentUnlocks') 
 
 class Submissions(db.Model):
     __tablename__ = "Submissions"
     Id = Column(Integer, primary_key=True)
     OutputFilepath = Column(String)
-    PylintFilepath = Column(String)
     CodeFilepath = Column(String)
     IsPassing = Column(Boolean)
-    NumberOfPylintErrors = Column(String)
     Time = Column(Date)
     User = Column(Integer, ForeignKey('Users.Id'))
     Project = Column(Integer, ForeignKey('Projects.Id'))
-    SubmissionLevel =Column(String)
-    Points = Column(Integer)
-    StudentProgress=relationship('StudentProgress')
-    visible = Column(Integer)
     TestCaseResults=Column(String)
-    LintingResults=Column(String)
 
 class LoginAttempts(db.Model):
     __tablename__ = "LoginAttempts"
@@ -71,7 +60,6 @@ class Classes(db.Model):
     Id = Column(Integer, primary_key=True)
     Name = Column(String)
     Tid = Column(String)
-    
 
 class Labs(db.Model):
     __tablename__ = "Labs"
@@ -94,45 +82,23 @@ class ClassAssignments(db.Model):
     LabId = Column(Integer, ForeignKey('Labs.Id'))
     LectureId = Column(Integer, ForeignKey('LectureSections.Id'))
 
-class StudentProgress(db.Model):
-    __tablename__ = "StudentProgress"
-    UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
-    ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
-    SubmissionId = Column(Integer, ForeignKey('Submissions.Id'), primary_key=True)
-    LatestLevel = Column(String)
-
 class StudentUnlocks(db.Model):
     __tablename__ = "StudentUnlocks"
     UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
     ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
     Time = Column(DateTime)
 
-class Config(db.Model):
-    __tablename__ = "Config"
-    Name  = Column(String, primary_key=True)
-    Value = Column(String)
-
-class Levels(db.Model):
-    __tablename__ = "Levels"
-    Id = Column(Integer, primary_key=True)
-    ProjectId = Column(Integer, ForeignKey('Projects.Id'))
-    Name=Column(String)
-    Order=Column(Integer)
-    Points=Column(Integer)
-
 class Testcases(db.Model):
     __tablename__ = "Testcases"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     ProjectId = Column(Integer, ForeignKey('Projects.Id'))
-    LevelId = Column(Integer, ForeignKey("Levels.Id"))
     Name = Column(String)
     Description = Column(String)
     input = Column(String)
     Output = Column(String)
-    IsHidden = Column(Boolean)
 
-class StudentQuestions(db.Model):
-    __tablename__ = "StudentQuestions"
+class OHVisits(db.Model):
+    __tablename__ = "OHVisits"
     Sqid = Column(Integer, primary_key=True, autoincrement=True)
     StudentQuestionscol = Column(String)
     ruling = Column(Integer)
@@ -148,36 +114,14 @@ class StudentGrades(db.Model):
     Sid = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
     Pid = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
     Grade = Column(Integer)
+
 class StudentSuggestions(db.Model):
     __tablename__ = "StudentSuggestions"
     idStudentSuggestions = Column(Integer, primary_key=True, autoincrement=True)
     UserId = Column(Integer)
     StudentSuggestionscol = Column(String)
     TimeSubmitted = Column(DateTime)
-class SnippetRuns(db.Model):
-    __tablename__ = "SnippetRuns"
-    idSnippetRuns = Column(Integer, primary_key=True, autoincrement=True)
-    UserId = Column(Integer)
-    Code = Column(String)
-    Language = Column(String)
-    TestCaseInput = Column(String)
-    Result = Column(DateTime)
-    TimeSubmitted = Column(DateTime)
-class ChatLogs(db.Model):
-    __tablename__ = "ChatLogs"
-    idChatLogs = Column(Integer, primary_key=True, autoincrement=True)
-    UserId = Column(Integer)
-    ClassId = Column(Integer)
-    ResponseTo = Column(Integer)
-    UserPseudonym = Column(String)
-    UserImage = Column(String)
-    Response = Column(String)
-    Code = Column(String)
-    Language = Column(String)
-    TimeSubmitted = Column(DateTime)
-    MessageFlag = Column(Integer)
-    AcceptedFlag = Column(Integer)
-    Likes=Column(Integer)
+
 class SubmissionCharges(db.Model):
     __tablename__ = "SubmissionCharges"
     Id = Column(Integer, primary_key=True, autoincrement=True)
@@ -185,6 +129,7 @@ class SubmissionCharges(db.Model):
     ClassId = Column(Integer)
     BaseCharge = Column(Integer)
     RewardCharge = Column(Integer)
+    
 class SubmissionChargeRedeptions(db.Model):
     __tablename__ = "SubmissionChargeRedeptions"
     Id = Column(Integer, primary_key=True, autoincrement=True)
@@ -196,3 +141,10 @@ class SubmissionChargeRedeptions(db.Model):
     RedeemedTime = Column(DateTime)
     SubmissionId = Column(Integer)
     Recouped = Column(Integer)
+    
+class SubmissionManualErrors(db.Model):
+    __tablename__ = "SubmissionManualErrors"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    SubmissionId = Column(Integer)
+    LineNumber = Column(Integer)
+    ErrorId = Column(String(45))

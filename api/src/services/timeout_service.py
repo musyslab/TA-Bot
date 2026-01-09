@@ -1,8 +1,6 @@
 from src.repositories.project_repository import ProjectRepository
-from src.repositories.config_repository import ConfigRepository
 from src.repositories.submission_repository import SubmissionRepository
 from datetime import date, datetime, timedelta
-from src.constants import DELAY_CONFIG
 from dependency_injector.wiring import inject, Provide
 from container import Container
 
@@ -10,14 +8,12 @@ from container import Container
 @inject
 def get_timeout(project_id: int, user_id: int,
                 submission_repo: SubmissionRepository = Provide[Container.submission_repo],
-                project_repo: ProjectRepository = Provide[Container.project_repo],
-                config_repo: ConfigRepository = Provide[Container.config_repo]) -> date:
+                project_repo: ProjectRepository = Provide[Container.project_repo]) -> date:
     curr_date = datetime.now()
 
     project = project_repo.get_selected_project(project_id)
 
-    day_delays_str = config_repo.get_config_setting(DELAY_CONFIG)
-    day_delays = [int(x) for x in day_delays_str.split(",")]
+    day_delays = [5]
     day = curr_date - project.Start
     index = day.days
 

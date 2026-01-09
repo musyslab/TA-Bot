@@ -1,0 +1,328 @@
+.main-grid {
+    margin-top: 15px;
+    padding-top: 0;
+}
+
+.admin-project-config-container {
+    margin-top: 0;
+    padding-top: 0;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    background: #f9fafb;
+    color: #111827;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    line-height: 1;
+
+    &:hover {
+        background: #f3f4f6;
+    }
+
+    &:active {
+        transform: translateY(1px);
+    }
+
+    &:focus-visible {
+        outline: 2px solid #93c5fd;
+        outline-offset: 2px;
+    }
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+}
+
+.section-divider {
+    border: 0;
+    height: 1px;
+    margin: 1rem 0 0;
+    background: linear-gradient(90deg, transparent, #d1d5db, transparent);
+}
+
+.student-sub-panel {
+    width: 95%;
+    max-width: none;
+    margin: 0.25rem auto 0;
+    /* close to the top */
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    padding: 1rem 1rem 1.25rem;
+
+    .filter-bar {
+        margin: 0 0 0.8rem;
+        padding: 0;
+        border: none;
+        background: transparent;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+
+        .filter-label {
+            color: #374151;
+            font-weight: 600;
+            margin-right: 0.4rem;
+        }
+
+        .filter-select {
+            padding: 0.45rem 0.6rem;
+            border-radius: 8px;
+            border: 1px solid #d1d5db;
+            background: #ffffff;
+            color: #111827;
+
+            &:focus-visible {
+                outline: 2px solid #60a5fa;
+                outline-offset: 2px;
+            }
+
+        }
+
+        #lectureFilter,
+        .lecture-filter {
+            margin-right: 12px;
+        }
+
+        .filter-label[for="sortSelect"] {
+            margin-left: auto;
+        }
+
+        #sortSelect,
+        .sort-select {
+            margin-left: 0.4rem;
+        }
+
+        .plagiarism-btn {
+            margin-left: 12px;
+            min-height: 36px;
+            padding: 0.45rem 0.75rem;
+            border-radius: 10px;
+            background: #6b7280;
+            /* gray-500 */
+            border-color: #6b7280;
+            color: #ffffff;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+
+            &:hover {
+                background: #4b5563;
+                /* gray-600 */
+                border-color: #4b5563;
+            }
+
+        }
+    }
+
+    .actions-bar {
+        margin-top: 20px;
+        margin-bottom: 20px;
+        /* 
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+        */
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+
+    .actions-bar .btn {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .table-scroll {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .students-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #f3f4f6;
+        border: 1px solid #d1d5db;
+        border-radius: 12px;
+        overflow: hidden;
+
+        /* Keep the grade column from ballooning */
+        .table-head th.col-grade,
+        .table-body td.grade-cell {
+            width: clamp(125px, 14vw, 200px);
+        }
+
+        .table-head {
+            background: #e5e7eb;
+
+            th {
+                text-align: left;
+                padding: 0.65rem 0.75rem;
+                color: #111827;
+                font-size: 0.95rem;
+                border: 1px solid #d1d5db;
+            }
+        }
+
+        .table-body {
+            tr.student-row {
+                background: #f8fafc;
+
+                &:nth-child(even) {
+                    background: #f3f6fb;
+                    /* lighter than no-submission (#eef2f7) for clearer contrast */
+                }
+
+                &:hover {
+                    background: #e9eef4;
+                }
+
+                td {
+                    padding: 0.6rem 0.75rem;
+                    border: 1px solid #e5e7eb;
+                    color: #111827;
+                    vertical-align: middle;
+
+                    &.student-name-cell {
+                        font-weight: 600;
+                        color: #0f172a;
+
+                        .unlock-btn {
+                            margin-left: 0.5rem;
+                            padding: 0.25rem 0.5rem;
+                            font-size: 0.8rem;
+                            background: #ffffff;
+                            border: 1px solid #d1d5db;
+                            border-radius: 8px;
+
+                            &:hover {
+                                background: #f3f4f6;
+                            }
+                        }
+                    }
+
+                    &.status-cell {
+                        font-weight: 700;
+
+                        &.passed {
+                            color: #065f46;
+                            background: rgba(16, 185, 129, 0.12);
+                            border-left: 3px solid #10b981;
+                        }
+
+                        &.failed {
+                            color: #7f1d1d;
+                            background: rgba(239, 68, 68, 0.12);
+                            border-left: 3px solid #ef4444;
+                        }
+                    }
+
+                    &.view-cell {
+                        .view-link {
+                            text-decoration: none;
+                            font-weight: 600;
+                            color: #1d4ed8;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            padding: 0.35rem 0.6rem;
+                            border: 1px solid #d1d5db;
+                            border-radius: 8px;
+                            background: #ffffff;
+                            width: 100%;
+                            height: 100%;
+                            min-height: 36px;
+                            box-sizing: border-box;
+
+                            /* ensure icon is perfectly centered vertically */
+                            .icon {
+                                line-height: 1;
+                                vertical-align: middle;
+                            }
+
+                            &:hover {
+                                text-decoration: none;
+                                background: #f3f4f6;
+                            }
+
+                            &:focus-visible {
+                                outline: 2px solid #93c5fd;
+                                outline-offset: 2px;
+                            }
+                        }
+                    }
+
+                    &.download-cell {
+                        .download-btn {
+                            display: flex;
+                            width: 100%;
+                            height: 100%;
+                            min-height: 36px;
+                            box-sizing: border-box;
+                            justify-content: center;
+                            align-items: center;
+
+                            .icon {
+                                line-height: 1;
+                                vertical-align: middle;
+                            }
+                        }
+                    }
+
+                    /* / .student-sub-panel .students-table .table-body tr.student-row td */
+                    &.grade-cell {
+                        display: flex;
+                        gap: 0.5rem;
+                        align-items: center;
+
+                        /* INPUT + BUTTON SPLIT THE ROW */
+                        .grade-input {
+                            /* removed: width: 65px; */
+                            flex: 1 1 0%;
+                            min-width: 0;
+                            padding: 0.45rem 0.6rem;
+                            border-radius: 8px;
+                            border: 1px solid #d1d5db;
+                            background: #ffffff;
+                            color: #111827;
+                            text-align: right;
+
+                            &:focus-visible {
+                                outline: 2px solid #60a5fa;
+                                outline-offset: 2px;
+                            }
+
+                            &::placeholder {
+                                color: #6b7280;
+                            }
+                        }
+
+                        .grade-btn {
+                            flex: 1 1 0%;
+                            min-width: 0;
+                            text-decoration: none;
+                            /* inherits .btn styles defined above */
+                        }
+                    }
+                }
+            }
+
+            .student-row--no-submission {
+                td {
+                    color: #374151;
+                    background: #e2e8f0;
+                }
+            }
+        }
+    }
+}

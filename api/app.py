@@ -13,9 +13,8 @@ from src.submission import submission_api
 from src.projects import projects_api
 from src.classes import class_api
 from src.error import error_api
-from src.settings import settings_api
 from src.jwt_manager import jwt
-from src import classes, auth, projects, submission, upload, settings
+from src import classes, auth, projects, submission, upload
 from src.services import timeout_service
 import os
 
@@ -23,10 +22,10 @@ def create_app():
     app = Flask(__name__)
     container = Container()
     app.container = container
-    container.wire(modules=[classes, auth, projects, submission, upload, settings, timeout_service])
+    container.wire(modules=[classes, auth, projects, submission, upload, timeout_service])
     
-    TEACHER_DIR = "/ta-bot/project-files/teacher-files"
-    STUDENT_DIR = "/ta-bot/project-files/student-files"
+    TEACHER_DIR = "/tabot-files/project-files/teacher-files"
+    STUDENT_DIR = "/tabot-files/project-files/student-files"
     os.makedirs(TEACHER_DIR, exist_ok=True)
     os.makedirs(STUDENT_DIR, exist_ok=True)
     app.config.update({
@@ -41,7 +40,6 @@ def create_app():
     )
         
     # App configuration
-    app.config['TABOT_PATH'] = os.getenv('TABOT_DIR') + '/tabot.sh'
     app.config["JWT_SECRET_KEY"] = "ob1L04WeQ1U0H5Kiybk9rMoQigVhoGJCKBxC6KxF85G89vAK3L903I073JXQ"
     app.config["MAX_FAILED_LOGINS"] = 5
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1000 * 1000
@@ -56,7 +54,6 @@ def create_app():
     app.register_blueprint(projects_api,url_prefix='/api/projects')  
     app.register_blueprint(class_api,url_prefix='/api/class')
     app.register_blueprint(error_api,url_prefix='/api/error')
-    app.register_blueprint(settings_api,url_prefix="/api/settings")
     
     # Initialize extensions
     jwt.init_app(app)

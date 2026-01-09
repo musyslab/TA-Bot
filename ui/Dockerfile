@@ -1,16 +1,11 @@
 # ui/Dockerfile.dev
-FROM node:20.18.0
-
-# if you still need legacy OpenSSL…
-ENV NODE_OPTIONS=--openssl-legacy-provider
-# file‐watch polling in Docker
-ENV CHOKIDAR_USEPOLLING=true
+FROM node:24.12.0
 
 WORKDIR /app
 
 # leverage cache
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+COPY package.json package-lock.json* ./
+RUN npm ci || npm install
 
 # copy all your source
 COPY . .
@@ -19,4 +14,4 @@ COPY . .
 EXPOSE 3000
 
 # run Vite in host mode so it's accessible outside Docker
-CMD ["yarn", "dev", "--host", "0.0.0.0"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

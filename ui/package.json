@@ -4,69 +4,33 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@testing-library/jest-dom": "^5.11.4",
-    "@testing-library/react": "^11.1.0",
-    "@testing-library/user-event": "^12.1.10",
-    "@types/jest": "^30.0.0",
-    "@types/react-dom": "^19.1.6",
+    "@types/react-dom": "^19.2.3",
     "@types/react-helmet": "^6.1.11",
-    "@types/react-syntax-highlighter": "^15.5.13",
-    "@types/styled-components": "^5.1.34",
-    "@types/tap": "^15.0.5",
-    "ace-builds": "^1.42.0",
-    "apexcharts": "^4.7.0",
-    "axios": "^1.10.0",
-    "diff": "^5.0.0",
-    "moment": "^2.30.1",
-    "react": "^18.2.0",
-    "react-ace": "^14.0.1",
-    "react-apexcharts": "^1.7.0",
+    "@vitejs/plugin-react": "^5.1.2",
+    "axios": "^1.13.2",
+    "diff": "^8.0.2",
+    "prism-react-renderer": "^2.4.1",
+    "react": "^19.2.3",
     "react-countdown": "^2.3.6",
-    "react-datepicker": "8.4.0",
-    "react-diff-viewer-continued": "^3.4.0",
-    "react-dom": "^18.2.0",
+    "react-datepicker": "9.1.0",
+    "react-dom": "^19.2.3",
     "react-helmet": "^6.1.0",
-    "react-router-dom": "^7.6.2",
-    "react-scripts": "5.0.1",
+    "react-icons": "^5.5.0",
+    "react-router-dom": "^7.11.0",
     "react-split": "^2.0.14",
-    "react-syntax-highlighter": "^15.6.1",
-    "sass": "^1.89.2",
-    "semantic-ui-css": "^2.5.0",
-    "semantic-ui-react": "^2.1.5",
-    "styled-components": "^6.1.19",
-    "tap": "^21.1.0",
-    "tap-parser": "^18.0.0",
-    "typescript": "^4.9.4",
-    "web-vitals": "^5.0.3",
-    "yarn": "^1.22.22"
+    "sass-embedded": "^1.97.1",
+    "tap": "^21.5.0",
+    "tap-parser": "^18.3.0",
+    "vite": "^7.3.0"
   },
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "eslintConfig": {
     "extends": [
-      "react-app",
-      "react-app/jest"
+      "react-app"
     ]
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
-  "devDependencies": {
-    "@types/node": "^18.19.112",
-    "@types/react-router-dom": "^5.3.3",
-    "@vitejs/plugin-react": "^4.5.2",
-    "vite": "^6.3.5"
   }
 }

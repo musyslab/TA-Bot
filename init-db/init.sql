@@ -1,19 +1,4 @@
--- MySQL dump 10.13  Distrib 8.0.19, for Win64 (x86_64)
---
--- Host: 127.0.0.1    Database: autota
--- ------------------------------------------------------
--- Server version	8.2.0
-
-/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
-/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
-/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
-/*!50503 SET NAMES utf8mb4 */;
-/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
-/*!40103 SET TIME_ZONE='+00:00' */;
-/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
-/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
-/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
-/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+SET FOREIGN_KEY_CHECKS=0;
 
 --
 -- Table structure for table `ClassAssignments`
@@ -55,20 +40,6 @@ CREATE TABLE `Classes` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `Config`
---
-
-DROP TABLE IF EXISTS `Config`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Config` (
-  `Name` varchar(256) NOT NULL,
-  `Value` varchar(256) NOT NULL,
-  PRIMARY KEY (`Name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
 -- Table structure for table `Labs`
 --
 
@@ -103,25 +74,6 @@ CREATE TABLE `LectureSections` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `Levels`
---
-
-DROP TABLE IF EXISTS `Levels`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Levels` (
-  `Id` int NOT NULL AUTO_INCREMENT,
-  `ProjectId` int NOT NULL,
-  `Name` varchar(45) NOT NULL,
-  `Points` int NOT NULL,
-  `Order` int NOT NULL,
-  PRIMARY KEY (`Id`),
-  KEY `fk_Levels_1_idx` (`ProjectId`),
-  CONSTRAINT `fk_Levels_1` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`)
-) ENGINE=InnoDB AUTO_INCREMENT=112 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
 -- Table structure for table `LoginAttempts`
 --
 
@@ -137,7 +89,6 @@ CREATE TABLE `LoginAttempts` (
   KEY `fk_LoginAttempts_1_idx` (`Username`)
 ) ENGINE=InnoDB AUTO_INCREMENT=95 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
 
 --
 -- Table structure for table `Projects`
@@ -164,43 +115,6 @@ CREATE TABLE `Projects` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `Replies`
---
-
-DROP TABLE IF EXISTS `Replies`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Replies` (
-  `rid` int NOT NULL AUTO_INCREMENT,
-  `uid` int DEFAULT NULL,
-  `tid` int DEFAULT NULL,
-  `reply` text,
-  `time` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `status` tinyint(1) DEFAULT '0',
-  PRIMARY KEY (`rid`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `SnippetRuns`
---
-
-DROP TABLE IF EXISTS `SnippetRuns`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `SnippetRuns` (
-  `idSnippetRuns` int NOT NULL AUTO_INCREMENT,
-  `UserId` int DEFAULT NULL,
-  `Code` text,
-  `Language` varchar(45) DEFAULT NULL,
-  `TestCaseInput` text,
-  `Result` text,
-  `TimeSubmitted` datetime DEFAULT NULL,
-  PRIMARY KEY (`idSnippetRuns`)
-) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
 -- Table structure for table `StudentGrades`
 --
 
@@ -219,34 +133,13 @@ CREATE TABLE `StudentGrades` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `StudentProgress`
+-- Table structure for table `OHVisits`
 --
 
-DROP TABLE IF EXISTS `StudentProgress`;
+DROP TABLE IF EXISTS `OHVisits`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `StudentProgress` (
-  `SubmissionId` int NOT NULL,
-  `LatestLevel` varchar(45) NOT NULL,
-  `UserId` int NOT NULL,
-  `ProjectId` int NOT NULL,
-  PRIMARY KEY (`ProjectId`,`UserId`),
-  KEY `fk_StudentProgress_1_idx` (`UserId`),
-  KEY `fk_StudentProgress_3_idx` (`SubmissionId`),
-  CONSTRAINT `fk_StudentProgress_1` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`),
-  CONSTRAINT `fk_StudentProgress_2` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`),
-  CONSTRAINT `fk_StudentProgress_3` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `StudentQuestions`
---
-
-DROP TABLE IF EXISTS `StudentQuestions`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `StudentQuestions` (
+CREATE TABLE `OHVisits` (
   `Sqid` int NOT NULL AUTO_INCREMENT,
   `StudentQuestionsCol` varchar(10000) DEFAULT NULL,
   `ruling` int DEFAULT NULL,
@@ -274,24 +167,6 @@ CREATE TABLE `StudentSuggestions` (
   `TimeSubmitted` varchar(45) DEFAULT NULL,
   PRIMARY KEY (`idStudentSuggestions`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `StudentUnlocks`
---
-
-DROP TABLE IF EXISTS `StudentUnlocks`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `StudentUnlocks` (
-  `UserId` int NOT NULL,
-  `ProjectId` int NOT NULL,
-  `Time` datetime NOT NULL,
-  PRIMARY KEY (`UserId`,`ProjectId`),
-  KEY `fk_StudentUnlocks_2_idx` (`ProjectId`),
-  CONSTRAINT `fk_StudentUnlocks_1` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`),
-  CONSTRAINT `fk_StudentUnlocks_2` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -345,15 +220,9 @@ CREATE TABLE `Submissions` (
   `Time` datetime NOT NULL,
   `OutputFilepath` varchar(256) NOT NULL,
   `Project` int NOT NULL,
-  `PylintFilepath` varchar(256) NOT NULL,
   `CodeFilepath` varchar(256) NOT NULL,
-  `NumberOfPylintErrors` int NOT NULL,
   `IsPassing` tinyint(1) NOT NULL,
-  `SubmissionLevel` varchar(45) NOT NULL,
-  `Points` int NOT NULL,
-  `visible` int DEFAULT NULL,
   `TestCaseResults` text,
-  `LintingResults` text,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `idSubmissions_UNIQUE` (`Id`),
   KEY `iduser_idx` (`User`),
@@ -373,18 +242,14 @@ DROP TABLE IF EXISTS `Testcases`;
 CREATE TABLE `Testcases` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `ProjectId` int DEFAULT NULL,
-  `LevelId` int DEFAULT NULL,
   `Name` text,
   `Description` text,
   `input` text,
   `Output` text,
-  `IsHidden` tinyint DEFAULT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Id_UNIQUE` (`Id`),
   KEY `tc_fk_idx` (`ProjectId`),
-  KEY `tc_fk2_idx` (`LevelId`),
-  CONSTRAINT `tc_fk` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`),
-  CONSTRAINT `tc_fk2` FOREIGN KEY (`LevelId`) REFERENCES `Levels` (`Id`)
+  CONSTRAINT `tc_fk` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=192 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -404,25 +269,24 @@ CREATE TABLE `Users` (
   `Email` varchar(256) NOT NULL,
   `StudentNumber` varchar(45) NOT NULL,
   `IsLocked` tinyint(1) NOT NULL,
-  `ResearchGroup` int NOT NULL,
-  `anonymous_username` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `idusers_UNIQUE` (`Id`),
   UNIQUE KEY `username_UNIQUE` (`Username`)
 ) ENGINE=InnoDB AUTO_INCREMENT=176 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='This is a table to store website login''s and all users';
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping routines for database 'autota'
+-- Table structure for table `SubmissionManualErrors`
 --
-/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+DROP TABLE IF EXISTS `SubmissionManualErrors`; 
 
-/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
-/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
-/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
-/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
-/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
-/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
-/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+CREATE TABLE `SubmissionManualErrors` ( 
+  `Id` int NOT NULL AUTO_INCREMENT, 
+  `SubmissionId` int NOT NULL, 
+  `LineNumber` int NOT NULL, 
+  `ErrorId` varchar(45) NOT NULL, 
+  PRIMARY KEY (`Id`), 
+  KEY `fk_sub_errors_idx` (`SubmissionId`), 
+  CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE 
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Dump completed on 2025-03-11 13:13:47
+SET FOREIGN_KEY_CHECKS=1;
