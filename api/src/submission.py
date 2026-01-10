@@ -443,6 +443,22 @@ def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Contai
     submission_details.append(str(projectId))
     return make_response(submission_details, HTTPStatus.OK)
 
+@submission_api.route('/get_oh_visits_by_projectId', methods=['POST'])
+@jwt_required()
+@inject
+def get_oh_visits_by_projectId(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    """
+    Helper to get all OHVisits entries for a given project_id.
+    Returns list of OHVisits objects.
+    """
+    input_json = request.get_json()
+    
+    project_id = input_json['project_id'] 
+    
+    visits = submission_repo.get_oh_visits_by_projectId(project_id)
+
+    return make_response(jsonify(visits), HTTPStatus.OK)
+
 @submission_api.route('/submitgrades', methods=['POST'])
 @jwt_required()
 @inject

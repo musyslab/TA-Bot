@@ -745,3 +745,15 @@ class SubmissionRepository():
             {'startLine': e.StartLine, 'endLine': e.EndLine, 'errorId': e.ErrorId}
             for e in errors
         ]
+    
+    def get_oh_visits_by_projectId(self, project_id):
+        """
+        Helper to get all OHVisits entries for a given project_id.
+        Returns list of OHVisits objects.
+        """
+        visits = OHVisits.query.filter(OHVisits.projectId == project_id).filter(OHVisits.ruling == 1).all()
+        student_ids = []
+        for i in visits:
+            student_ids.append(i.StudentId)
+
+        return student_ids

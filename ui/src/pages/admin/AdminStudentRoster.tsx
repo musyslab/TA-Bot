@@ -7,7 +7,7 @@ import MenuComponent from '../components/MenuComponent'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import '../../styling/AdminStudentRoster.scss'
 
-import { FaClone, FaDownload, FaEye } from 'react-icons/fa'
+import { FaClone, FaDownload, FaEye, FaHandPaper } from 'react-icons/fa'
 
 const AdminStudentRoster = () => {
     const { class_id, id } = useParams<{ class_id: string; id: string }>()
@@ -61,6 +61,7 @@ class Row {
     grade: number
     StudentNumber: number
     IsLocked: boolean
+    attendedOfficeHours: boolean = false;
 }
 
 interface Option {
@@ -173,76 +174,88 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
     }
 
     componentDidMount() {
-        axios
-            .post(
-                import.meta.env.VITE_API_URL + `/submissions/recentsubproject`,
-                { project_id: this.props.project_id },
-                {
-                    headers: {
-                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-                    },
-                }
-            )
-            .then((res) => {
-                const data = res.data
-                const rows: Array<Row> = []
-                const lectureSet = new Set<number>([-1])
-                const labSet = new Set<number>([-1])
+        const submissionsRequest = axios.post(
+            import.meta.env.VITE_API_URL + `/submissions/recentsubproject`,
+            { project_id: this.props.project_id },
+            {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                },
+            }
+        );
+        const ohVisitsRequest = axios.post(
+            import.meta.env.VITE_API_URL + `/submissions/get_oh_visits_by_projectId`,
+            {project_id: this.props.project_id},
+            {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                },
+            }
+        );
+        Promise.all([submissionsRequest, ohVisitsRequest])
+                .then(([submissionsRes, officeHoursRes]) => {
+                    const data = submissionsRes.data
 
-                Object.entries(data).map(([key, value]) => {
-                    const row = new Row()
-                    const student_output_data = value as Array<any>
+                    const officeHoursAttendees = new Set(officeHoursRes.data);
+                    const rows: Array<Row> = []
+                    const lectureSet = new Set<number>([-1])
+                    const labSet = new Set<number>([-1])
 
-                    row.id = parseInt(key, 10)
-                    row.Lname = String(student_output_data[0] ?? '')
-                    row.Fname = String(student_output_data[1] ?? '')
-                    row.lecture_number = parseInt(String(student_output_data[2] ?? '0'), 10)
-                    row.lab_number = parseInt(String(student_output_data[3] ?? '0'), 10)
+                    Object.entries(data).map(([key, value]) => {
+                        const row = new Row()
+                        const student_output_data = value as Array<any>
 
-                    lectureSet.add(row.lecture_number)
-                    labSet.add(row.lab_number)
+                        row.id = parseInt(key, 10)
+                        row.Lname = String(student_output_data[0] ?? '')
+                        row.Fname = String(student_output_data[1] ?? '')
+                        row.lecture_number = parseInt(String(student_output_data[2] ?? '0'), 10)
+                        row.lab_number = parseInt(String(student_output_data[3] ?? '0'), 10)
 
-                    row.numberOfSubmissions = parseInt(String(student_output_data[4] ?? '0'), 10)
-                    row.date = String(student_output_data[5] ?? '')
+                        lectureSet.add(row.lecture_number)
+                        labSet.add(row.lab_number)
 
-                    const passRaw = String(student_output_data[6] ?? '').toLowerCase().trim()
-                    row.isPassing =
-                        passRaw === 'true' ||
-                        passRaw === '1' ||
-                        passRaw === 'pass' ||
-                        passRaw === 'passed' ||
-                        passRaw === 'ok' ||
-                        passRaw === 'success'
+                        row.numberOfSubmissions = parseInt(String(student_output_data[4] ?? '0'), 10)
+                        row.date = String(student_output_data[5] ?? '')
 
-                    const hasSub = String(student_output_data[7] ?? 'N/A') !== 'N/A'
-                    const off = hasSub ? 0 : 1
-                    row.subid = parseInt(String(student_output_data[7 + off] ?? '-1'), 10)
-                    row.classId = String(student_output_data[8 + off] ?? '')
-                    row.grade = parseInt(String(student_output_data[9 + off] ?? '0'), 10)
-                    row.StudentNumber = parseInt(String(student_output_data[10 + off] ?? '0'), 10)
-                    const lockRaw = String(student_output_data[11 + off] ?? '').toLowerCase().trim()
-                    row.IsLocked = lockRaw === 'true' || lockRaw === '1' || lockRaw === 'locked'
+                        const passRaw = String(student_output_data[6] ?? '').toLowerCase().trim()
+                        row.isPassing =
+                            passRaw === 'true' ||
+                            passRaw === '1' ||
+                            passRaw === 'pass' ||
+                            passRaw === 'passed' ||
+                            passRaw === 'ok' ||
+                            passRaw === 'success'
 
-                    rows.push(row)
-                    return row
+                        const hasSub = String(student_output_data[7] ?? 'N/A') !== 'N/A'
+                        const off = hasSub ? 0 : 1
+                        row.subid = parseInt(String(student_output_data[7 + off] ?? '-1'), 10)
+                        row.classId = String(student_output_data[8 + off] ?? '')
+                        row.grade = parseInt(String(student_output_data[9 + off] ?? '0'), 10)
+                        row.StudentNumber = parseInt(String(student_output_data[10 + off] ?? '0'), 10)
+                        const lockRaw = String(student_output_data[11 + off] ?? '').toLowerCase().trim()
+                        row.IsLocked = lockRaw === 'true' || lockRaw === '1' || lockRaw === 'locked'
+
+                        row.attendedOfficeHours = officeHoursAttendees.has(row.id);
+                    
+                        rows.push(row)
+                        return row
+                    })
+                    const lecture_numbers: Option[] = Array.from(lectureSet)
+                        .filter((v) => v !== -1)
+                        .sort((a, b) => a - b)
+                        .map((v) => ({ key: v, text: String(v), value: v }))
+                    lecture_numbers.unshift({ key: -1, text: 'All', value: -1 })
+
+                    const lab_numbers: Option[] = Array.from(labSet)
+                        .filter((v) => v !== -1)
+                        .sort((a, b) => a - b)
+                        .map((v) => ({ key: v, text: String(v), value: v }))
+                    lab_numbers.unshift({ key: -1, text: 'All', value: -1 })
+
+                    rows.sort((a, b) => a.Lname.localeCompare(b.Lname))
+
+                    this.setState({ rows, lecture_numbers, lab_numbers })
                 })
-
-                const lecture_numbers: Option[] = Array.from(lectureSet)
-                    .filter((v) => v !== -1)
-                    .sort((a, b) => a - b)
-                    .map((v) => ({ key: v, text: String(v), value: v }))
-                lecture_numbers.unshift({ key: -1, text: 'All', value: -1 })
-
-                const lab_numbers: Option[] = Array.from(labSet)
-                    .filter((v) => v !== -1)
-                    .sort((a, b) => a - b)
-                    .map((v) => ({ key: v, text: String(v), value: v }))
-                lab_numbers.unshift({ key: -1, text: 'All', value: -1 })
-
-                rows.sort((a, b) => a.Lname.localeCompare(b.Lname))
-
-                this.setState({ rows, lecture_numbers, lab_numbers })
-            })
     }
 
     // Run plagiarism detector
@@ -763,18 +776,30 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                         <tbody className="table-body">
                                             {rowsForView.map((row) => {
                                                 if (row.hidden) return null
+                                                const renderStudentName = () => (
+                                                    <td className="student-name-cell">
+                                                        {row.Fname + ' ' + row.Lname}{' '}
+                                                        
+                                                        {row.attendedOfficeHours && (
+                                                            <span 
+                                                                className="office-hours-indicator" 
+                                                                data-tooltip="Attended Office Hours for this project" 
+                                                            >
+                                                                <FaHandPaper aria-hidden="true" />
+                                                            </span>
+                                                        )}
 
+                                                        {row.IsLocked === true && (
+                                                            <button className="btn unlock-btn" onClick={() => this.handleUnlockClick(row.id)}>
+                                                                Unlock
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                );
                                                 if (row.subid === -1) {
                                                     return (
                                                         <tr className="student-row student-row--no-submission" key={`row-${row.id}-na`}>
-                                                            <td className="student-name-cell">
-                                                                {row.Fname + ' ' + row.Lname}{' '}
-                                                                {row.IsLocked === true && (
-                                                                    <button className="btn unlock-btn" onClick={() => this.handleUnlockClick(row.id)}>
-                                                                        Unlock
-                                                                    </button>
-                                                                )}
-                                                            </td>
+                                                            {renderStudentName()}
                                                             <td className="lecture-number-cell">{row.lecture_number}</td>
                                                             <td className="lab-number-cell">{row.lab_number}</td>
                                                             <td className="submissions-cell">N/A</td>
@@ -806,14 +831,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                                                 return (
                                                     <tr className="student-row" key={`row-${row.id}`}>
-                                                        <td className="student-name-cell">
-                                                            {row.Fname + ' ' + row.Lname}{' '}
-                                                            {row.IsLocked === true && (
-                                                                <button className="btn unlock-btn" onClick={() => this.handleUnlockClick(row.id)}>
-                                                                    Unlock
-                                                                </button>
-                                                            )}
-                                                        </td>
+                                                        {renderStudentName()}
                                                         <td className="lecture-number-cell">{row.lecture_number}</td>
                                                         <td className="lab-number-cell">{row.lab_number}</td>
                                                         <td className="submissions-cell">{row.numberOfSubmissions}</td>
