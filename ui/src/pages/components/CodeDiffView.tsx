@@ -180,9 +180,10 @@ type DiffViewProps = {
     codeContainerRef?: React.RefObject<HTMLDivElement | null>
     lineRefs?: React.MutableRefObject<Record<number, HTMLLIElement | null>>
     getLineClassName?: (lineNo: number) => string
-    onLineClick?: (lineNo: number, e: React.MouseEvent) => void
     onLineMouseEnter?: (lineNo: number) => void
     onLineMouseLeave?: (lineNo: number) => void
+    onLineMouseDown?: (lineNo: number) => void
+    onLineMouseUp?: () => void
     rightPanel?: React.ReactNode
     betweenDiffAndCode?: React.ReactNode
 }
@@ -196,9 +197,10 @@ export default function DiffView(props: DiffViewProps) {
         codeContainerRef,
         lineRefs,
         getLineClassName,
-        onLineClick,
         onLineMouseEnter,
         onLineMouseLeave,
+        onLineMouseDown,
+        onLineMouseUp,
         rightPanel,
         betweenDiffAndCode,
     } = props
@@ -471,7 +473,7 @@ export default function DiffView(props: DiffViewProps) {
                 ? 'java'
                 : 'clike'
 
-    const isLineClickable = Boolean(onLineClick)
+    const isLineClickable = Boolean(onLineMouseDown)
 
     const DiffViewSection = () => {
         return (
@@ -672,6 +674,7 @@ export default function DiffView(props: DiffViewProps) {
                     <div
                         className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
                         ref={effectiveCodeContainerRef}
+                        onMouseLeave={onLineMouseUp ? () => onLineMouseUp() : undefined}
                         role="region"
                         aria-label="Submitted source code"
                     >
@@ -688,11 +691,12 @@ export default function DiffView(props: DiffViewProps) {
                                         }}
                                         {...lineProps}
                                         className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
-                                        onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
+                                        onMouseDown={onLineMouseDown ? () => onLineMouseDown(lineNo) : undefined}
                                         onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
                                         onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
+                                        onMouseUp={onLineMouseUp ? () => onLineMouseUp() : undefined}
                                         title={
-                                            onLineClick ? 'Click this line to add or view grading errors' : undefined
+                                            onLineMouseDown ? 'Click this line to add or view grading errors' : undefined
                                         }
                                     >
                                         <span className="gutter">

@@ -146,5 +146,6 @@ class SubmissionManualErrors(db.Model):
     __tablename__ = "SubmissionManualErrors"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     SubmissionId = Column(Integer)
-    LineNumber = Column(Integer)
+    StartLine = Column(Integer)
+    EndLine = Column(Integer)
     ErrorId = Column(String(45))

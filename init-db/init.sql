@@ -281,8 +281,9 @@ DROP TABLE IF EXISTS `SubmissionManualErrors`;
 
 CREATE TABLE `SubmissionManualErrors` ( 
   `Id` int NOT NULL AUTO_INCREMENT, 
-  `SubmissionId` int NOT NULL, 
-  `LineNumber` int NOT NULL, 
+  `SubmissionId` int NOT NULL,
+  `StartLine` int NOT NULL,
+  `EndLine` int NOT NULL,
   `ErrorId` varchar(45) NOT NULL, 
   PRIMARY KEY (`Id`), 
   KEY `fk_sub_errors_idx` (`SubmissionId`), 
