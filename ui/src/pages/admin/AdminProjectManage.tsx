@@ -417,7 +417,8 @@ const AdminProjectManage = () => {
 
     const handleTimeColors = (time) => {
         const isBlocked = projectRanges.some((range) => {
-            return time >= range.start && time <= range.end;
+            // Allow boundary-touching (end == start) without marking as blocked
+            return time > range.start && time < range.end;
         });
 
         return isBlocked ? "react-datepicker__time--highlighted-red" : null;
@@ -607,8 +608,9 @@ const AdminProjectManage = () => {
         const isNewDay = !previousDate || (date && date.toDateString() !== previousDate.toDateString());
 
         if (finalDate && isNewDay) {
+            // Allow boundary-touching (end == start) without treating it as blocked
             const isBlocked = projectRanges.some(range =>
-                finalDate >= range.start && finalDate <= range.end
+                finalDate > range.start && finalDate < range.end
             );
 
             if (isBlocked) {
@@ -617,7 +619,7 @@ const AdminProjectManage = () => {
 
                 let foundSafeTime = false;
 
-                const checkTime = (t) => projectRanges.some(r => t >= r.start && t <= r.end);
+                const checkTime = (t) => projectRanges.some(r => t > r.start && t < r.end);
 
                 while (candidate.getDate() === finalDate.getDate()) {
                     if (!checkTime(candidate)) {
@@ -658,7 +660,7 @@ const AdminProjectManage = () => {
         for (const project of projectRanges) {
 
 
-            if (finalDate >= project.start && finalDate <= project.end) {
+            if (finalDate > project.start && finalDate < project.end) {
                 overlap = true;
                 break;
             }
