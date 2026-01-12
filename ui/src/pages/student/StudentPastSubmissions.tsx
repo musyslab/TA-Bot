@@ -109,7 +109,6 @@ class StudentPastSubmissions extends Component<{}, ProjectsState> {
                                             <td className="cell cell-link">
                                                 <Link
                                                     className="view-link"
-                                                    target="_blank"
                                                     to={`/student/${row.classid}/code/${row.id}`}
                                                 >
                                                     View

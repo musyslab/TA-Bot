@@ -328,7 +328,6 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
                                                     </div>
                                                 ) : item.submission_id !== -1 ? (
                                                     <Link
-                                                        target="_blank"
                                                         to={`/class/${item.class_id}/code/${item.submission_id}`}
                                                         className="link-code"
                                                     >
@@ -448,7 +447,6 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
                                             <td className="cell-code">
                                                 {item.submission_id !== -1 ? (
                                                     <Link
-                                                        target="_blank"
                                                         to={`/class/${item.class_id}/code/${item.submission_id}`}
                                                         className="link-code"
                                                     >

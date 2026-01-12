@@ -154,6 +154,7 @@ body {
               cursor: pointer;
             }
           }
+
           &.input-error {
             input {
               border-color: #e74c3c;
@@ -162,7 +163,7 @@ body {
           }
         }
       }
-      
+
       .form-group {
         display: flex;
         gap: 1rem;
@@ -523,7 +524,7 @@ body {
   .form-testcases-overview {
     overflow-x: auto;
     margin-top: 1rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0;
 
     .testcases-table {
       width: 100%;
@@ -648,6 +649,34 @@ body {
       }
     }
   }
+
+  /* Export JSON sits directly under the table, visually attached but separate */
+  .export-json-segment {
+    background: #fff;
+    border: 1px solid #e7eaf1;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 6px rgba(80, 95, 126, 0.07);
+  }
+
+  .export-json-button {
+    padding: 0.6rem 1.2rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    background: #fff;
+    color: #505f7e;
+
+    &:hover {
+      background: #f0f4f8;
+    }
+  }
 }
 
 .or-separator {
@@ -710,18 +739,10 @@ body {
     background: #2ecc71;
     color: #fff;
     border: none;
+    width: min(420px, 100%);
 
     &:hover {
       background: #27ae60;
-    }
-  }
-
-  .get-json-button {
-    background: #fff;
-    color: #505f7e;
-
-    &:hover {
-      background: #f0f4f8;
     }
   }
 }
@@ -767,6 +788,10 @@ body:has(.preview-modal) {
   overflow: hidden;
 }
 
+body:has(.testcase-modal) {
+  overflow: hidden;
+}
+
 /* Overlay (matches .modal-overlay) */
 .preview-overlay {
   position: fixed;
@@ -775,9 +800,12 @@ body:has(.preview-modal) {
   backdrop-filter: saturate(120%) blur(2px);
   animation: overlayFadeIn 160ms ease-out;
   z-index: 1100;
-  /* slightly above the testcase modal */
-  display: grid;
-  place-items: center;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 125px;
+  padding-bottom: 25px;
+  box-sizing: border-box;
 }
 
 /* Container (parity with .testcase-modal) */
@@ -786,7 +814,7 @@ body:has(.preview-modal) {
   z-index: 1101;
 
   width: min(92vw, 1040px);
-  max-height: 86vh;
+  max-height: calc(100vh - 150px);
   background: #ffffff;
   color: #1f2937;
   border: 1px solid #e5e7eb;
@@ -796,7 +824,7 @@ body:has(.preview-modal) {
     0 2px 10px rgba(2, 6, 23, 0.08);
   display: flex;
   flex-direction: column;
-  animation: modalEnter 180ms cubic-bezier(.2, .8, .2, 1);
+  animation: modalEnterFlex 180ms cubic-bezier(.2, .8, .2, 1);
 
   /* Header (parity with .modal-header) */
   .preview-header {
@@ -946,6 +974,30 @@ body:has(.preview-modal) {
   }
 }
 
+@keyframes modalEnterFlex {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes modalEnterFixed {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px) scale(.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -960,14 +1012,14 @@ body:has(.preview-modal) {
 
 .testcase-modal {
   position: fixed;
-  top: 50%;
+  top: 125px;
   left: 50%;
-  transform: translate(-50%, -50%) scale(1);
+  transform: translateX(-50%);
   z-index: 1001;
 
   // container
   width: min(92vw, 960px);
-  max-height: 86vh;
+  max-height: calc(100vh - 150px);
   background: #ffffff;
   color: #1f2937;
   border: 1px solid #e5e7eb;
@@ -977,7 +1029,7 @@ body:has(.preview-modal) {
     0 2px 10px rgba(2, 6, 23, 0.08);
   display: flex;
   flex-direction: column;
-  animation: modalEnter 180ms cubic-bezier(.2, .8, .2, 1);
+  animation: modalEnterFixed 180ms cubic-bezier(.2, .8, .2, 1);
 
   // header
   .modal-header {
@@ -1042,8 +1094,6 @@ body:has(.preview-modal) {
   .modal-content {
     position: relative;
     padding: 1.25rem;
-    max-height: calc(86vh - 56px - 64px); // total - header - footer
-    /* Ensure content scrolls so the footer can sit at the bottom */
     flex: 1 1 auto;
     overflow: auto;
 
@@ -1222,8 +1272,6 @@ body:has(.preview-modal) {
 
   // sticky footer with actions
   .modal-action-buttons {
-    position: sticky;
-    bottom: 0;
     z-index: 2;
     display: flex;
     gap: .75rem;
@@ -1294,25 +1342,27 @@ body:has(.preview-modal) {
 }
 
 .react-datepicker__day--highlighted-red {
-    background-color: #b4b0b0 !important; /* Light Red Background */
-    color: #474040 !important;            /* Dark Red Text */
-    border-radius: 0.3rem;
-    font-weight: bold;
+  background-color: #b4b0b0 !important;
+  /* Light Red Background */
+  color: #474040 !important;
+  /* Dark Red Text */
+  border-radius: 0.3rem;
+  font-weight: bold;
 
-    &:hover {
-        background-color: #302e2e !important;
-    }
+  &:hover {
+    background-color: #302e2e !important;
+  }
 }
 
 .react-datepicker__time--highlighted-red {
-    background-color: #b4b0b0 !important;
-    color: #555252 !important;
-    font-weight: bold;
+  background-color: #b4b0b0 !important;
+  color: #555252 !important;
+  font-weight: bold;
 
-    /* Optional: Change color slightly on hover */
-    &:hover {
-        background-color: #302e2e !important;
-    }
+  /* Optional: Change color slightly on hover */
+  &:hover {
+    background-color: #302e2e !important;
+  }
 }
 
 .overlap-error-text {

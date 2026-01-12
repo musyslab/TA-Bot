@@ -819,7 +819,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                 <Link
                                                                     to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
                                                                     className="btn grade-btn"
-                                                                    target="_blank"
                                                                     rel="noreferrer"
                                                                 >
                                                                     Grade
@@ -843,7 +842,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                             <Link
                                                                 className="view-link"
                                                                 to={`/admin/${row.classId}/project/${this.props.project_id}/codeview/${row.subid}`}
-                                                                target="_blank"
                                                                 rel="noreferrer"
                                                             >
                                                                 <FaEye aria-hidden="true" /> View
@@ -871,7 +869,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                             <Link
                                                                 to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
                                                                 className="btn grade-btn"
-                                                                target="_blank"
                                                                 rel="noreferrer"
                                                             >
                                                                 Grade
@@ -955,7 +952,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                                 to={`/admin/plagiarism/?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
                                                                                     p.a.name
                                                                                 )}&bn=${encodeURIComponent(p.b.name)}`}
-                                                                                target="_blank"
                                                                                 rel="noreferrer"
                                                                             >
                                                                                 <FaEye aria-hidden="true" /> View
