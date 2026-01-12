@@ -40,27 +40,45 @@ export function AdminGrading() {
     const [observedErrors, setObservedErrors] = useState<ObservedError[]>([])
     const hasErrors = observedErrors.length > 0
 
-    // TODO: Add actual error definitions
     const ERRORS: Record<string, ErrorDef> = {
-        ERROR1: {
-            id: 'ERROR1',
-            label: 'Error 1',
-            description: 'Error 1 description.',
-            points: 1,
+        FORMAT: {
+            id: 'FORMAT',
+            label: 'Format/typo',
+            description: 'Spelling, spacing, newlines, punctuation, or order issues',
+            points: 5,
         },
-        ERROR2: {
-            id: 'ERROR2',
-            label: 'Error 2',
-            description: 'Error 2 description.',
-            points: 2,
+        COMPUTE: {
+            id: 'COMPUTE',
+            label: 'Computation',
+            description: 'Wrong math/types (division, formula, rounding)',
+            points: 20,
         },
-        ERROR3: {
-            id: 'ERROR3',
-            label: 'Error 3',
-            description: 'Error 3 description.',
-            points: 3,
+        BRANCH: {
+            id: 'BRANCH',
+            label: 'Branching',
+            description: 'Wrong if/else/boolean/boundary logic',
+            points: 20,
+        },
+        LOOP: {
+            id: 'LOOP',
+            label: 'Loop/off-by-one',
+            description: 'Wrong count; missing/extra/duplicate items',
+            points: 20,
+        },
+        INDEX: {
+            id: 'INDEX',
+            label: 'Indexing',
+            description: 'Wrong element/range/order (arrays/strings)',
+            points: 20,
+        },
+        INCOMPLETE: {
+            id: 'INCOMPLETE',
+            label: 'Incomplete',
+            description: 'Missing required steps/major parts',
+            points: 30,
         },
     }
+
 
     const errorDefs = useMemo(() => Object.values(ERRORS), [])
 
@@ -77,7 +95,7 @@ export function AdminGrading() {
     const [selectedRange, setSelectedRange] = useState<LineRange | null>(null)
 
     const selectLines = (start: number, end: number) => {
-        setSelectedRange({start: start, end: end})
+        setSelectedRange({ start: start, end: end })
     }
 
     const isRangeSelected = (start: number, end: number) => {
@@ -86,12 +104,12 @@ export function AdminGrading() {
     }
 
     // Handles code line selection
-    const handleMouseDown = (line : number) => {
+    const handleMouseDown = (line: number) => {
         setInitialLine(line)
         selectLines(line, line)
     }
 
-    const handleMouseEnter = (line : number) => {
+    const handleMouseEnter = (line: number) => {
         setHoveredLine(line)
         if (initialLine === null) return
         setSelectedRange({
@@ -118,9 +136,9 @@ export function AdminGrading() {
     const diffViewRef = useRef<HTMLElement | null>(null)
     const allObservedErrorsRef = useRef<HTMLElement | null>(null)
 
-    const scrollToSection = (section : HTMLElement) => {
+    const scrollToSection = (section: HTMLElement) => {
         if (!section) return
-        section.scrollIntoView({ behavior: 'smooth', block: 'center'})
+        section.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
 
     // Fetch student name for header
@@ -221,14 +239,15 @@ export function AdminGrading() {
     const addError = (start: number, end: number, errorId: string) => {
         setObservedErrors(prev => {
             if (prev.some((err) => err.errorId === errorId &&
-                    err.startLine === start &&
-                    err.endLine === end))
+                err.startLine === start &&
+                err.endLine === end))
                 return prev
             return [...prev,
-                {errorId: errorId,
-                    startLine: start,
-                    endLine: end
-                }
+            {
+                errorId: errorId,
+                startLine: start,
+                endLine: end
+            }
             ]
         })
         setSaveStatus('idle')
@@ -340,8 +359,8 @@ export function AdminGrading() {
                                     title="Click to jump to selected line"
                                 >
                                     {selectedRange === null ? 'None' :
-                                    selectedRange.start === selectedRange.end ? `Line ${selectedRange.start}` :
-                                    `Lines ${selectedRange.start}-${selectedRange.end}`}
+                                        selectedRange.start === selectedRange.end ? `Line ${selectedRange.start}` :
+                                            `Lines ${selectedRange.start}-${selectedRange.end}`}
                                 </button>
                             </div>
                         </div>
@@ -450,7 +469,7 @@ export function AdminGrading() {
                             {tableRows.map(([start, end, errors]) => {
                                 const totalPoints = errors.reduce((sum, e) => sum + (ERRORS[e.errorId]?.points ?? 0), 0)
 
-                                return(
+                                return (
                                     <div
                                         key={`${start}-${end}`}
                                         className={`
@@ -462,7 +481,7 @@ export function AdminGrading() {
                                             type="button"
                                             className="all-errors-line-header"
                                             onClick={() => {
-                                                setSelectedRange({start: start, end: end})
+                                                setSelectedRange({ start: start, end: end })
                                                 scrollToLine(start)
                                             }}
                                             title="Select line(s)"
