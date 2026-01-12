@@ -328,7 +328,7 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
                                                     </div>
                                                 ) : item.submission_id !== -1 ? (
                                                     <Link
-                                                        to={`/class/${item.class_id}/code/${item.submission_id}`}
+                                                        to={`/admin/${item.class_id}/project/${item.project_id}/codeview/${item.submission_id}`}
                                                         className="link-code"
                                                     >
                                                         <button className="button button-view-code">View</button>
@@ -447,7 +447,7 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
                                             <td className="cell-code">
                                                 {item.submission_id !== -1 ? (
                                                     <Link
-                                                        to={`/class/${item.class_id}/code/${item.submission_id}`}
+                                                        to={`/admin/${item.class_id}/project/${item.project_id}/codeview/${item.submission_id}`}
                                                         className="link-code"
                                                     >
                                                         <button className="button button-view-code">View</button>
