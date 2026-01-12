@@ -424,11 +424,11 @@ const StudentUpload = () => {
 
             {inOfficeHours && (
               <div className="oh-banner" role="status" aria-live="polite">
-                <div className="oh-banner__icon" aria-hidden="true">
-                  <FaHandshake />
-                </div>
                 <div className="oh-banner__content">
-                  <div className="oh-banner__header">You're in Office Hours</div>
+                  <div className="oh-banner__header">
+                    You're in Office Hours
+                    <FaHandshake className="oh-banner__header-icon" aria-hidden="true" />
+                  </div>
                   <div className="oh-banner__text">
                     Submissions will not consume energy while this is active.
                   </div>

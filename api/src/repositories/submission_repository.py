@@ -192,7 +192,14 @@ class SubmissionRepository():
 
     def Submit_Student_OH_question(self, question, user_id, project_id):
         dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        student_question = OHVisits(StudentQuestionscol=question, StudentId=user_id, dismissed=0, ruling=-1, TimeSubmitted=dt_string, projectId=project_id)
+        student_question = OHVisits(
+            StudentQuestionscol=question,
+            StudentId=user_id,
+            dismissed=0,
+            ruling=-1,
+            TimeSubmitted=dt_string,
+            projectId=int(project_id),
+        )
         db.session.add(student_question)
         db.session.commit()
         return str(student_question.Sqid)

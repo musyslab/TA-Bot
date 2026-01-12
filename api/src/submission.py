@@ -251,8 +251,14 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
 @inject
 def Submit_OH_Question(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
     question = str(request.args.get("question"))
-    project_id = str(request.args.get("projectId"))
-    return make_response(submission_repo.Submit_Student_OH_question(question,current_user.Id, project_id), HTTPStatus.OK)
+    project_id_raw = (request.args.get("projectId") or "").strip()
+    if not project_id_raw.isdigit():
+        return make_response("Invalid projectId", HTTPStatus.BAD_REQUEST)
+    project_id = int(project_id_raw)
+    return make_response(
+        submission_repo.Submit_Student_OH_question(question, current_user.Id, project_id),
+        HTTPStatus.OK
+    )
 
 @submission_api.route('/getOHquestions', methods=['GET'])
 @jwt_required()
@@ -275,10 +281,16 @@ def Get_OH_Questions(submission_repo: SubmissionRepository = Provide[Container.s
     question_list = []
     #Need class ID and submission ID
     for question in questions:
+        # If the project was deleted / missing, skip this OH entry so the admin page doesn't 500.
+        try:
+            proj = project_repo.get_selected_project(int(getattr(question, "projectId", 0) or 0))
+        except Exception:
+            proj = None
+        if not proj:
+            continue
         user = user_repo.get_user(question.StudentId)
         Student_name = user.Firstname + " " + user.Lastname
-        class_name = project_repo.get_className_by_projectId(question.projectId)
-        class_id = project_repo.get_class_id_by_name(class_name)
+        class_id = int(getattr(proj, "ClassId", 0) or 0)
         subs = submission_repo.get_most_recent_submission_by_project(question.projectId, [question.StudentId])
         try:
             question_list.append([

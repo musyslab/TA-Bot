@@ -90,21 +90,21 @@
         text-align: center;
     }
 
-        .upload-segment {
-                display: grid;
-                grid-template-columns: 60px 1fr 60px;
-                align-items: stretch;
-                gap: 20px;
-                width: 100%;
-                min-width: 0;
-                margin: 0 auto;
-                position: relative;
-            }
-        
-            /* Spacer was only needed for flex. Grid handles layout. */
-            .upload-segment__spacer {
-                display: none;
-            }
+    .upload-segment {
+        display: grid;
+        grid-template-columns: 60px 1fr 60px;
+        align-items: stretch;
+        gap: 20px;
+        width: 100%;
+        min-width: 0;
+        margin: 0 auto;
+        position: relative;
+    }
+
+    /* Spacer was only needed for flex. Grid handles layout. */
+    .upload-segment__spacer {
+        display: none;
+    }
 
     .base-charge {
         flex: 0 0 60px;
@@ -408,8 +408,8 @@
         thead th {
             background: #f3f4f6;
             color: #111827;
-                        font-weight: 700;
-                        padding: 8px 6px;
+            font-weight: 700;
+            padding: 8px 6px;
             border-bottom: 1px solid #e5e7eb;
         }
 
@@ -546,25 +546,12 @@
 .oh-banner {
     width: 100%;
     margin: 10px auto 12px;
-    border: 1px solid #d1d5db;
-    background: #f9fafb;
+    border: 1px solid #16a34a;
+    background: #dcfce7;
     border-radius: 12px;
     padding: 12px 14px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-
-    display: grid;
-    grid-template-columns: 48px 1fr;
-    align-items: center;
-    gap: 10px;
     text-align: center;
-
-    .oh-banner__icon {
-        font-size: 28px;
-        line-height: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
 
     .oh-banner__content {
         display: flex;
@@ -575,12 +562,21 @@
 
     .oh-banner__header {
         font-weight: 900;
-        color: #111827;
+        color: #14532d;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    .oh-banner__header-icon {
+        font-size: 22px;
+        line-height: 1;
     }
 
     .oh-banner__text {
         font-weight: 600;
-        color: #374151;
+        color: #166534;
     }
 }
 
