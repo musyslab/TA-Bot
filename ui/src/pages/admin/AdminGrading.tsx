@@ -10,11 +10,28 @@ import DiffView from '../components/CodeDiffView'
 
 const defaultpagenumber = -1
 
-type ErrorDef = {
+type ErrorOption = {
     id: string
     label: string
     description: string
     points: number
+}
+
+type CategoryDef = {
+    id: string
+    label: string
+    description: string
+    errors: ErrorOption[]
+}
+
+type ErrorDef = ErrorOption & {
+    categoryId: string
+    categoryLabel: string
+}
+
+type SuggestedPick = {
+    id: string
+    errorId: string
 }
 
 type ObservedError = {
@@ -40,52 +57,120 @@ export function AdminGrading() {
     const [observedErrors, setObservedErrors] = useState<ObservedError[]>([])
     const hasErrors = observedErrors.length > 0
 
-    const ERRORS: Record<string, ErrorDef> = {
-        FORMAT: {
-            id: 'FORMAT',
-            label: 'Format/typo',
-            description: 'Spelling, spacing, newlines, punctuation, or order issues',
-            points: 5,
+    const CATEGORIES = useMemo<CategoryDef[]>(() => [
+        {
+            id: 'INPUT',
+            label: 'Input handling',
+            description: 'Missing prompts, wrong order, wrong parsing',
+            errors: [
+                { id: 'INPUT_PROMPT', label: 'No prompt before reading input', description: 'Missing prompt before input read', points: 4 },
+                { id: 'INPUT_ORDER', label: 'Reads inputs in the wrong order', description: 'Consumes inputs in the wrong sequence', points: 6 },
+                { id: 'INPUT_PARSE', label: 'Wrong parsing of input type', description: 'String vs int/float parse mismatch', points: 5 },
+            ],
         },
-        COMPUTE: {
+        {
+            id: 'OUTPUT',
+            label: 'Output formatting and ordering',
+            description: 'Right values, wrong presentation',
+            errors: [
+                { id: 'OUTPUT_ORDER', label: 'Correct values, wrong order of output lines', description: 'Lines printed in the wrong order', points: 6 },
+                { id: 'OUTPUT_MISSING', label: 'Missing required line(s) of output', description: 'Required output line(s) not printed', points: 8 },
+                { id: 'OUTPUT_EXTRA', label: 'Extra line(s) of output', description: 'Unexpected extra output printed', points: 6 },
+                { id: 'OUTPUT_SPACE', label: 'Wrong formatting: spaces/newlines', description: 'Extra or missing spaces/newlines', points: 2 },
+                { id: 'OUTPUT_SPELL', label: 'Wrong formatting: misspellings', description: 'Typos in required output text', points: 3 },
+                { id: 'OUTPUT_ROUND', label: 'Wrong rounding/precision formatting', description: 'Wrong decimal precision/rounding', points: 4 },
+            ],
+        },
+        {
+            id: 'STATE',
+            label: 'Variable and state',
+            description: 'Bad initialization, wrong variable use, misused flags',
+            errors: [
+                { id: 'STATE_INIT', label: 'Uninitialized or wrong initial value', description: 'Uses uninitialized value or wrong starting value', points: 10 },
+                { id: 'STATE_VAR', label: 'Wrong variable use or type', description: 'Mixed variables, truncation, overwritten state', points: 8 },
+                { id: 'STATE_FLAG', label: 'Flag/state variable misused', description: 'Never set/cleared, reused incorrectly', points: 7 },
+            ],
+        },
+        {
             id: 'COMPUTE',
-            label: 'Computation',
-            description: 'Wrong math/types (division, formula, rounding)',
-            points: 20,
+            label: 'Computation and numeric logic',
+            description: 'Wrong formula, precedence, or division type',
+            errors: [
+                { id: 'COMPUTE_NUMERIC', label: 'Wrong numeric computation', description: 'Wrong formula, precedence, or division type', points: 10 },
+            ],
         },
-        BRANCH: {
+        {
+            id: 'COND',
+            label: 'Condition and boolean logic',
+            description: 'Wrong branch condition logic',
+            errors: [
+                { id: 'COND_COMPOUND', label: 'Incorrect compound logic', description: 'Missing AND/OR or logical vs bitwise', points: 10 },
+                { id: 'COND_BOUNDARY', label: 'Incorrect comparisons or boundaries', description: 'Wrong operator/variable or missed edge case', points: 8 },
+            ],
+        },
+        {
             id: 'BRANCH',
-            label: 'Branching',
-            description: 'Wrong if/else/boolean/boundary logic',
-            points: 20,
+            label: 'Branching structure',
+            description: 'Control flow wiring mistakes',
+            errors: [
+                { id: 'BRANCH_STRUCTURE', label: 'Incorrect branch structure', description: 'Misbound else, missing default/else, missing break', points: 8 },
+            ],
         },
-        LOOP: {
+        {
             id: 'LOOP',
-            label: 'Loop/off-by-one',
-            description: 'Wrong count; missing/extra/duplicate items',
-            points: 20,
+            label: 'Loop',
+            description: 'Bounds, control, and semantics',
+            errors: [
+                { id: 'LOOP_BOUNDS', label: 'Incorrect loop bounds or termination', description: 'Off-by-one, missing last, infinite loop', points: 12 },
+                { id: 'LOOP_CONTROL', label: 'Incorrect loop control logic', description: 'Bad init/update, misplaced counter, empty loop', points: 10 },
+                { id: 'LOOP_SEMANTICS', label: 'Incorrect loop semantics', description: 'Wrong nesting, wrong I/O placement, bad accumulation', points: 9 },
+            ],
         },
-        INDEX: {
+        {
             id: 'INDEX',
-            label: 'Indexing',
-            description: 'Wrong element/range/order (arrays/strings)',
-            points: 20,
+            label: 'Array, string, and indexing',
+            description: 'Out of bounds, wrong setup, wrong range',
+            errors: [
+                { id: 'INDEX_INVALID', label: 'Invalid indexing', description: 'Out-of-bounds, empty, wrong base, wrong range', points: 12 },
+                { id: 'INDEX_SETUP', label: 'Incorrect array/string setup', description: 'Wrong size, missing elements', points: 8 },
+            ],
         },
-        INCOMPLETE: {
-            id: 'INCOMPLETE',
-            label: 'Incomplete',
-            description: 'Missing required steps/major parts',
-            points: 30,
+        {
+            id: 'FUNC',
+            label: 'Function and return values',
+            description: 'Wrong return behavior or function use',
+            errors: [
+                { id: 'FUNC_RETURN', label: 'Incorrect return behavior', description: 'Ignored, missing, wrong sentinel/type', points: 10 },
+                { id: 'FUNC_USE', label: 'Incorrect function use', description: 'Wrong order/scope or unnecessary re-calls', points: 8 },
+            ],
         },
-    }
+    ], [])
 
+    const ERROR_MAP = useMemo<Record<string, ErrorDef>>(() => {
+        const map: Record<string, ErrorDef> = {}
+        for (const cat of CATEGORIES) {
+            for (const err of cat.errors) {
+                map[err.id] = {
+                    ...err,
+                    categoryId: cat.id,
+                    categoryLabel: cat.label,
+                }
+            }
+        }
+        return map
+    }, [CATEGORIES])
 
-    const errorDefs = useMemo(() => Object.values(ERRORS), [])
+    const SUGGESTIONS = useMemo<SuggestedPick[]>(() => [
+        { id: 'SUG_1', errorId: 'LOOP_BOUNDS' },
+        { id: 'SUG_2', errorId: 'COMPUTE_NUMERIC' },
+        { id: 'SUG_3', errorId: 'OUTPUT_MISSING' },
+        { id: 'SUG_4', errorId: 'COND_BOUNDARY' },
+    ], [])
 
     const totalPoints = useMemo(() => {
         return observedErrors
-            .reduce((sum, err) => sum + (ERRORS[err.errorId]?.points ?? 0), 0)
-    }, [observedErrors])
+            .reduce((sum, err) => sum + (ERROR_MAP[err.errorId]?.points ?? 0), 0)
+    }, [observedErrors, ERROR_MAP])
 
     const grade = Math.max(0, 100 - totalPoints)
 
@@ -366,27 +451,72 @@ export function AdminGrading() {
                         </div>
 
                         <div className="grading-section">
-                            <div className="section-label">Add an error</div>
-                            <div className="error-def-list">
-                                {errorDefs.map((err) => (
-                                    <button
-                                        key={err.id}
-                                        type="button"
-                                        className="error-def-btn"
-                                        disabled={selectedRange === null}
-                                        onClick={() => {
-                                            if (selectedRange === null) return
-                                            addError(selectedRange.start, selectedRange.end, err.id)
-                                        }}
-                                    >
-                                        <div className="error-def-top">
-                                            <span className="error-def-label">{err.label}</span>
-                                            <span className="error-def-points">-{err.points}</span>
-                                        </div>
-                                        <div className="error-def-desc">{err.description}</div>
-                                    </button>
-                                ))}
+                            <div className="section-label">AI suggestions</div>
+                            <div className="suggestions-grid">
+                                {SUGGESTIONS.map((s) => {
+                                    const meta = ERROR_MAP[s.errorId]
+                                    return (
+                                        <button
+                                            key={s.id}
+                                            type="button"
+                                            className="suggestion-btn"
+                                            disabled={selectedRange === null}
+                                            onClick={() => {
+                                                if (selectedRange === null) return
+                                                addError(selectedRange.start, selectedRange.end, s.errorId)
+                                            }}
+                                        >
+                                            <div className="suggestion-top">
+                                                <span className="suggestion-title">{meta?.label ?? s.errorId}</span>
+                                                <span className="suggestion-points">-{meta?.points ?? 0}</span>
+                                            </div>
+                                        </button>
+                                    )
+                                })}
                             </div>
+                        </div>
+
+                        <div className="grading-section">
+                            <details className="all-categories">
+                                <summary className="all-categories-summary">
+                                    <span className="all-categories-title">All categories</span>
+                                    <span className="all-categories-count">{CATEGORIES.length}</span>
+                                </summary>
+
+                                <div className="all-categories-body">
+                                    <div className="category-list">
+                                        {CATEGORIES.map((cat) => (
+                                            <details
+                                                key={cat.id}
+                                                className="category"
+                                            >
+                                                <summary className="category-summary">
+                                                    <span className="category-title">{cat.label}</span>
+                                                    <span className="category-count">{cat.errors.length}</span>
+                                                </summary>
+                                                <div className="category-errors">
+                                                    {cat.errors.map((err) => (
+                                                        <button
+                                                            key={err.id}
+                                                            type="button"
+                                                            className="error-option-btn"
+                                                            disabled={selectedRange === null}
+                                                            onClick={() => {
+                                                                if (selectedRange === null) return
+                                                                addError(selectedRange.start, selectedRange.end, err.id)
+                                                            }}
+                                                        >
+                                                            <span className="error-option-label">{err.label}</span>
+                                                            <span className="error-option-points">-{err.points}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </details>
+                                        ))}
+                                    </div>
+                                </div>
+                            </details>
+
                             {selectedRange === null && <div className="muted small">Select a line to enable adding.</div>}
                         </div>
 
@@ -402,13 +532,14 @@ export function AdminGrading() {
                             {selectedRange !== null && selectedRangeErrors.length > 0 && (
                                 <div className="line-error-list">
                                     {selectedRangeErrors.map((err, idx) => {
-                                        const meta = ERRORS[err.errorId]
+                                        const meta = ERROR_MAP[err.errorId]
                                         const label = meta?.label ?? err.errorId
                                         const pts = meta?.points ?? 0
+                                        const catLabel = meta?.categoryLabel ?? ''
                                         return (
                                             <div key={`${selectedRange.start}-${err.errorId}-${idx}`} className="line-error-item">
                                                 <div className="line-error-main">
-                                                    <span className="line-error-label">{label}</span>
+                                                    {catLabel && <span className="line-error-category">{catLabel}</span>}
                                                     <span className="line-error-lines">
                                                         {err.startLine === err.endLine ? `${err.startLine}` : `${err.startLine}-${err.endLine}`}
                                                     </span>
@@ -417,7 +548,7 @@ export function AdminGrading() {
                                                 <button
                                                     type="button"
                                                     className="line-error-remove"
-                                                    onClick={() => removeError(selectedRange.start, selectedRange.end, err.errorId)}
+                                                    onClick={() => removeError(err.startLine, err.endLine, err.errorId)}
                                                 >
                                                     Remove
                                                 </button>
@@ -467,7 +598,7 @@ export function AdminGrading() {
                     {hasErrors && (
                         <div className="all-errors">
                             {tableRows.map(([start, end, errors]) => {
-                                const totalPoints = errors.reduce((sum, e) => sum + (ERRORS[e.errorId]?.points ?? 0), 0)
+                                const totalPoints = errors.reduce((sum, e) => sum + (ERROR_MAP[e.errorId]?.points ?? 0), 0)
 
                                 return (
                                     <div
@@ -496,12 +627,16 @@ export function AdminGrading() {
 
                                         <div className="all-errors-line-body">
                                             {errors.map((err, idx) => {
-                                                const meta = ERRORS[err.errorId]
+                                                const meta = ERROR_MAP[err.errorId]
+                                                const label = meta?.label ?? err.errorId
+                                                const catLabel = meta?.categoryLabel ?? ''
+                                                const pts = meta?.points ?? 0
 
                                                 return (
                                                     <div key={`${start}-${end}-${err.errorId}-${idx}`} className="all-errors-item">
-                                                        <span className="all-errors-item-label">{meta.label}</span>
-                                                        <span className="all-errors-item-points">-{meta.points}</span>
+                                                        <span className="all-errors-item-label">{label}</span>
+                                                        {catLabel && <span className="all-errors-item-category">{catLabel}</span>}
+                                                        <span className="all-errors-item-points">-{pts}</span>
                                                         <button
                                                             type="button"
                                                             className="all-errors-item-remove"
