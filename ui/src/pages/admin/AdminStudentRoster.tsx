@@ -102,6 +102,10 @@ interface StudentListState {
         overlap_snippet_a?: string
         overlap_snippet_b?: string
     }>
+    // Marks Code//
+    plagiarismPage: number
+    plagiarismPageSize: number
+    // End of Change //
 }
 
 class StudentListInternal extends Component<StudentListProps, StudentListState> {
@@ -131,6 +135,10 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             sortBy: 'lastname',
             plagiarismModalIsOpen: false,
             plagiarismResults: [],
+            /* Marks Changes */
+            plagiarismPage: 1,
+            /* End Of Change */
+            plagiarismPageSize: 10,
         }
 
         this.handleClick = this.handleClick.bind(this)
@@ -277,6 +285,9 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                 this.setState({
                     plagiarismResults: pairs,
                     plagiarismModalIsOpen: true,
+                    /* Marks Code */
+                    plagiarismPage: 1,
+                    /* End Of Code */
                     isLoading: false,
                 })
             })
@@ -480,6 +491,48 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
         // ===== Helpers for modal "CodePage-like" UI =====
         const code = this.state.selectedStudentCode || ''
+        // Marks Code //
+        // --- Pagination for plagiarism modal (10 per page) ---
+        const pageSize = this.state.plagiarismPageSize ?? 10
+
+        // --- Thresholds (easy to tune) ---
+        const SIM_THRESHOLD = 0.85        // 85% similarity
+        const MIN_OVERLAP_CHARS = 150    // "150 sentences" idea -> using char length proxy
+
+        // Filter first, then sort, then paginate
+        const filteredPlagiarismResults = this.state.plagiarismResults.filter((p) => {
+            const token = p.similarity_token ?? 0
+            const ast = p.similarity_ast ?? 0
+
+            const overlapA = (p.overlap_snippet_a ?? '').trim()
+            const overlapB = (p.overlap_snippet_b ?? '').trim()
+            const overlapChars = overlapA.length + overlapB.length
+
+            return Math.max(token, ast) >= SIM_THRESHOLD && overlapChars >= MIN_OVERLAP_CHARS
+        })
+
+        const sortedPlagiarismResults = [...filteredPlagiarismResults].sort((x, y) => {
+            const xScore = Math.max(x.similarity_token ?? 0, x.similarity_ast ?? 0)
+            const yScore = Math.max(y.similarity_token ?? 0, y.similarity_ast ?? 0)
+
+            if (yScore !== xScore) return yScore - xScore
+            if ((y.similarity_ast ?? 0) !== (x.similarity_ast ?? 0)) return (y.similarity_ast ?? 0) - (x.similarity_ast ?? 0)
+            return (y.similarity_token ?? 0) - (x.similarity_token ?? 0)
+        })
+
+        const totalResults = sortedPlagiarismResults.length
+        const totalPages = Math.max(1, Math.ceil(totalResults / pageSize))
+
+        const currentPage = Math.min(Math.max(this.state.plagiarismPage ?? 1, 1), totalPages)
+        const startIndex = (currentPage - 1) * pageSize
+
+        const pageResults = sortedPlagiarismResults.slice(startIndex, startIndex + pageSize)
+
+        const goToPage = (p: number) => {
+            const clamped = Math.max(1, Math.min(p, totalPages))
+            this.setState({ plagiarismPage: clamped })
+        }
+        // End Of Code //
 
         function parseOutputs(raw: string): { expected: string; actual: string; hadDiff: boolean } {
             if (raw.includes('~~~diff~~~')) {
@@ -902,67 +955,93 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                                     <div className="modal-body">
                                         <div className="modal-header">
+                                            {/* Marks Code */}
                                             <div className="modal-title" id="plagiarism-modal-title">
-                                                Potentially Similar Submissions
+                                                Potentially Similar Submissions ({totalResults} pairs)
                                             </div>
+                                            {/* End of Marks Code */}
                                         </div>
 
                                         <div className="tab-content">
                                             <section className="tests-section">
-                                                <table className="results-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>Student A</th>
-                                                            <th>Student B</th>
-                                                            <th>Token Sim.</th>
-                                                            <th>AST Sim.</th>
-                                                            <th>Open</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {this.state.plagiarismResults.length === 0 && (
+                                                <div className="similar-modal-scroll">
+                                                    <table className="results-table">
+
+                                                        <thead>
                                                             <tr>
-                                                                <td className="no-data-message" colSpan={5}>
-                                                                    No similar pairs found (above threshold).
-                                                                </td>
+                                                                <th>Student A</th>
+                                                                <th>Student B</th>
+                                                                <th>Token Sim.</th>
+                                                                <th>AST Sim.</th>
+                                                                <th>Open</th>
                                                             </tr>
-                                                        )}
-
-                                                        {this.state.plagiarismResults.map((p, i) => {
-                                                            const pct = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%'
-                                                            const bucketClass = (v: number) => {
-                                                                const percent = v * 100
-                                                                if (percent < 40) return 'status-cell sim-low'
-                                                                if (percent < 60) return 'status-cell sim-medlow'
-                                                                if (percent < 75) return 'status-cell sim-medium'
-                                                                if (percent < 90) return 'status-cell sim-high'
-                                                                return 'status-cell sim-critical'
-                                                            }
-
-                                                            return (
-                                                                <tr key={`plag-${i}`}>
-                                                                    <td>{p.a.name}</td>
-                                                                    <td>{p.b.name}</td>
-                                                                    <td className={bucketClass(p.similarity_token)}>{pct(p.similarity_token)}</td>
-                                                                    <td className={bucketClass(p.similarity_ast)}>{pct(p.similarity_ast)}</td>
-                                                                    <td>
-                                                                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                                                            <Link
-                                                                                className="view-link"
-                                                                                to={`/admin/plagiarism/?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
-                                                                                    p.a.name
-                                                                                )}&bn=${encodeURIComponent(p.b.name)}`}
-                                                                                rel="noreferrer"
-                                                                            >
-                                                                                <FaEye aria-hidden="true" /> View
-                                                                            </Link>
-                                                                        </div>
+                                                        </thead>
+                                                        <tbody>
+                                                            {this.state.plagiarismResults.length === 0 && (
+                                                                <tr>
+                                                                    <td className="no-data-message" colSpan={5}>
+                                                                        No similar pairs found (above threshold).
                                                                     </td>
                                                                 </tr>
-                                                            )
-                                                        })}
-                                                    </tbody>
-                                                </table>
+                                                            )}
+
+                                                            {pageResults.map((p, i) => {
+                                                                const pct = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%'
+                                                                const bucketClass = (v: number) => {
+                                                                    const percent = v * 100
+                                                                    if (percent < 40) return 'status-cell sim-low'
+                                                                    if (percent < 60) return 'status-cell sim-medlow'
+                                                                    if (percent < 75) return 'status-cell sim-medium'
+                                                                    if (percent < 90) return 'status-cell sim-high'
+                                                                    return 'status-cell sim-critical'
+                                                                }
+
+                                                                return (
+                                                                    <tr key={`plag-${i}`}>
+                                                                        <td>{p.a.name}</td>
+                                                                        <td>{p.b.name}</td>
+                                                                        <td className={bucketClass(p.similarity_token)}>{pct(p.similarity_token)}</td>
+                                                                        <td className={bucketClass(p.similarity_ast)}>{pct(p.similarity_ast)}</td>
+                                                                        <td>
+                                                                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                                                <Link
+                                                                                    className="view-link"
+                                                                                    to={`/admin/plagiarism/?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
+                                                                                        p.a.name
+                                                                                    )}&bn=${encodeURIComponent(p.b.name)}`}
+                                                                                    target="_blank"
+                                                                                    rel="noreferrer"
+                                                                                >
+                                                                                    <FaEye aria-hidden="true" /> View
+                                                                                </Link>
+                                                                            </div>
+                                                                        </td>
+                                                                    </tr>
+                                                                )
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div className="pagination">
+                                                    <button className="page-btn" onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1}>
+                                                        Prev
+                                                    </button>
+
+                                                    {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((p) => (
+                                                        <button
+                                                            key={`page-${p}`}
+                                                            className={`page-btn ${p === currentPage ? 'active' : ''}`}
+                                                            onClick={() => goToPage(p)}
+                                                        >
+                                                            {p}
+                                                        </button>
+                                                    ))}
+
+                                                    <button className="page-btn" onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages}>
+                                                        Next
+                                                    </button>
+                                                </div>
+
                                             </section>
                                         </div>
                                     </div>
