@@ -17,18 +17,6 @@ type ErrorOption = {
     points: number
 }
 
-type CategoryDef = {
-    id: string
-    label: string
-    description: string
-    errors: ErrorOption[]
-}
-
-type ErrorDef = ErrorOption & {
-    categoryId: string
-    categoryLabel: string
-}
-
 type SuggestedPick = {
     id: string
     errorId: string
@@ -52,120 +40,177 @@ export function AdminGrading() {
     const pid = project_id !== undefined ? parseInt(project_id, 10) : -1
 
     const [studentName, setStudentName] = useState<string>('')
+    const [activeTestcaseName, setActiveTestcaseName] = useState<string>('')
+    const [activeTestcaseLongDiff, setActiveTestcaseLongDiff] = useState<string>('')
 
     // Track which lines contain errors and if errors exist
     const [observedErrors, setObservedErrors] = useState<ObservedError[]>([])
     const hasErrors = observedErrors.length > 0
 
-    const CATEGORIES = useMemo<CategoryDef[]>(() => [
-        {
-            id: 'INPUT',
-            label: 'Input handling',
-            description: 'Missing prompts, wrong order, wrong parsing',
-            errors: [
-                { id: 'INPUT_PROMPT', label: 'No prompt before reading input', description: 'Missing prompt before input read', points: 4 },
-                { id: 'INPUT_ORDER', label: 'Reads inputs in the wrong order', description: 'Consumes inputs in the wrong sequence', points: 6 },
-                { id: 'INPUT_PARSE', label: 'Wrong parsing of input type', description: 'String vs int/float parse mismatch', points: 5 },
-            ],
-        },
-        {
-            id: 'OUTPUT',
-            label: 'Output formatting and ordering',
-            description: 'Right values, wrong presentation',
-            errors: [
-                { id: 'OUTPUT_ORDER', label: 'Correct values, wrong order of output lines', description: 'Lines printed in the wrong order', points: 6 },
-                { id: 'OUTPUT_MISSING', label: 'Missing required line(s) of output', description: 'Required output line(s) not printed', points: 8 },
-                { id: 'OUTPUT_EXTRA', label: 'Extra line(s) of output', description: 'Unexpected extra output printed', points: 6 },
-                { id: 'OUTPUT_SPACE', label: 'Wrong formatting: spaces/newlines', description: 'Extra or missing spaces/newlines', points: 2 },
-                { id: 'OUTPUT_SPELL', label: 'Wrong formatting: misspellings', description: 'Typos in required output text', points: 3 },
-                { id: 'OUTPUT_ROUND', label: 'Wrong rounding/precision formatting', description: 'Wrong decimal precision/rounding', points: 4 },
-            ],
-        },
-        {
-            id: 'STATE',
-            label: 'Variable and state',
-            description: 'Bad initialization, wrong variable use, misused flags',
-            errors: [
-                { id: 'STATE_INIT', label: 'Uninitialized or wrong initial value', description: 'Uses uninitialized value or wrong starting value', points: 10 },
-                { id: 'STATE_VAR', label: 'Wrong variable use or type', description: 'Mixed variables, truncation, overwritten state', points: 8 },
-                { id: 'STATE_FLAG', label: 'Flag/state variable misused', description: 'Never set/cleared, reused incorrectly', points: 7 },
-            ],
-        },
-        {
-            id: 'COMPUTE',
-            label: 'Computation and numeric logic',
-            description: 'Wrong formula, precedence, or division type',
-            errors: [
-                { id: 'COMPUTE_NUMERIC', label: 'Wrong numeric computation', description: 'Wrong formula, precedence, or division type', points: 10 },
-            ],
-        },
-        {
-            id: 'COND',
-            label: 'Condition and boolean logic',
-            description: 'Wrong branch condition logic',
-            errors: [
-                { id: 'COND_COMPOUND', label: 'Incorrect compound logic', description: 'Missing AND/OR or logical vs bitwise', points: 10 },
-                { id: 'COND_BOUNDARY', label: 'Incorrect comparisons or boundaries', description: 'Wrong operator/variable or missed edge case', points: 8 },
-            ],
-        },
-        {
-            id: 'BRANCH',
-            label: 'Branching structure',
-            description: 'Control flow wiring mistakes',
-            errors: [
-                { id: 'BRANCH_STRUCTURE', label: 'Incorrect branch structure', description: 'Misbound else, missing default/else, missing break', points: 8 },
-            ],
-        },
-        {
-            id: 'LOOP',
-            label: 'Loop',
-            description: 'Bounds, control, and semantics',
-            errors: [
-                { id: 'LOOP_BOUNDS', label: 'Incorrect loop bounds or termination', description: 'Off-by-one, missing last, infinite loop', points: 12 },
-                { id: 'LOOP_CONTROL', label: 'Incorrect loop control logic', description: 'Bad init/update, misplaced counter, empty loop', points: 10 },
-                { id: 'LOOP_SEMANTICS', label: 'Incorrect loop semantics', description: 'Wrong nesting, wrong I/O placement, bad accumulation', points: 9 },
-            ],
-        },
-        {
-            id: 'INDEX',
-            label: 'Array, string, and indexing',
-            description: 'Out of bounds, wrong setup, wrong range',
-            errors: [
-                { id: 'INDEX_INVALID', label: 'Invalid indexing', description: 'Out-of-bounds, empty, wrong base, wrong range', points: 12 },
-                { id: 'INDEX_SETUP', label: 'Incorrect array/string setup', description: 'Wrong size, missing elements', points: 8 },
-            ],
-        },
-        {
-            id: 'FUNC',
-            label: 'Function and return values',
-            description: 'Wrong return behavior or function use',
-            errors: [
-                { id: 'FUNC_RETURN', label: 'Incorrect return behavior', description: 'Ignored, missing, wrong sentinel/type', points: 10 },
-                { id: 'FUNC_USE', label: 'Incorrect function use', description: 'Wrong order/scope or unnecessary re-calls', points: 8 },
-            ],
-        },
-    ], [])
+    const ERROR_DEFS = useMemo<ErrorOption[]>(
+        () => [
+            {
+                id: 'MISSPELL',
+                label: 'Spelling or word substitution error',
+                description:
+                    'A word or short phrase is wrong compared to expected output (including valid English words used incorrectly, missing/extra letters, or wrong small words) when the rest of the line is otherwise correct.',
+                points: 10,
+            },
+            {
+                id: 'FORMAT',
+                label: 'Formatting mismatch',
+                description: 'Correct content but incorrect formatting (spacing/newlines/case/spelling/precision).',
+                points: 5,
+            },
+            {
+                id: 'CONTENT',
+                label: 'Missing or extra required content',
+                description: 'Required value/line is missing, or additional unexpected value/line is produced.',
+                points: 20,
+            },
+            {
+                id: 'ORDER',
+                label: 'Order mismatch',
+                description: 'Reads inputs or prints outputs in the wrong order relative to the required sequence.',
+                points: 15,
+            },
+            {
+                id: 'INIT_STATE',
+                label: 'Incorrect initialization',
+                description: 'Uses uninitialized values or starts with the wrong initial state.',
+                points: 20,
+            },
+            {
+                id: 'STATE_MISUSE',
+                label: 'Incorrect variable or state use',
+                description: 'Wrong variable used, wrong type behavior (truncation), overwritten state, or flag not managed correctly.',
+                points: 15,
+            },
+            {
+                id: 'COMPUTE',
+                label: 'Incorrect computation',
+                description: 'Wrong formula, precedence, numeric operation, or derived value.',
+                points: 20,
+            },
+            {
+                id: 'CONDITION',
+                label: 'Incorrect condition logic',
+                description: 'Incorrect comparison, boundary, compound logic, or missing edge case handling.',
+                points: 15,
+            },
+            {
+                id: 'BRANCHING',
+                label: 'Incorrect branching structure',
+                description:
+                    'Wrong if/elif/else structure (misbound else), missing default case, or missing break in selection-like logic.',
+                points: 15,
+            },
+            {
+                id: 'LOOP',
+                label: 'Incorrect loop logic',
+                description: 'Wrong bounds/termination, update/control error, off-by-one, wrong nesting, or accumulation error.',
+                points: 20,
+            },
+            {
+                id: 'INDEXING',
+                label: 'Incorrect indexing or collection setup',
+                description: 'Out-of-bounds, wrong base/range, or incorrect array/string/list setup (size or contents).',
+                points: 20,
+            },
+            {
+                id: 'FUNCTIONS',
+                label: 'Incorrect function behavior or use',
+                description: 'Wrong return behavior (missing/ignored/wrong type) or incorrect function use (scope/order/unnecessary re-calls).',
+                points: 15,
+            },
+            {
+                id: 'COMPILE',
+                label: 'Program did not compile',
+                description:
+                    'Code fails to compile or run due to syntax errors, missing imports/includes, or build/runtime errors that prevent execution.',
+                points: 40,
+            },
+        ],
+        [],
+    )    
 
-    const ERROR_MAP = useMemo<Record<string, ErrorDef>>(() => {
-        const map: Record<string, ErrorDef> = {}
-        for (const cat of CATEGORIES) {
-            for (const err of cat.errors) {
-                map[err.id] = {
-                    ...err,
-                    categoryId: cat.id,
-                    categoryLabel: cat.label,
-                }
-            }
-        }
+    const ERROR_MAP = useMemo<Record<string, ErrorOption>>(() => {
+        const map: Record<string, ErrorOption> = {}
+        for (const err of ERROR_DEFS) map[err.id] = err
         return map
-    }, [CATEGORIES])
+    }, [ERROR_DEFS])
 
-    const SUGGESTIONS = useMemo<SuggestedPick[]>(() => [
-        { id: 'SUG_1', errorId: 'LOOP_BOUNDS' },
-        { id: 'SUG_2', errorId: 'COMPUTE_NUMERIC' },
-        { id: 'SUG_3', errorId: 'OUTPUT_MISSING' },
-        { id: 'SUG_4', errorId: 'COND_BOUNDARY' },
-    ], [])
+    // AI suggestions (dynamic, based on selected lines + failing diffs)
+    const [aiSuggestionIds, setAiSuggestionIds] = useState<string[]>([])
+    const [aiSuggestStatus, setAiSuggestStatus] = useState<'idle' | 'loading' | 'error'>('idle')
+    const [aiSuggestError, setAiSuggestError] = useState<string | null>(null)
+    const lastAiKeyRef = useRef<string>('')
+    const aiAbortRef = useRef<AbortController | null>(null)
+
+    const getSelectedCodeFromDom = (range: LineRange): string => {
+        const lines: string[] = []
+        for (let ln = range.start; ln <= range.end; ln++) {
+            const el = lineRefs.current[ln]
+            if (!el) continue
+            // Try to strip leading line number if it appears in textContent.
+            const raw = (el.textContent ?? '').replace(/\u00A0/g, ' ').trimEnd()
+            const stripped = raw.replace(/^\s*\d+\s+/, '')
+            lines.push(stripped)
+        }
+        return lines.join('\n').trim()
+    }
+
+    const requestAiSuggestions = async (range: LineRange) => {
+        const key = `${submissionId}:${range.start}-${range.end}`
+        if (lastAiKeyRef.current === key) return
+        lastAiKeyRef.current = key
+
+        const selectedCode = getSelectedCodeFromDom(range)
+        if (!selectedCode) {
+            setAiSuggestionIds([])
+            setAiSuggestStatus('idle')
+            setAiSuggestError(null)
+            return
+        }
+
+        // Cancel any in-flight request to avoid race conditions while selecting.
+        if (aiAbortRef.current) aiAbortRef.current.abort()
+        const ctrl = new AbortController()
+        aiAbortRef.current = ctrl
+
+        setAiSuggestStatus('loading')
+        setAiSuggestError(null)
+
+        try {
+            const res = await axios.post(
+                `${import.meta.env.VITE_API_URL}/ai/grading-suggestions`,
+                {
+                    submissionId: submissionId,
+                    startLine: range.start,
+                    endLine: range.end,
+                    selectedCode: selectedCode,
+                                        testcaseName: activeTestcaseName,
+                                        testcaseLongDiff: activeTestcaseLongDiff,
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                    signal: ctrl.signal,
+                }
+            )
+
+            const ids = Array.isArray(res.data?.suggestions) ? res.data.suggestions : []
+            setAiSuggestionIds(ids)
+            setAiSuggestStatus('idle')
+        } catch (e: any) {
+            // Ignore abort errors
+            if (e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') return
+            setAiSuggestStatus('error')
+            setAiSuggestError('AI suggestion request failed.')
+            setAiSuggestionIds([])
+        }
+    }
 
     const totalPoints = useMemo(() => {
         return observedErrors
@@ -178,6 +223,10 @@ export function AdminGrading() {
     const [hoveredLine, setHoveredLine] = useState<number | null>(null)
     const [initialLine, setInitialLine] = useState<number | null>(null)
     const [selectedRange, setSelectedRange] = useState<LineRange | null>(null)
+    const selectedRangeRef = useRef<LineRange | null>(null)
+    useEffect(() => {
+        selectedRangeRef.current = selectedRange
+    }, [selectedRange])
 
     const selectLines = (start: number, end: number) => {
         setSelectedRange({ start: start, end: end })
@@ -206,6 +255,21 @@ export function AdminGrading() {
     const handleMouseUp = () => {
         setInitialLine(null)
     }
+
+    // Only request AI suggestions once the selection is finalized (initialLine becomes null),
+    // and also when selection is set from elsewhere (ex: All Observed Errors click).
+    useEffect(() => {
+        if (initialLine !== null) return
+        if (selectedRange === null) {
+            setAiSuggestionIds([])
+            setAiSuggestStatus('idle')
+            setAiSuggestError(null)
+            lastAiKeyRef.current = ''
+            return
+        }
+        requestAiSuggestions(selectedRange)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedRange, initialLine])
 
     // References for code lines
     const codeContainerRef = useRef<HTMLDivElement | null>(null)
@@ -383,6 +447,16 @@ export function AdminGrading() {
                 classId={cid}
                 diffViewRef={diffViewRef}
                 codeSectionTitle="Submitted Code (click lines to mark errors)"
+                                onActiveTestcaseChange={(tc) => {
+                                        // Only feed diffs to AI when the testcase is failing and has a long diff.
+                                        if (!tc || tc.passed) {
+                                            setActiveTestcaseName('')
+                                            setActiveTestcaseLongDiff('')
+                                            return
+                                        }
+                                        setActiveTestcaseName(tc.name ?? '')
+                                        setActiveTestcaseLongDiff(tc.longDiff ?? '')
+                                    }}
                 betweenDiffAndCode={
                     <div className="grading-banner" role="note" aria-label="How to add errors">
                         <div className="banner-title">How to mark errors</div>
@@ -453,65 +527,82 @@ export function AdminGrading() {
                         <div className="grading-section">
                             <div className="section-label">AI suggestions</div>
                             <div className="suggestions-grid">
-                                {SUGGESTIONS.map((s) => {
-                                    const meta = ERROR_MAP[s.errorId]
-                                    return (
+                                {aiSuggestStatus === 'loading' && (
+                                    <div className="muted small">Generating suggestions...</div>
+                                )}
+
+                                {aiSuggestStatus === 'error' && (
+                                    <div className="muted small">
+                                        {aiSuggestError ?? 'AI error.'}{' '}
                                         <button
-                                            key={s.id}
                                             type="button"
-                                            className="suggestion-btn"
+                                            className="linklike"
                                             disabled={selectedRange === null}
                                             onClick={() => {
-                                                if (selectedRange === null) return
-                                                addError(selectedRange.start, selectedRange.end, s.errorId)
+                                                if (!selectedRangeRef.current) return
+                                                // Allow retry even if same key
+                                                lastAiKeyRef.current = ''
+                                                requestAiSuggestions(selectedRangeRef.current)
                                             }}
                                         >
-                                            <div className="suggestion-top">
-                                                <span className="suggestion-title">{meta?.label ?? s.errorId}</span>
-                                                <span className="suggestion-points">-{meta?.points ?? 0}</span>
-                                            </div>
+                                            Retry
                                         </button>
-                                    )
-                                })}
+                                    </div>
+                                )}
+
+                                {aiSuggestStatus === 'idle' && selectedRange !== null && aiSuggestionIds.length === 0 && (
+                                    <div className="muted small">No suggestions yet for this selection.</div>
+                                )}
+
+                                {aiSuggestStatus !== 'loading' &&
+                                    aiSuggestionIds.map((errorId) => {
+                                        const meta = ERROR_MAP[errorId]
+                                        const label = meta?.label ?? errorId
+                                        const pts = meta?.points ?? 0
+                                        return (
+                                            <button
+                                                key={`ai-${errorId}`}
+                                                type="button"
+                                                className="suggestion-btn"
+                                                disabled={selectedRange === null}
+                                                onClick={() => {
+                                                    if (selectedRange === null) return
+                                                    addError(selectedRange.start, selectedRange.end, errorId)
+                                                }}
+                                            >
+                                                <div className="suggestion-top">
+                                                    <span className="suggestion-title">{label}</span>
+                                                    <span className="suggestion-points">-{pts}</span>
+                                                </div>
+                                            </button>
+                                        )
+                                    })}
                             </div>
                         </div>
 
                         <div className="grading-section">
-                            <details className="all-categories">
-                                <summary className="all-categories-summary">
-                                    <span className="all-categories-title">All categories</span>
-                                    <span className="all-categories-count">{CATEGORIES.length}</span>
+                            <details className="all-errors-picker" defaultChecked={false}>
+                                <summary className="all-errors-picker-header">
+                                    <span className="all-errors-picker-title">All errors</span>
+                                    <span className="all-errors-picker-count">{ERROR_DEFS.length}</span>
                                 </summary>
-
-                                <div className="all-categories-body">
-                                    <div className="category-list">
-                                        {CATEGORIES.map((cat) => (
-                                            <details
-                                                key={cat.id}
-                                                className="category"
+                                <div className="all-errors-picker-body">
+                                    <div className="error-options-list">
+                                        {ERROR_DEFS.map((err) => (
+                                            <button
+                                                key={err.id}
+                                                type="button"
+                                                className="error-option-btn"
+                                                disabled={selectedRange === null}
+                                                title={err.description}
+                                                onClick={() => {
+                                                    if (selectedRange === null) return
+                                                    addError(selectedRange.start, selectedRange.end, err.id)
+                                                }}
                                             >
-                                                <summary className="category-summary">
-                                                    <span className="category-title">{cat.label}</span>
-                                                    <span className="category-count">{cat.errors.length}</span>
-                                                </summary>
-                                                <div className="category-errors">
-                                                    {cat.errors.map((err) => (
-                                                        <button
-                                                            key={err.id}
-                                                            type="button"
-                                                            className="error-option-btn"
-                                                            disabled={selectedRange === null}
-                                                            onClick={() => {
-                                                                if (selectedRange === null) return
-                                                                addError(selectedRange.start, selectedRange.end, err.id)
-                                                            }}
-                                                        >
-                                                            <span className="error-option-label">{err.label}</span>
-                                                            <span className="error-option-points">-{err.points}</span>
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </details>
+                                                <span className="error-option-label">{err.label}</span>
+                                                <span className="error-option-points">-{err.points}</span>
+                                            </button>
                                         ))}
                                     </div>
                                 </div>
@@ -539,7 +630,6 @@ export function AdminGrading() {
                                         return (
                                             <div key={`${selectedRange.start}-${err.errorId}-${idx}`} className="line-error-item">
                                                 <div className="line-error-main">
-                                                    {catLabel && <span className="line-error-category">{catLabel}</span>}
                                                     <span className="line-error-lines">
                                                         {err.startLine === err.endLine ? `${err.startLine}` : `${err.startLine}-${err.endLine}`}
                                                     </span>
@@ -629,13 +719,11 @@ export function AdminGrading() {
                                             {errors.map((err, idx) => {
                                                 const meta = ERROR_MAP[err.errorId]
                                                 const label = meta?.label ?? err.errorId
-                                                const catLabel = meta?.categoryLabel ?? ''
                                                 const pts = meta?.points ?? 0
 
                                                 return (
                                                     <div key={`${start}-${end}-${err.errorId}-${idx}`} className="all-errors-item">
                                                         <span className="all-errors-item-label">{label}</span>
-                                                        {catLabel && <span className="all-errors-item-category">{catLabel}</span>}
                                                         <span className="all-errors-item-points">-{pts}</span>
                                                         <button
                                                             type="button"

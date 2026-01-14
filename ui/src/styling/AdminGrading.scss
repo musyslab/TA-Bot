@@ -237,16 +237,14 @@
     white-space: nowrap;
 }
 
-/* All categories wrapper (collapsed by default) */
-.all-categories {
+.all-errors-picker {
     border: 1px solid #e6eaf0;
     border-radius: 12px;
     background: #ffffff;
     overflow: hidden;
 }
 
-.all-categories-summary {
-    list-style: none;
+.all-errors-picker-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -261,13 +259,13 @@
     }
 }
 
-.all-categories-title {
+.all-errors-picker-title {
     font-weight: 900;
     color: #111827;
     font-size: 0.92rem;
 }
 
-.all-categories-count {
+.all-errors-picker-count {
     font-weight: 900;
     color: #374151;
     font-size: 0.9rem;
@@ -278,58 +276,11 @@
     white-space: nowrap;
 }
 
-.all-categories-body {
+.all-errors-picker-body {
     padding: 10px 10px;
 }
 
-.category-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.category {
-    border: 1px solid #e6eaf0;
-    border-radius: 12px;
-    background: #ffffff;
-    overflow: hidden;
-}
-
-.category-summary {
-    list-style: none;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 10px;
-    background: #f8fafc;
-    cursor: pointer;
-    user-select: none;
-
-    &::-webkit-details-marker {
-        display: none;
-    }
-}
-
-.category-title {
-    font-weight: 900;
-    color: #111827;
-    font-size: 0.92rem;
-}
-
-.category-count {
-    font-weight: 900;
-    color: #374151;
-    font-size: 0.9rem;
-    border: 1px solid #e5e7eb;
-    background: #ffffff;
-    padding: 2px 8px;
-    border-radius: 999px;
-    white-space: nowrap;
-}
-
-.category-errors {
-    padding: 10px 10px;
+.error-options-list {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -407,13 +358,6 @@
     .line-error-label {
         font-weight: 800;
         color: #111827;
-    }
-
-    .line-error-category {
-        color: #6b7280;
-        font-size: 0.85rem;
-        font-weight: 800;
-        white-space: nowrap;
     }
 
     .line-error-lines {
@@ -565,13 +509,6 @@
     .all-errors-item-label {
         font-weight: 800;
         color: #111827;
-    }
-
-    .all-errors-item-category {
-        color: #6b7280;
-        font-size: 0.85rem;
-        font-weight: 800;
-        white-space: nowrap;
     }
 
     .all-errors-item-points {

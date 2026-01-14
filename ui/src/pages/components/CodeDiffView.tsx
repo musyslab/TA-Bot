@@ -186,6 +186,7 @@ type DiffViewProps = {
     onLineMouseUp?: () => void
     rightPanel?: React.ReactNode
     betweenDiffAndCode?: React.ReactNode
+    onActiveTestcaseChange?: (tc: { name: string; num: number; passed: boolean; longDiff: string; shortDiff: string }) => void
 }
 
 export default function DiffView(props: DiffViewProps) {
@@ -203,6 +204,7 @@ export default function DiffView(props: DiffViewProps) {
         onLineMouseUp,
         rightPanel,
         betweenDiffAndCode,
+        onActiveTestcaseChange,
     } = props
 
     const internalCodeContainerRef = useRef<HTMLDivElement | null>(null)
@@ -415,6 +417,18 @@ export default function DiffView(props: DiffViewProps) {
         () => diffFilesAll.find((f) => f.id === selectedDiffId) || null,
         [diffFilesAll, selectedDiffId]
     )
+
+        useEffect(() => {
+                if (!onActiveTestcaseChange) return
+                if (!selectedFile) return
+                onActiveTestcaseChange({
+                    name: selectedFile.test,
+                    num: selectedFile.num,
+                    passed: selectedFile.passed,
+                    longDiff: selectedFile.longDiff ?? '',
+                    shortDiff: selectedFile.shortDiff ?? '',
+                })
+            }, [selectedFile, onActiveTestcaseChange])    
 
     const showDiffModeToggle = useMemo(() => {
         if (!selectedFile || selectedFile.passed) return false
