@@ -125,10 +125,10 @@ def build_prompt(selected_code: str, diff_long: str) -> str:
 
     return f"""You are helping a human TA label likely grading mistakes.
 
-Return ONLY a JSON array of 2 to 4 strings, each string must be one valid errorId from the Allowed list.
+Return ONLY a JSON array of 3 to 4 strings, each string must be one valid errorId from the Allowed list.
 No extra keys, no explanations, no markdown, no surrounding text.
 
-Choose the 2–4 most likely errorIds based on:
+Choose the 3–4 most likely errorIds based on:
 1) Selected source lines
 2) Output diffs from failing tests (unified diff where '-' is student output and '+' is expected output)
 
@@ -343,8 +343,8 @@ def grading_suggestions(
         except Exception:
             pass
 
-    # 3) Final fallback (guarantee 2–4)
-    if len(ids) < 2:
+    # 3) Final fallback (guarantee 3–4)
+    if len(ids) < 3:
         ids = heuristic_fallback_from_diff(diff_long)
 
     return make_response(json.dumps({"suggestions": ids}), 200, {"Content-Type": "application/json"})

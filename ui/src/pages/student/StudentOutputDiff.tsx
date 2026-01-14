@@ -40,7 +40,7 @@ export function StudentOutputDiff() {
 
             <div className="pageTitle">Your Program Output Results</div>
 
-            <DiffView submissionId={submissionId} classId={cid} />
+            <DiffView submissionId={submissionId} classId={cid} disableCopy />
         </div>
     )
 }

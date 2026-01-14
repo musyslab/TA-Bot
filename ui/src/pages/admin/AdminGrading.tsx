@@ -132,7 +132,7 @@ export function AdminGrading() {
             },
         ],
         [],
-    )    
+    )
 
     const ERROR_MAP = useMemo<Record<string, ErrorOption>>(() => {
         const map: Record<string, ErrorOption> = {}
@@ -189,8 +189,8 @@ export function AdminGrading() {
                     startLine: range.start,
                     endLine: range.end,
                     selectedCode: selectedCode,
-                                        testcaseName: activeTestcaseName,
-                                        testcaseLongDiff: activeTestcaseLongDiff,
+                    testcaseName: activeTestcaseName,
+                    testcaseLongDiff: activeTestcaseLongDiff,
                 },
                 {
                     headers: {
@@ -257,7 +257,7 @@ export function AdminGrading() {
     }
 
     // Only request AI suggestions once the selection is finalized (initialLine becomes null),
-    // and also when selection is set from elsewhere (ex: All Observed Errors click).
+    // and also when selection is set from elsewhere (ex: Grading Summary and Save click).
     useEffect(() => {
         if (initialLine !== null) return
         if (selectedRange === null) {
@@ -279,6 +279,53 @@ export function AdminGrading() {
         const el = lineRefs.current[lineNo]
         if (!el) return
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+
+    // Ctrl+F style find (commits on Enter)
+    const [findInput, setFindInput] = useState<string>('')
+    const [findQuery, setFindQuery] = useState<string>('') // last committed query
+    const [findMatches, setFindMatches] = useState<number[]>([])
+    const [findMatchIndex, setFindMatchIndex] = useState<number>(0)
+
+    const findMatchSet = useMemo(() => new Set(findMatches), [findMatches])
+    const activeFindLine = findMatches.length > 0 ? findMatches[findMatchIndex] : null
+
+    const performFind = (rawQuery: string) => {
+        const needle = rawQuery.trim()
+        if (!needle) {
+            setFindQuery('')
+            setFindMatches([])
+            setFindMatchIndex(0)
+            return
+        }
+
+        const lowerNeedle = needle.toLowerCase()
+        const lineNos = Object.keys(lineRefs.current)
+            .map((k) => Number(k))
+            .filter((n) => Number.isFinite(n))
+            .sort((a, b) => a - b)
+
+        const matches: number[] = []
+        for (const ln of lineNos) {
+            const el = lineRefs.current[ln]
+            if (!el) continue
+            const hay = (el.textContent ?? '').replace(/\u00A0/g, ' ').toLowerCase()
+            if (hay.includes(lowerNeedle)) matches.push(ln)
+        }
+
+        setFindQuery(needle)
+        setFindMatches(matches)
+        setFindMatchIndex(0)
+        if (matches.length > 0) scrollToLine(matches[0])
+    }
+
+    const stepFind = (dir: 1 | -1) => {
+        if (findMatches.length === 0) return
+        setFindMatchIndex((prev) => {
+            const next = (prev + dir + findMatches.length) % findMatches.length
+            scrollToLine(findMatches[next])
+            return next
+        })
     }
 
     // References for Navigation
@@ -447,16 +494,16 @@ export function AdminGrading() {
                 classId={cid}
                 diffViewRef={diffViewRef}
                 codeSectionTitle="Submitted Code (click lines to mark errors)"
-                                onActiveTestcaseChange={(tc) => {
-                                        // Only feed diffs to AI when the testcase is failing and has a long diff.
-                                        if (!tc || tc.passed) {
-                                            setActiveTestcaseName('')
-                                            setActiveTestcaseLongDiff('')
-                                            return
-                                        }
-                                        setActiveTestcaseName(tc.name ?? '')
-                                        setActiveTestcaseLongDiff(tc.longDiff ?? '')
-                                    }}
+                onActiveTestcaseChange={(tc) => {
+                    // Only feed diffs to AI when the testcase is failing and has a long diff.
+                    if (!tc || tc.passed) {
+                        setActiveTestcaseName('')
+                        setActiveTestcaseLongDiff('')
+                        return
+                    }
+                    setActiveTestcaseName(tc.name ?? '')
+                    setActiveTestcaseLongDiff(tc.longDiff ?? '')
+                }}
                 betweenDiffAndCode={
                     <div className="grading-banner" role="note" aria-label="How to add errors">
                         <div className="banner-title">How to mark errors</div>
@@ -470,10 +517,14 @@ export function AdminGrading() {
                 lineRefs={lineRefs}
                 getLineClassName={(lineNo) => {
                     const errors = observedErrors.some(err => err.startLine <= lineNo && err.endLine >= lineNo)
+                    const isFindMatch = findMatchSet.has(lineNo)
+                    const isFindActive = activeFindLine === lineNo
                     return [
                         errors ? 'has-error' : '',
                         hoveredLine === lineNo ? 'is-hovered' : '',
                         isRangeSelected(lineNo, lineNo) ? 'is-selected' : '',
+                        isFindMatch ? 'is-find-match' : '',
+                        isFindActive ? 'is-find-active' : '',
                     ]
                         .filter(Boolean)
                         .join(' ')
@@ -482,12 +533,158 @@ export function AdminGrading() {
                 onLineMouseEnter={(lineNo) => handleMouseEnter(lineNo)}
                 onLineMouseLeave={() => setHoveredLine(null)}
                 onLineMouseUp={() => handleMouseUp()}
+
+
+                belowCode={
+                    <section className="all-observed-section" aria-label="Grading Summary and Save" ref={allObservedErrorsRef}>
+                        <h2 className="section-title">Grading Summary and Save</h2>
+                        <div className="all-observed-panel">
+                            <div className="save-panel">
+                                <div className="grade-column">
+                                    Grade: {grade}
+                                </div>
+
+                                <button className="save-grade">
+                                    Save as draft
+                                </button>
+
+                                <button
+                                    className={`save-grade ${saveStatus}`}
+                                    onClick={handleSave}
+                                    disabled={saveStatus === 'saving'}
+                                >
+                                    {saveStatus === 'idle' && 'Save'}
+                                    {saveStatus === 'saving' && 'Saving...'}
+                                    {saveStatus === 'saved' && 'Saved!'}
+                                    {saveStatus === 'error' && 'Error'}
+                                </button>
+
+                                {saveStatus === 'error' && (
+                                    <div className="muted small">Save failed. Try again.</div>
+                                )}
+                                {saveStatus === 'saved' && (
+                                    <div className="muted small">Saved to the database.</div>
+                                )}
+                            </div>
+
+                            {!hasErrors && <div className="muted">No errors added yet.</div>}
+
+                            {hasErrors && (
+                                <div className="all-errors">
+                                    {tableRows.map(([start, end, errors]) => {
+                                        const totalPoints = errors.reduce((sum, e) => sum + (ERROR_MAP[e.errorId]?.points ?? 0), 0)
+
+                                        return (
+                                            <div
+                                                key={`${start}-${end}`}
+                                                className={`
+                                                                        all-errors-line
+                                                                        ${selectedRange?.start === start && selectedRange.end === end ? 'is-selected' : ''}
+                                                                    `}
+                                            >
+                                                <button
+                                                    type="button"
+                                                    className="all-errors-line-header"
+                                                    onClick={() => {
+                                                        setSelectedRange({ start: start, end: end })
+                                                        scrollToLine(start)
+                                                    }}
+                                                    title="Select line(s)"
+                                                >
+                                                    <span className="all-errors-line-title">
+                                                        {start === end ? `Line ${start}` : `Lines ${start}-${end}`}
+                                                    </span>
+                                                    <span className="all-errors-line-meta">
+                                                        {errors.length} {errors.length === 1 ? 'error' : 'errors'}, -{totalPoints}
+                                                    </span>
+                                                </button>
+
+                                                <div className="all-errors-line-body">
+                                                    {errors.map((err, idx) => {
+                                                        const meta = ERROR_MAP[err.errorId]
+                                                        const label = meta?.label ?? err.errorId
+                                                        const pts = meta?.points ?? 0
+
+                                                        return (
+                                                            <div key={`${start}-${end}-${err.errorId}-${idx}`} className="all-errors-item">
+                                                                <span className="all-errors-item-label">{label}</span>
+                                                                <span className="all-errors-item-points">-{pts}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    className="all-errors-item-remove"
+                                                                    onClick={() => removeError(start, end, err.errorId)}
+                                                                >
+                                                                    Remove
+                                                                </button>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </section>
+                }
+
+
                 rightPanel={
                     <aside className="grading-panel" aria-label="Grading panel">
+
                         <div className="grading-panel-header">
                             <div className="grading-title">Grading Panel</div>
                             <div className="grading-hint">
                                 {!selectedRange ? 'Select a line to start.' : 'Add errors to the selected line(s).'}
+                            </div>
+                        </div>
+
+                        <div className="find-bar" role="search" aria-label="Find in code">
+                            <input
+                                className="find-input"
+                                type="text"
+                                placeholder="Find in code (Enter to search)"
+                                value={findInput}
+                                onChange={(e) => setFindInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return
+                                    e.preventDefault()
+
+                                    const nextQuery = findInput.trim()
+                                    // If query changed, run a fresh search and jump to first match.
+                                    if (nextQuery !== findQuery) {
+                                        performFind(findInput)
+                                        return
+                                    }
+                                    // If query is the same, behave like Ctrl+F Enter: jump to next (Shift+Enter: previous).
+                                    stepFind(e.shiftKey ? -1 : 1)
+                                }}
+                            />
+
+                            <div className="find-count" aria-label="Match count">
+                                {findMatches.length === 0 ? '0/0' : `${findMatchIndex + 1}/${findMatches.length}`}
+                            </div>
+
+                            <div className="find-nav" aria-label="Find navigation">
+                                <button
+                                    type="button"
+                                    className="find-nav-btn"
+                                    disabled={findMatches.length === 0}
+                                    onClick={() => stepFind(-1)}
+                                    title="Previous match (Shift+Enter)"
+                                >
+                                    ‹
+                                </button>
+                                <button
+                                    type="button"
+                                    className="find-nav-btn"
+                                    disabled={findMatches.length === 0}
+                                    onClick={() => stepFind(1)}
+                                    title="Next match (Enter)"
+                                >
+                                    ›
+                                </button>
                             </div>
                         </div>
 
@@ -502,7 +699,7 @@ export function AdminGrading() {
                                 <li className="navigation-item"
                                     onClick={() => allObservedErrorsRef.current !== null ? scrollToSection(allObservedErrorsRef.current) : null}
                                 >
-                                    All Observed Errors
+                                    Grading Summary and Save
                                 </li>
                             </ul>
                         </div>
@@ -651,98 +848,6 @@ export function AdminGrading() {
                     </aside>
                 }
             />
-
-            <section className="all-observed-section" aria-label="All observed errors" ref={allObservedErrorsRef}>
-                <h2 className="section-title">All Observed Errors</h2>
-                <div className="all-observed-panel">
-                    <div className="save-panel">
-                        <div className="grade-column">
-                            Grade: {grade}
-                        </div>
-
-                        <button className="save-grade">
-                            Save as draft
-                        </button>
-
-                        <button
-                            className={`save-grade ${saveStatus}`}
-                            onClick={handleSave}
-                            disabled={saveStatus === 'saving'}
-                        >
-                            {saveStatus === 'idle' && 'Save'}
-                            {saveStatus === 'saving' && 'Saving...'}
-                            {saveStatus === 'saved' && 'Saved!'}
-                            {saveStatus === 'error' && 'Error'}
-                        </button>
-
-                        {saveStatus === 'error' && (
-                            <div className="muted small">Save failed. Try again.</div>
-                        )}
-                        {saveStatus === 'saved' && (
-                            <div className="muted small">Saved to the database.</div>
-                        )}
-                    </div>
-
-                    {!hasErrors && <div className="muted">No errors added yet.</div>}
-
-                    {hasErrors && (
-                        <div className="all-errors">
-                            {tableRows.map(([start, end, errors]) => {
-                                const totalPoints = errors.reduce((sum, e) => sum + (ERROR_MAP[e.errorId]?.points ?? 0), 0)
-
-                                return (
-                                    <div
-                                        key={`${start}-${end}`}
-                                        className={`
-                                            all-errors-line
-                                            ${selectedRange?.start === start && selectedRange.end === end ? 'is-selected' : ''}
-                                        `}
-                                    >
-                                        <button
-                                            type="button"
-                                            className="all-errors-line-header"
-                                            onClick={() => {
-                                                setSelectedRange({ start: start, end: end })
-                                                scrollToLine(start)
-                                            }}
-                                            title="Select line(s)"
-                                        >
-                                            <span className="all-errors-line-title">
-                                                {start === end ? `Line ${start}` : `Lines ${start}-${end}`}
-                                            </span>
-                                            <span className="all-errors-line-meta">
-                                                {errors.length} {errors.length === 1 ? 'error' : 'errors'}, -{totalPoints}
-                                            </span>
-                                        </button>
-
-                                        <div className="all-errors-line-body">
-                                            {errors.map((err, idx) => {
-                                                const meta = ERROR_MAP[err.errorId]
-                                                const label = meta?.label ?? err.errorId
-                                                const pts = meta?.points ?? 0
-
-                                                return (
-                                                    <div key={`${start}-${end}-${err.errorId}-${idx}`} className="all-errors-item">
-                                                        <span className="all-errors-item-label">{label}</span>
-                                                        <span className="all-errors-item-points">-{pts}</span>
-                                                        <button
-                                                            type="button"
-                                                            className="all-errors-item-remove"
-                                                            onClick={() => removeError(start, end, err.errorId)}
-                                                        >
-                                                            Remove
-                                                        </button>
-                                                    </div>
-                                                )
-                                            })}
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    )}
-                </div>
-            </section>
         </div>
     )
 }
