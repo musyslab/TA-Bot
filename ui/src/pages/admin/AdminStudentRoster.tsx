@@ -193,7 +193,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         );
         const ohVisitsRequest = axios.post(
             import.meta.env.VITE_API_URL + `/submissions/get_oh_visits_by_projectId`,
-            {project_id: this.props.project_id},
+            { project_id: this.props.project_id },
             {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -201,69 +201,69 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             }
         );
         Promise.all([submissionsRequest, ohVisitsRequest])
-                .then(([submissionsRes, officeHoursRes]) => {
-                    const data = submissionsRes.data
+            .then(([submissionsRes, officeHoursRes]) => {
+                const data = submissionsRes.data
 
-                    const officeHoursAttendees = new Set(officeHoursRes.data);
-                    const rows: Array<Row> = []
-                    const lectureSet = new Set<number>([-1])
-                    const labSet = new Set<number>([-1])
+                const officeHoursAttendees = new Set(officeHoursRes.data);
+                const rows: Array<Row> = []
+                const lectureSet = new Set<number>([-1])
+                const labSet = new Set<number>([-1])
 
-                    Object.entries(data).map(([key, value]) => {
-                        const row = new Row()
-                        const student_output_data = value as Array<any>
+                Object.entries(data).map(([key, value]) => {
+                    const row = new Row()
+                    const student_output_data = value as Array<any>
 
-                        row.id = parseInt(key, 10)
-                        row.Lname = String(student_output_data[0] ?? '')
-                        row.Fname = String(student_output_data[1] ?? '')
-                        row.lecture_number = parseInt(String(student_output_data[2] ?? '0'), 10)
-                        row.lab_number = parseInt(String(student_output_data[3] ?? '0'), 10)
+                    row.id = parseInt(key, 10)
+                    row.Lname = String(student_output_data[0] ?? '')
+                    row.Fname = String(student_output_data[1] ?? '')
+                    row.lecture_number = parseInt(String(student_output_data[2] ?? '0'), 10)
+                    row.lab_number = parseInt(String(student_output_data[3] ?? '0'), 10)
 
-                        lectureSet.add(row.lecture_number)
-                        labSet.add(row.lab_number)
+                    lectureSet.add(row.lecture_number)
+                    labSet.add(row.lab_number)
 
-                        row.numberOfSubmissions = parseInt(String(student_output_data[4] ?? '0'), 10)
-                        row.date = String(student_output_data[5] ?? '')
+                    row.numberOfSubmissions = parseInt(String(student_output_data[4] ?? '0'), 10)
+                    row.date = String(student_output_data[5] ?? '')
 
-                        const passRaw = String(student_output_data[6] ?? '').toLowerCase().trim()
-                        row.isPassing =
-                            passRaw === 'true' ||
-                            passRaw === '1' ||
-                            passRaw === 'pass' ||
-                            passRaw === 'passed' ||
-                            passRaw === 'ok' ||
-                            passRaw === 'success'
+                    const passRaw = String(student_output_data[6] ?? '').toLowerCase().trim()
+                    row.isPassing =
+                        passRaw === 'true' ||
+                        passRaw === '1' ||
+                        passRaw === 'pass' ||
+                        passRaw === 'passed' ||
+                        passRaw === 'ok' ||
+                        passRaw === 'success'
 
-                        const hasSub = String(student_output_data[7] ?? 'N/A') !== 'N/A'
-                        const off = hasSub ? 0 : 1
-                        row.subid = parseInt(String(student_output_data[7 + off] ?? '-1'), 10)
-                        row.classId = String(student_output_data[8 + off] ?? '')
-                        row.grade = parseInt(String(student_output_data[9 + off] ?? '0'), 10)
-                        row.StudentNumber = parseInt(String(student_output_data[10 + off] ?? '0'), 10)
-                        const lockRaw = String(student_output_data[11 + off] ?? '').toLowerCase().trim()
-                        row.IsLocked = lockRaw === 'true' || lockRaw === '1' || lockRaw === 'locked'
+                    const hasSub = String(student_output_data[7] ?? 'N/A') !== 'N/A'
+                    const off = hasSub ? 0 : 1
+                    row.subid = parseInt(String(student_output_data[7 + off] ?? '-1'), 10)
+                    row.classId = String(student_output_data[8 + off] ?? '')
+                    row.grade = parseInt(String(student_output_data[9 + off] ?? '0'), 10)
+                    row.StudentNumber = parseInt(String(student_output_data[10 + off] ?? '0'), 10)
+                    const lockRaw = String(student_output_data[11 + off] ?? '').toLowerCase().trim()
+                    row.IsLocked = lockRaw === 'true' || lockRaw === '1' || lockRaw === 'locked'
 
-                        row.attendedOfficeHours = officeHoursAttendees.has(row.id);
-                    
-                        rows.push(row)
-                        return row
-                    })
-                    const lecture_numbers: Option[] = Array.from(lectureSet)
-                        .filter((v) => v !== -1)
-                        .sort((a, b) => a - b)
-                        .map((v) => ({ key: v, text: String(v), value: v }))
-                    lecture_numbers.unshift({ key: -1, text: 'All', value: -1 })
+                    row.attendedOfficeHours = officeHoursAttendees.has(row.id);
 
-                    const lab_numbers: Option[] = Array.from(labSet)
-                        .filter((v) => v !== -1)
-                        .sort((a, b) => a - b)
-                        .map((v) => ({ key: v, text: String(v), value: v }))
-                    lab_numbers.unshift({ key: -1, text: 'All', value: -1 })
-
-                    rows.sort((a, b) => a.Lname.localeCompare(b.Lname))
-
-                    this.setState({ rows, lecture_numbers, lab_numbers })
+                    rows.push(row)
+                    return row
                 })
+                const lecture_numbers: Option[] = Array.from(lectureSet)
+                    .filter((v) => v !== -1)
+                    .sort((a, b) => a - b)
+                    .map((v) => ({ key: v, text: String(v), value: v }))
+                lecture_numbers.unshift({ key: -1, text: 'All', value: -1 })
+
+                const lab_numbers: Option[] = Array.from(labSet)
+                    .filter((v) => v !== -1)
+                    .sort((a, b) => a - b)
+                    .map((v) => ({ key: v, text: String(v), value: v }))
+                lab_numbers.unshift({ key: -1, text: 'All', value: -1 })
+
+                rows.sort((a, b) => a.Lname.localeCompare(b.Lname))
+
+                this.setState({ rows, lecture_numbers, lab_numbers })
+            })
     }
 
     // Run plagiarism detector
@@ -491,32 +491,36 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
         // ===== Helpers for modal "CodePage-like" UI =====
         const code = this.state.selectedStudentCode || ''
-        // Marks Code //
+
         // --- Pagination for plagiarism modal (10 per page) ---
         const pageSize = this.state.plagiarismPageSize ?? 10
 
         // --- Thresholds (easy to tune) ---
-        const SIM_THRESHOLD = 0.85        // 85% similarity
-        const MIN_OVERLAP_CHARS = 150    // "150 sentences" idea -> using char length proxy
+        const SIM_THRESHOLD = 0.75
+        const MIN_OVERLAP_CHARS = 150
 
-        // Filter first, then sort, then paginate
-        const filteredPlagiarismResults = this.state.plagiarismResults.filter((p) => {
-            const token = p.similarity_token ?? 0
-            const ast = p.similarity_ast ?? 0
+        const raw = this.state.plagiarismResults ?? []
 
+        const score = (r: any) => ((r.similarity_token ?? 0) + (r.similarity_ast ?? 0)) / 2
+
+        const filteredPlagiarismResults = raw.filter((p) => {
             const overlapA = (p.overlap_snippet_a ?? '').trim()
             const overlapB = (p.overlap_snippet_b ?? '').trim()
             const overlapChars = overlapA.length + overlapB.length
 
-            return Math.max(token, ast) >= SIM_THRESHOLD && overlapChars >= MIN_OVERLAP_CHARS
+            const hasOverlapSnippets = overlapChars > 0
+            const overlapOk = !hasOverlapSnippets || overlapChars >= MIN_OVERLAP_CHARS
+
+            return score(p) >= SIM_THRESHOLD && overlapOk
         })
 
         const sortedPlagiarismResults = [...filteredPlagiarismResults].sort((x, y) => {
-            const xScore = Math.max(x.similarity_token ?? 0, x.similarity_ast ?? 0)
-            const yScore = Math.max(y.similarity_token ?? 0, y.similarity_ast ?? 0)
+            const xScore = score(x)
+            const yScore = score(y)
 
             if (yScore !== xScore) return yScore - xScore
-            if ((y.similarity_ast ?? 0) !== (x.similarity_ast ?? 0)) return (y.similarity_ast ?? 0) - (x.similarity_ast ?? 0)
+            if ((y.similarity_ast ?? 0) !== (x.similarity_ast ?? 0))
+                return (y.similarity_ast ?? 0) - (x.similarity_ast ?? 0)
             return (y.similarity_token ?? 0) - (x.similarity_token ?? 0)
         })
 
@@ -532,7 +536,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             const clamped = Math.max(1, Math.min(p, totalPages))
             this.setState({ plagiarismPage: clamped })
         }
-        // End Of Code //
+        // End of Changes
 
         function parseOutputs(raw: string): { expected: string; actual: string; hadDiff: boolean } {
             if (raw.includes('~~~diff~~~')) {
@@ -832,11 +836,11 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                 const renderStudentName = () => (
                                                     <td className="student-name-cell">
                                                         {row.Fname + ' ' + row.Lname}{' '}
-                                                        
+
                                                         {row.attendedOfficeHours && (
-                                                            <span 
-                                                                className="office-hours-indicator" 
-                                                                data-tooltip="Attended Office Hours for this project" 
+                                                            <span
+                                                                className="office-hours-indicator"
+                                                                data-tooltip="Attended Office Hours for this project"
                                                             >
                                                                 <FaHandPaper aria-hidden="true" />
                                                             </span>
