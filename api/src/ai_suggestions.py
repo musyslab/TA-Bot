@@ -24,79 +24,66 @@ ERROR_DEFS = [
         "id": "MISSPELL",
         "label": "Spelling or word substitution error",
         "description": "A word or short phrase is wrong compared to expected output (including valid English words used incorrectly, missing/extra letters, or wrong small words) when the rest of the line is otherwise correct.",
-        "points": 10,
     },
     {
         "id": "FORMAT",
         "label": "Formatting mismatch",
         "description": "Correct content but incorrect formatting (spacing/newlines/case/spelling/precision).",
-        "points": 5,
     },
     {
         "id": "CONTENT",
         "label": "Missing or extra required content",
         "description": "Required value/line is missing, or additional unexpected value/line is produced.",
-        "points": 20,
     },
     {
         "id": "ORDER",
         "label": "Order mismatch",
         "description": "Reads inputs or prints outputs in the wrong order relative to the required sequence.",
-        "points": 15,
     },
     {
         "id": "INIT_STATE",
         "label": "Incorrect initialization",
         "description": "Uses uninitialized values or starts with the wrong initial state.",
-        "points": 20,
     },
     {
         "id": "STATE_MISUSE",
         "label": "Incorrect variable or state use",
         "description": "Wrong variable used, wrong type behavior (truncation), overwritten state, or flag not managed correctly.",
-        "points": 15,
     },
     {
         "id": "COMPUTE",
         "label": "Incorrect computation",
         "description": "Wrong formula, precedence, numeric operation, or derived value.",
-        "points": 20,
     },
     {
         "id": "CONDITION",
         "label": "Incorrect condition logic",
         "description": "Incorrect comparison, boundary, compound logic, or missing edge case handling.",
-        "points": 15,
     },
     {
         "id": "BRANCHING",
         "label": "Incorrect branching structure",
         "description": "Wrong if/elif/else structure (misbound else), missing default case, or missing break in selection-like logic.",
-        "points": 15,
     },
     {
         "id": "LOOP",
         "label": "Incorrect loop logic",
         "description": "Wrong bounds/termination, update/control error, off-by-one, wrong nesting, or accumulation error.",
-        "points": 20,
     },
     {
         "id": "INDEXING",
         "label": "Incorrect indexing or collection setup",
         "description": "Out-of-bounds, wrong base/range, or incorrect array/string/list setup (size or contents).",
-        "points": 20,
     },
     {
         "id": "FUNCTIONS",
         "label": "Incorrect function behavior or use",
         "description": "Wrong return behavior (missing/ignored/wrong type) or incorrect function use (scope/order/unnecessary re-calls).",
-        "points": 15,
     },
     {
         "id": "COMPILE",
         "label": "Program did not compile",
         "description": "Code fails to compile or run due to syntax errors, missing imports/includes, or build/runtime errors that prevent execution.",
-        "points": 40,
     },   
 ]
 
@@ -114,7 +101,7 @@ def _build_allowed_list_text() -> str:
     # Compact and stable formatting helps the model stay constrained.
     lines: List[str] = []
     for e in ERROR_DEFS:
-        lines.append(f'{e["id"]}: {e["label"]} [{e["points"]}] - {e["description"]}')
+        lines.append(f'{e["id"]}: {e["label"]} - {e["description"]}')
     return "\n".join(lines)
 
 
@@ -125,17 +112,17 @@ def build_prompt(selected_code: str, diff_long: str) -> str:
 
     return f"""You are helping a human TA label likely grading mistakes.
 
-Return ONLY a JSON array of 3 to 4 strings, each string must be one valid errorId from the Allowed list.
+Return ONLY a JSON array of 3 strings, each string must be one valid errorId from the Allowed list.
 No extra keys, no explanations, no markdown, no surrounding text.
 
-Choose the 3–4 most likely errorIds based on:
+Choose the 3 most likely errorIds based on:
 1) Selected source lines
 2) Output diffs from failing tests (unified diff where '-' is student output and '+' is expected output)
 
 Prefer MISSPELL when the difference is a small typo (few characters or a tiny word change like 'of' vs 'on').
 Prefer FORMAT when the difference is mostly spacing, newlines, capitalization, or punctuation.
 
-Allowed errorIds (id: label [points] - description):
+Allowed errorIds (id: label - description):
 {allowed}
 
 Selected source lines:
@@ -190,9 +177,9 @@ def sanitize_suggestions(raw_ids: List[str]) -> List[str]:
         if rid in ALLOWED_IDS and rid not in seen:
             clean.append(rid)
             seen.add(rid)
-        if len(clean) >= 4:
+        if len(clean) >= 3:
             break
-    return clean
+    return clean[:3]
 
 
 def heuristic_fallback_from_diff(diff_long: str) -> List[str]:
@@ -220,10 +207,10 @@ def heuristic_fallback_from_diff(diff_long: str) -> List[str]:
     for cand in ["ORDER", "COMPUTE", "CONDITION", "LOOP", "INDEXING", "BRANCHING", "STATE_MISUSE", "INIT_STATE", "FUNCTIONS"]:
         if cand not in picks:
             picks.append(cand)
-        if len(picks) >= 4:
+        if len(picks) >= 3:
             break
 
-    return picks[:4]
+    return picks[:3]
 
 
 def call_llm(prompt: str, temperature: float, max_tokens: int = 120) -> str:
@@ -343,7 +330,7 @@ def grading_suggestions(
         except Exception:
             pass
 
-    # 3) Final fallback (guarantee 3–4)
+    # 3) Final fallback (guarantee 3)
     if len(ids) < 3:
         ids = heuristic_fallback_from_diff(diff_long)
 

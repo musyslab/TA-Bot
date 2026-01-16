@@ -17,21 +17,19 @@ type ErrorOption = {
     points: number
 }
 
-type SuggestedPick = {
-    id: string
-    errorId: string
-}
-
 type ObservedError = {
     startLine: number
     endLine: number
     errorId: string
+    count: number
 }
 
 type LineRange = {
     start: number
     end: number
 }
+
+type ScoringMode = 'perInstance' | 'flatPerError'
 
 export function AdminGrading() {
     const { id, class_id, project_id } = useParams<{ id: string; class_id: string; project_id: string }>()
@@ -47,7 +45,12 @@ export function AdminGrading() {
     const [observedErrors, setObservedErrors] = useState<ObservedError[]>([])
     const hasErrors = observedErrors.length > 0
 
-    const ERROR_DEFS = useMemo<ErrorOption[]>(
+    // Scoring mode:
+    // - perInstance: points deducted per instance (count matters for grading)
+    // - flatPerError: points deducted once if error exists on a selected range (count does not affect grading)
+    const [scoringMode, setScoringMode] = useState<ScoringMode>('perInstance')
+
+    const BASE_ERROR_DEFS = useMemo<ErrorOption[]>(
         () => [
             {
                 id: 'MISSPELL',
@@ -134,11 +137,37 @@ export function AdminGrading() {
         [],
     )
 
+    // Points are now editable (global per errorId for this grading session/page).
+    const [errorPoints, setErrorPoints] = useState<Record<string, number>>(() => {
+        const m: Record<string, number> = {}
+        for (const e of BASE_ERROR_DEFS) m[e.id] = e.points
+        return m
+    })
+
+    const ERROR_DEFS = useMemo<ErrorOption[]>(
+        () =>
+            BASE_ERROR_DEFS.map((e) => ({
+                ...e,
+                points: Number.isFinite(errorPoints[e.id]) ? Math.max(0, errorPoints[e.id]) : e.points,
+            })),
+        [BASE_ERROR_DEFS, errorPoints],
+    )
+
     const ERROR_MAP = useMemo<Record<string, ErrorOption>>(() => {
         const map: Record<string, ErrorOption> = {}
         for (const err of ERROR_DEFS) map[err.id] = err
         return map
     }, [ERROR_DEFS])
+
+    const bumpErrorPoints = (errorId: string, delta: number) => {
+        if (!delta) return
+        setErrorPoints((prev) => {
+            const cur = Number.isFinite(prev[errorId]) ? prev[errorId] : 0
+            const next = Math.max(0, cur + delta)
+            return { ...prev, [errorId]: next }
+        })
+        setSaveStatus('idle')
+    }
 
     // AI suggestions (dynamic, based on selected lines + failing diffs)
     const [aiSuggestionIds, setAiSuggestionIds] = useState<string[]>([])
@@ -147,12 +176,59 @@ export function AdminGrading() {
     const lastAiKeyRef = useRef<string>('')
     const aiAbortRef = useRef<AbortController | null>(null)
 
+    // References for code lines
+    const codeContainerRef = useRef<HTMLDivElement | null>(null)
+    const lineRefs = useRef<Record<number, HTMLLIElement | null>>({})
+
+    const errorCountByKey = useMemo(() => {
+        const m: Record<string, number> = {}
+        for (const e of observedErrors) {
+            m[`${e.startLine}-${e.endLine}-${e.errorId}`] = e.count
+        }
+        return m
+    }, [observedErrors])
+
+    const getErrorCount = (start: number, end: number, errorId: string) => {
+        return errorCountByKey[`${start}-${end}-${errorId}`] ?? 0
+    }
+
+    // Adjust COUNT (instances) via separate + / - buttons
+    const bumpErrorCount = (start: number, end: number, errorId: string, delta: number) => {
+        if (delta === 0) return
+
+        setObservedErrors((prev) => {
+            const idx = prev.findIndex((e) => e.startLine === start && e.endLine === end && e.errorId === errorId)
+            if (idx === -1) {
+                if (delta < 0) return prev
+                return [...prev, { startLine: start, endLine: end, errorId: errorId, count: delta }]
+            }
+
+            const next = [...prev]
+            const cur = next[idx]
+            const nextCount = (cur.count ?? 1) + delta
+
+            if (nextCount <= 0) {
+                next.splice(idx, 1)
+            } else {
+                next[idx] = { ...cur, count: nextCount }
+            }
+            return next
+        })
+
+        setSaveStatus('idle')
+    }
+
+    const scrollToLine = (lineNo: number) => {
+        const el = lineRefs.current[lineNo]
+        if (!el) return
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+
     const getSelectedCodeFromDom = (range: LineRange): string => {
         const lines: string[] = []
         for (let ln = range.start; ln <= range.end; ln++) {
             const el = lineRefs.current[ln]
             if (!el) continue
-            // Try to strip leading line number if it appears in textContent.
             const raw = (el.textContent ?? '').replace(/\u00A0/g, ' ').trimEnd()
             const stripped = raw.replace(/^\s*\d+\s+/, '')
             lines.push(stripped)
@@ -173,7 +249,6 @@ export function AdminGrading() {
             return
         }
 
-        // Cancel any in-flight request to avoid race conditions while selecting.
         if (aiAbortRef.current) aiAbortRef.current.abort()
         const ctrl = new AbortController()
         aiAbortRef.current = ctrl
@@ -197,14 +272,13 @@ export function AdminGrading() {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
                     },
                     signal: ctrl.signal,
-                }
+                },
             )
 
             const ids = Array.isArray(res.data?.suggestions) ? res.data.suggestions : []
             setAiSuggestionIds(ids)
             setAiSuggestStatus('idle')
         } catch (e: any) {
-            // Ignore abort errors
             if (e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') return
             setAiSuggestStatus('error')
             setAiSuggestError('AI suggestion request failed.')
@@ -212,10 +286,24 @@ export function AdminGrading() {
         }
     }
 
+    const computeDeduction = (errorId: string, count: number) => {
+        const pts = ERROR_MAP[errorId]?.points ?? 0
+        if (scoringMode === 'flatPerError') return pts
+        return pts * Math.max(1, count)
+    }
+
     const totalPoints = useMemo(() => {
-        return observedErrors
-            .reduce((sum, err) => sum + (ERROR_MAP[err.errorId]?.points ?? 0), 0)
-    }, [observedErrors, ERROR_MAP])
+        if (scoringMode === 'flatPerError') {
+            const uniq = new Set<string>()
+            for (const e of observedErrors) uniq.add(e.errorId)
+            let sum = 0
+            for (const id of uniq) sum += ERROR_MAP[id]?.points ?? 0
+            return sum
+        }
+
+        return observedErrors.reduce((sum, err) => sum + computeDeduction(err.errorId, err.count ?? 1), 0)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [observedErrors, ERROR_MAP, scoringMode])
 
     const grade = Math.max(0, 100 - totalPoints)
 
@@ -237,7 +325,6 @@ export function AdminGrading() {
         return start <= selectedRange.end && end >= selectedRange.start
     }
 
-    // Handles code line selection
     const handleMouseDown = (line: number) => {
         setInitialLine(line)
         selectLines(line, line)
@@ -248,7 +335,7 @@ export function AdminGrading() {
         if (initialLine === null) return
         setSelectedRange({
             start: Math.min(initialLine, line),
-            end: Math.max(initialLine, line)
+            end: Math.max(initialLine, line),
         })
     }
 
@@ -256,8 +343,6 @@ export function AdminGrading() {
         setInitialLine(null)
     }
 
-    // Only request AI suggestions once the selection is finalized (initialLine becomes null),
-    // and also when selection is set from elsewhere (ex: Grading Summary and Save click).
     useEffect(() => {
         if (initialLine !== null) return
         if (selectedRange === null) {
@@ -270,16 +355,6 @@ export function AdminGrading() {
         requestAiSuggestions(selectedRange)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedRange, initialLine])
-
-    // References for code lines
-    const codeContainerRef = useRef<HTMLDivElement | null>(null)
-    const lineRefs = useRef<Record<number, HTMLLIElement | null>>({})
-
-    const scrollToLine = (lineNo: number) => {
-        const el = lineRefs.current[lineNo]
-        if (!el) return
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
 
     // Ctrl+F style find (commits on Enter)
     const [findInput, setFindInput] = useState<string>('')
@@ -349,12 +424,12 @@ export function AdminGrading() {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
                     },
-                }
+                },
             )
             .then((res) => {
                 const data = res.data
                 const entry = Object.entries(data).find(
-                    ([_, value]) => parseInt((value as Array<string>)[7], 10) === submissionId
+                    ([_, value]) => parseInt((value as Array<string>)[7], 10) === submissionId,
                 )
                 if (entry) {
                     const studentData = entry[1] as Array<string>
@@ -375,17 +450,35 @@ export function AdminGrading() {
             .then((response) => {
                 const { errors } = response.data
 
-                for (const item of errors as ObservedError[]) {
+                // Supports either:
+                // - legacy: [{startLine,endLine,errorId}, ...] (duplicates imply multiple counts)
+                // - counted: [{startLine,endLine,errorId,count}, ...]
+                for (const item of errors as Array<any>) {
                     const start = Number(item.startLine)
                     const end = Number(item.endLine)
-                    addError(start, end, item.errorId)
+                    const errorId = String(item.errorId)
+                    const count = Number.isFinite(Number(item.count)) ? Math.max(1, Number(item.count)) : 1
+                    bumpErrorCount(start, end, errorId, count)
                 }
             })
             .catch((err) => console.error('Could not load saved grading:', err))
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [submissionId])
 
     // Handles saving grading errors
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+    const serializeErrorsForSave = (errs: ObservedError[]) => {
+        // Keep backend compatibility by flattening counts into repeated entries.
+        const flat: Array<{ startLine: number; endLine: number; errorId: string }> = []
+        for (const e of errs) {
+            const c = Math.max(1, Number(e.count ?? 1))
+            for (let i = 0; i < c; i++) {
+                flat.push({ startLine: e.startLine, endLine: e.endLine, errorId: e.errorId })
+            }
+        }
+        return flat
+    }
 
     const handleSave = () => {
         setSaveStatus('saving')
@@ -396,13 +489,13 @@ export function AdminGrading() {
                 {
                     submissionId: submissionId,
                     grade: grade,
-                    errors: observedErrors,
+                    errors: serializeErrorsForSave(observedErrors),
                 },
                 {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
                     },
-                }
+                },
             )
             .then((response) => {
                 setSaveStatus('saved')
@@ -423,60 +516,34 @@ export function AdminGrading() {
 
                 table[key][2].push(err)
                 return table
-            }, {} as Record<string, [number, number, ObservedError[]]>)
+            }, {} as Record<string, [number, number, ObservedError[]]>),
         ).sort((a, b) => {
             const [aStart, aEnd] = a
             const [bStart, bEnd] = b
             if (aStart !== bStart) return aStart - bStart
-            return (aEnd - aStart) - (bEnd - bStart)
+            return aEnd - bEnd
         })
     }, [observedErrors])
 
-    const addError = (start: number, end: number, errorId: string) => {
-        setObservedErrors(prev => {
-            if (prev.some((err) => err.errorId === errorId &&
-                err.startLine === start &&
-                err.endLine === end))
-                return prev
-            return [...prev,
-            {
-                errorId: errorId,
-                startLine: start,
-                endLine: end
+    const selectedRangeErrors = selectedRange !== null ? observedErrors.filter((err) => isRangeSelected(err.startLine, err.endLine)) : []
+
+    const selectedRangeCountsByErrorId = useMemo(() => {
+        const m: Record<string, number> = {}
+        if (!selectedRange) return m
+        for (const e of observedErrors) {
+            if (e.startLine === selectedRange.start && e.endLine === selectedRange.end) {
+                m[e.errorId] = e.count
             }
-            ]
-        })
-        setSaveStatus('idle')
-    }
-
-    const removeError = (start: number, end: number, errorId: string) => {
-        setObservedErrors(prev =>
-            prev.filter(err => !(
-                err.errorId === errorId &&
-                err.startLine === start &&
-                err.endLine === end
-            ))
-        )
-        setSaveStatus('idle')
-    }
-
-    const selectedRangeErrors = selectedRange !== null ? observedErrors.filter(err =>
-        isRangeSelected(err.startLine, err.endLine)
-    ) : []
+        }
+        return m
+    }, [observedErrors, selectedRange])
 
     return (
         <div className="page-container" id="admin-output-diff">
             <Helmet>
                 <title>TA-Bot</title>
             </Helmet>
-            <MenuComponent
-                showUpload={false}
-                showAdminUpload={false}
-                showHelp={false}
-                showCreate={false}
-                showLast={false}
-                showReviewButton={false}
-            />
+            <MenuComponent showUpload={false} showAdminUpload={false} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} />
 
             <DirectoryBreadcrumbs
                 items={[
@@ -495,7 +562,6 @@ export function AdminGrading() {
                 diffViewRef={diffViewRef}
                 codeSectionTitle="Submitted Code (click lines to mark errors)"
                 onActiveTestcaseChange={(tc) => {
-                    // Only feed diffs to AI when the testcase is failing and has a long diff.
                     if (!tc || tc.passed) {
                         setActiveTestcaseName('')
                         setActiveTestcaseLongDiff('')
@@ -516,16 +582,10 @@ export function AdminGrading() {
                 codeContainerRef={codeContainerRef}
                 lineRefs={lineRefs}
                 getLineClassName={(lineNo) => {
-                    const errors = observedErrors.some(err => err.startLine <= lineNo && err.endLine >= lineNo)
+                    const errors = observedErrors.some((err) => err.startLine <= lineNo && err.endLine >= lineNo)
                     const isFindMatch = findMatchSet.has(lineNo)
                     const isFindActive = activeFindLine === lineNo
-                    return [
-                        errors ? 'has-error' : '',
-                        hoveredLine === lineNo ? 'is-hovered' : '',
-                        isRangeSelected(lineNo, lineNo) ? 'is-selected' : '',
-                        isFindMatch ? 'is-find-match' : '',
-                        isFindActive ? 'is-find-active' : '',
-                    ]
+                    return [errors ? 'has-error' : '', hoveredLine === lineNo ? 'is-hovered' : '', isRangeSelected(lineNo, lineNo) ? 'is-selected' : '', isFindMatch ? 'is-find-match' : '', isFindActive ? 'is-find-active' : '']
                         .filter(Boolean)
                         .join(' ')
                 }}
@@ -533,38 +593,38 @@ export function AdminGrading() {
                 onLineMouseEnter={(lineNo) => handleMouseEnter(lineNo)}
                 onLineMouseLeave={() => setHoveredLine(null)}
                 onLineMouseUp={() => handleMouseUp()}
-
-
                 belowCode={
                     <section className="all-observed-section" aria-label="Grading Summary and Save" ref={allObservedErrorsRef}>
                         <h2 className="section-title">Grading Summary and Save</h2>
                         <div className="all-observed-panel">
                             <div className="save-panel">
                                 <div className="grade-column">
-                                    Grade: {grade}
+                                    <div className="grade-stack">
+                                        <div className="grade-value">{grade}</div>
+                                        <div className="grade-mode">{scoringMode === 'perInstance' ? 'Per-instance scoring' : 'Flat per-error scoring'}</div>
+                                    </div>
                                 </div>
 
-                                <button className="save-grade">
-                                    Save as draft
-                                </button>
+                                <button className="save-grade">Save as draft</button>
 
-                                <button
-                                    className={`save-grade ${saveStatus}`}
-                                    onClick={handleSave}
-                                    disabled={saveStatus === 'saving'}
-                                >
+                                <button className={`save-grade ${saveStatus}`} onClick={handleSave} disabled={saveStatus === 'saving'}>
                                     {saveStatus === 'idle' && 'Save'}
                                     {saveStatus === 'saving' && 'Saving...'}
                                     {saveStatus === 'saved' && 'Saved!'}
                                     {saveStatus === 'error' && 'Error'}
                                 </button>
 
-                                {saveStatus === 'error' && (
-                                    <div className="muted small">Save failed. Try again.</div>
-                                )}
-                                {saveStatus === 'saved' && (
-                                    <div className="muted small">Saved to the database.</div>
-                                )}
+                                <div className="scoring-toggle" role="group" aria-label="Scoring mode toggle">
+                                    <button type="button" className={`toggle-btn ${scoringMode === 'perInstance' ? 'active' : ''}`} onClick={() => setScoringMode('perInstance')}>
+                                        Per instance
+                                    </button>
+                                    <button type="button" className={`toggle-btn ${scoringMode === 'flatPerError' ? 'active' : ''}`} onClick={() => setScoringMode('flatPerError')}>
+                                        Flat per error
+                                    </button>
+                                </div>
+
+                                {saveStatus === 'error' && <div className="muted small save-status">Save failed. Try again.</div>}
+                                {saveStatus === 'saved' && <div className="muted small save-status">Saved to the database.</div>}
                             </div>
 
                             {!hasErrors && <div className="muted">No errors added yet.</div>}
@@ -572,15 +632,25 @@ export function AdminGrading() {
                             {hasErrors && (
                                 <div className="all-errors">
                                     {tableRows.map(([start, end, errors]) => {
-                                        const totalPoints = errors.reduce((sum, e) => sum + (ERROR_MAP[e.errorId]?.points ?? 0), 0)
+                                        const totalPointsForRange =
+                                            scoringMode === 'flatPerError'
+                                                ? (() => {
+                                                    const uniq = new Set<string>()
+                                                    for (const e of errors) uniq.add(e.errorId)
+                                                    let sum = 0
+                                                    for (const id of uniq) sum += ERROR_MAP[id]?.points ?? 0
+                                                    return sum
+                                                })()
+                                                : errors.reduce((sum, e) => sum + computeDeduction(e.errorId, e.count ?? 1), 0)
+                                        const totalCountForRange = errors.reduce((sum, e) => sum + (e.count ?? 1), 0)
 
                                         return (
                                             <div
                                                 key={`${start}-${end}`}
                                                 className={`
-                                                                        all-errors-line
-                                                                        ${selectedRange?.start === start && selectedRange.end === end ? 'is-selected' : ''}
-                                                                    `}
+                                                    all-errors-line
+                                                    ${selectedRange?.start === start && selectedRange.end === end ? 'is-selected' : ''}
+                                                `}
                                             >
                                                 <button
                                                     type="button"
@@ -591,11 +661,9 @@ export function AdminGrading() {
                                                     }}
                                                     title="Select line(s)"
                                                 >
-                                                    <span className="all-errors-line-title">
-                                                        {start === end ? `Line ${start}` : `Lines ${start}-${end}`}
-                                                    </span>
+                                                    <span className="all-errors-line-title">{start === end ? `Line ${start}` : `Lines ${start}-${end}`}</span>
                                                     <span className="all-errors-line-meta">
-                                                        {errors.length} {errors.length === 1 ? 'error' : 'errors'}, -{totalPoints}
+                                                        {totalCountForRange} {totalCountForRange === 1 ? 'instance' : 'instances'}, -{totalPointsForRange}
                                                     </span>
                                                 </button>
 
@@ -603,19 +671,66 @@ export function AdminGrading() {
                                                     {errors.map((err, idx) => {
                                                         const meta = ERROR_MAP[err.errorId]
                                                         const label = meta?.label ?? err.errorId
-                                                        const pts = meta?.points ?? 0
+                                                        const desc = meta?.description ?? ''
+                                                        const count = Math.max(1, err.count ?? 1)
+                                                        const shownDeduction = computeDeduction(err.errorId, count)
 
                                                         return (
-                                                            <div key={`${start}-${end}-${err.errorId}-${idx}`} className="all-errors-item">
-                                                                <span className="all-errors-item-label">{label}</span>
-                                                                <span className="all-errors-item-points">-{pts}</span>
-                                                                <button
-                                                                    type="button"
-                                                                    className="all-errors-item-remove"
-                                                                    onClick={() => removeError(start, end, err.errorId)}
-                                                                >
-                                                                    Remove
-                                                                </button>
+                                                            <div key={`${start}-${end}-${err.errorId}-${idx}`} className="all-errors-item" title={desc}>
+                                                                <div className="all-errors-item-left">
+                                                                    <span className="all-errors-item-label">{label}</span>
+
+                                                                    <div className="instance-box" aria-label="Instances">
+                                                                        <span className={`count-badge ${count > 0 ? 'active' : ''}`}>x{count}</span>
+                                                                        <div className="count-controls" aria-label="Adjust count">
+                                                                            <button
+                                                                                type="button"
+                                                                                className="count-btn plus"
+                                                                                onClick={() => bumpErrorCount(start, end, err.errorId, 1)}
+                                                                                aria-label="Increase count"
+                                                                                title="Increase count"
+                                                                            >
+                                                                                +
+                                                                            </button>
+                                                                            {getErrorCount(start, end, err.errorId) > 0 && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    className="count-btn minus"
+                                                                                    onClick={() => bumpErrorCount(start, end, err.errorId, -1)}
+                                                                                    aria-label="Decrease count"
+                                                                                    title="Decrease count"
+                                                                                >
+                                                                                    −
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="points-box" aria-label="Point deduction">
+                                                                    <span className="deduction-value">-{shownDeduction}</span>
+                                                                    <div className="points-controls" aria-label="Adjust points">
+                                                                        <button
+                                                                            type="button"
+                                                                            className="points-btn plus"
+                                                                            onClick={() => bumpErrorPoints(err.errorId, 1)}
+                                                                            aria-label="Increase points for this error type"
+                                                                            title="Increase points"
+                                                                        >
+                                                                            +
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="points-btn minus"
+                                                                            onClick={() => bumpErrorPoints(err.errorId, -1)}
+                                                                            disabled={(ERROR_MAP[err.errorId]?.points ?? 0) <= 0}
+                                                                            aria-label="Decrease points for this error type"
+                                                                            title="Decrease points"
+                                                                        >
+                                                                            −
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         )
                                                     })}
@@ -628,16 +743,11 @@ export function AdminGrading() {
                         </div>
                     </section>
                 }
-
-
                 rightPanel={
                     <aside className="grading-panel" aria-label="Grading panel">
-
                         <div className="grading-panel-header">
                             <div className="grading-title">Grading Panel</div>
-                            <div className="grading-hint">
-                                {!selectedRange ? 'Select a line to start.' : 'Add errors to the selected line(s).'}
-                            </div>
+                            <div className="grading-hint">{!selectedRange ? 'Select a line to start.' : 'Add errors to the selected line(s).'}</div>
                         </div>
 
                         <div className="find-bar" role="search" aria-label="Find in code">
@@ -652,12 +762,10 @@ export function AdminGrading() {
                                     e.preventDefault()
 
                                     const nextQuery = findInput.trim()
-                                    // If query changed, run a fresh search and jump to first match.
                                     if (nextQuery !== findQuery) {
                                         performFind(findInput)
                                         return
                                     }
-                                    // If query is the same, behave like Ctrl+F Enter: jump to next (Shift+Enter: previous).
                                     stepFind(e.shiftKey ? -1 : 1)
                                 }}
                             />
@@ -667,22 +775,10 @@ export function AdminGrading() {
                             </div>
 
                             <div className="find-nav" aria-label="Find navigation">
-                                <button
-                                    type="button"
-                                    className="find-nav-btn"
-                                    disabled={findMatches.length === 0}
-                                    onClick={() => stepFind(-1)}
-                                    title="Previous match (Shift+Enter)"
-                                >
+                                <button type="button" className="find-nav-btn" disabled={findMatches.length === 0} onClick={() => stepFind(-1)} title="Previous match (Shift+Enter)">
                                     ‹
                                 </button>
-                                <button
-                                    type="button"
-                                    className="find-nav-btn"
-                                    disabled={findMatches.length === 0}
-                                    onClick={() => stepFind(1)}
-                                    title="Next match (Enter)"
-                                >
+                                <button type="button" className="find-nav-btn" disabled={findMatches.length === 0} onClick={() => stepFind(1)} title="Next match (Enter)">
                                     ›
                                 </button>
                             </div>
@@ -691,14 +787,10 @@ export function AdminGrading() {
                         <div className="navigation-section">
                             <div className="navigation-header">Jump To</div>
                             <ul className="navigation-list">
-                                <li className="navigation-item"
-                                    onClick={() => diffViewRef.current !== null ? scrollToSection(diffViewRef.current) : null}
-                                >
+                                <li className="navigation-item" onClick={() => (diffViewRef.current !== null ? scrollToSection(diffViewRef.current) : null)}>
                                     Test Cases
                                 </li>
-                                <li className="navigation-item"
-                                    onClick={() => allObservedErrorsRef.current !== null ? scrollToSection(allObservedErrorsRef.current) : null}
-                                >
+                                <li className="navigation-item" onClick={() => (allObservedErrorsRef.current !== null ? scrollToSection(allObservedErrorsRef.current) : null)}>
                                     Grading Summary and Save
                                 </li>
                             </ul>
@@ -711,12 +803,10 @@ export function AdminGrading() {
                                     type="button"
                                     className={`selected-line-pill ${selectedRange ? 'active' : 'inactive'}`}
                                     disabled={!selectedRange}
-                                    onClick={() => selectedRange !== null ? scrollToLine(selectedRange?.start) : null}
+                                    onClick={() => (selectedRange !== null ? scrollToLine(selectedRange.start) : null)}
                                     title="Click to jump to selected line"
                                 >
-                                    {selectedRange === null ? 'None' :
-                                        selectedRange.start === selectedRange.end ? `Line ${selectedRange.start}` :
-                                            `Lines ${selectedRange.start}-${selectedRange.end}`}
+                                    {selectedRange === null ? 'None' : selectedRange.start === selectedRange.end ? `Line ${selectedRange.start}` : `Lines ${selectedRange.start}-${selectedRange.end}`}
                                 </button>
                             </div>
                         </div>
@@ -724,9 +814,7 @@ export function AdminGrading() {
                         <div className="grading-section">
                             <div className="section-label">AI suggestions</div>
                             <div className="suggestions-grid">
-                                {aiSuggestStatus === 'loading' && (
-                                    <div className="muted small">Generating suggestions...</div>
-                                )}
+                                {aiSuggestStatus === 'loading' && <div className="muted small">Generating suggestions...</div>}
 
                                 {aiSuggestStatus === 'error' && (
                                     <div className="muted small">
@@ -737,7 +825,6 @@ export function AdminGrading() {
                                             disabled={selectedRange === null}
                                             onClick={() => {
                                                 if (!selectedRangeRef.current) return
-                                                // Allow retry even if same key
                                                 lastAiKeyRef.current = ''
                                                 requestAiSuggestions(selectedRangeRef.current)
                                             }}
@@ -747,65 +834,167 @@ export function AdminGrading() {
                                     </div>
                                 )}
 
-                                {aiSuggestStatus === 'idle' && selectedRange !== null && aiSuggestionIds.length === 0 && (
-                                    <div className="muted small">No suggestions yet for this selection.</div>
-                                )}
+                                {aiSuggestStatus === 'idle' && selectedRange !== null && aiSuggestionIds.length === 0 && <div className="muted small">No suggestions yet for this selection.</div>}
 
                                 {aiSuggestStatus !== 'loading' &&
                                     aiSuggestionIds.map((errorId) => {
                                         const meta = ERROR_MAP[errorId]
                                         const label = meta?.label ?? errorId
                                         const pts = meta?.points ?? 0
+                                        const desc = meta?.description ?? ''
+                                        const count = selectedRange === null ? 0 : selectedRangeCountsByErrorId[errorId] ?? 0
+                                        const shownDeduction = selectedRange === null ? 0 : computeDeduction(errorId, Math.max(1, count))
+
                                         return (
-                                            <button
-                                                key={`ai-${errorId}`}
-                                                type="button"
-                                                className="suggestion-btn"
-                                                disabled={selectedRange === null}
-                                                onClick={() => {
-                                                    if (selectedRange === null) return
-                                                    addError(selectedRange.start, selectedRange.end, errorId)
-                                                }}
-                                            >
+                                            <div key={`ai-${errorId}`} className="suggestion-card" title={desc}>
                                                 <div className="suggestion-top">
                                                     <span className="suggestion-title">{label}</span>
-                                                    <span className="suggestion-points">-{pts}</span>
                                                 </div>
-                                            </button>
+
+                                                <div className="suggestion-bottom">
+                                                    <div className="instance-box" aria-label="Instances">
+                                                        <span className={`count-badge ${count > 0 ? 'active' : ''}`}>x{count}</span>
+                                                        <div className="count-controls" aria-label="Adjust count">
+                                                            <button
+                                                                type="button"
+                                                                className="count-btn plus"
+                                                                disabled={selectedRange === null}
+                                                                onClick={() => {
+                                                                    if (selectedRange === null) return
+                                                                    bumpErrorCount(selectedRange.start, selectedRange.end, errorId, 1)
+                                                                }}
+                                                                aria-label="Increase count"
+                                                                title="Increase count"
+                                                            >
+                                                                +
+                                                            </button>
+                                                            {selectedRange !== null && count > 0 && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="count-btn minus"
+                                                                    onClick={() => bumpErrorCount(selectedRange.start, selectedRange.end, errorId, -1)}
+                                                                    aria-label="Decrease count"
+                                                                    title="Decrease count"
+                                                                >
+                                                                    −
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="points-box" aria-label="Point deduction">
+                                                        <span className="deduction-value">{selectedRange === null ? `-${pts}` : `-${shownDeduction}`}</span>
+                                                        <div className="points-controls" aria-label="Adjust points">
+                                                            <button
+                                                                type="button"
+                                                                className="points-btn plus"
+                                                                onClick={() => bumpErrorPoints(errorId, 1)}
+                                                                aria-label="Increase points for this error type"
+                                                                title="Increase points"
+                                                            >
+                                                                +
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="points-btn minus"
+                                                                onClick={() => bumpErrorPoints(errorId, -1)}
+                                                                disabled={pts <= 0}
+                                                                aria-label="Decrease points for this error type"
+                                                                title="Decrease points"
+                                                            >
+                                                                −
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         )
                                     })}
                             </div>
                         </div>
 
                         <div className="grading-section">
-                            <details className="all-errors-picker" defaultChecked={false}>
+                            <details className="all-errors-picker" defaultChecked={false as any}>
                                 <summary className="all-errors-picker-header">
                                     <span className="all-errors-picker-title">All errors</span>
                                     <span className="all-errors-picker-count">{ERROR_DEFS.length}</span>
                                 </summary>
                                 <div className="all-errors-picker-body">
                                     <div className="error-options-list">
-                                        {ERROR_DEFS.map((err) => (
-                                            <button
-                                                key={err.id}
-                                                type="button"
-                                                className="error-option-btn"
-                                                disabled={selectedRange === null}
-                                                title={err.description}
-                                                onClick={() => {
-                                                    if (selectedRange === null) return
-                                                    addError(selectedRange.start, selectedRange.end, err.id)
-                                                }}
-                                            >
-                                                <span className="error-option-label">{err.label}</span>
-                                                <span className="error-option-points">-{err.points}</span>
-                                            </button>
-                                        ))}
+                                        {ERROR_DEFS.map((err) => {
+                                            const count = selectedRange ? selectedRangeCountsByErrorId[err.id] ?? 0 : 0
+                                            const shownDeduction = selectedRange === null ? err.points : computeDeduction(err.id, Math.max(1, count))
+
+                                            return (
+                                                <div key={err.id} className="suggestion-card" title={err.description}>
+                                                    <div className="suggestion-top">
+                                                        <span className="suggestion-title">{err.label}</span>
+                                                    </div>
+
+                                                    <div className="suggestion-bottom">
+                                                        <div className="instance-box" aria-label="Instances">
+                                                            <span className={`count-badge ${count > 0 ? 'active' : ''}`}>x{count}</span>
+                                                            <div className="count-controls" aria-label="Adjust count">
+                                                                <button
+                                                                    type="button"
+                                                                    className="count-btn plus"
+                                                                    disabled={selectedRange === null}
+                                                                    onClick={() => {
+                                                                        if (selectedRange === null) return
+                                                                        bumpErrorCount(selectedRange.start, selectedRange.end, err.id, 1)
+                                                                    }}
+                                                                    aria-label="Increase count"
+                                                                    title="Increase count"
+                                                                >
+                                                                    +
+                                                                </button>
+                                                                {selectedRange !== null && count > 0 && (
+                                                                    <button
+                                                                        type="button"
+                                                                        className="count-btn minus"
+                                                                        onClick={() => bumpErrorCount(selectedRange.start, selectedRange.end, err.id, -1)}
+                                                                        aria-label="Decrease count"
+                                                                        title="Decrease count"
+                                                                    >
+                                                                        −
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="points-box" aria-label="Point deduction">
+                                                            <span className="deduction-value">-{shownDeduction}</span>
+                                                            <div className="points-controls" aria-label="Adjust points">
+                                                                <button
+                                                                    type="button"
+                                                                    className="points-btn plus"
+                                                                    onClick={() => bumpErrorPoints(err.id, 1)}
+                                                                    aria-label="Increase points for this error type"
+                                                                    title="Increase points"
+                                                                >
+                                                                    +
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="points-btn minus"
+                                                                    onClick={() => bumpErrorPoints(err.id, -1)}
+                                                                    disabled={err.points <= 0}
+                                                                    aria-label="Decrease points for this error type"
+                                                                    title="Decrease points"
+                                                                >
+                                                                    −
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
                                     </div>
                                 </div>
                             </details>
 
-                            {selectedRange === null && <div className="muted small">Select a line to enable adding.</div>}
+                            {selectedRange === null && <div className="muted small">Select a line to enable adjusting.</div>}
                         </div>
 
                         <div className="grading-section">
@@ -813,32 +1002,78 @@ export function AdminGrading() {
 
                             {selectedRange === null && <div className="muted">No line selected.</div>}
 
-                            {selectedRange !== null && selectedRangeErrors.length === 0 && (
-                                <div className="muted">No errors on this line.</div>
-                            )}
+                            {selectedRange !== null && selectedRangeErrors.length === 0 && <div className="muted">No errors on this line.</div>}
 
                             {selectedRange !== null && selectedRangeErrors.length > 0 && (
                                 <div className="line-error-list">
                                     {selectedRangeErrors.map((err, idx) => {
                                         const meta = ERROR_MAP[err.errorId]
                                         const label = meta?.label ?? err.errorId
-                                        const pts = meta?.points ?? 0
-                                        const catLabel = meta?.categoryLabel ?? ''
+                                        const desc = meta?.description ?? ''
+                                        const count = Math.max(1, err.count ?? 1)
+                                        const shownDeduction = computeDeduction(err.errorId, count)
+                                        const ptsNow = meta?.points ?? 0
+                                        const rangeLabel = err.startLine === err.endLine ? `Line ${err.startLine}` : `Lines ${err.startLine}-${err.endLine}`
+
                                         return (
-                                            <div key={`${selectedRange.start}-${err.errorId}-${idx}`} className="line-error-item">
-                                                <div className="line-error-main">
-                                                    <span className="line-error-lines">
-                                                        {err.startLine === err.endLine ? `${err.startLine}` : `${err.startLine}-${err.endLine}`}
-                                                    </span>
-                                                    <span className="line-error-points">-{pts}</span>
+                                            <div key={`${err.startLine}-${err.endLine}-${err.errorId}-${idx}`} className="suggestion-card" title={desc}>
+                                                <div className="suggestion-top">
+                                                    <span className="suggestion-title">{label}</span>
+                                                    <span className="muted small">{rangeLabel}</span>
                                                 </div>
-                                                <button
-                                                    type="button"
-                                                    className="line-error-remove"
-                                                    onClick={() => removeError(err.startLine, err.endLine, err.errorId)}
-                                                >
-                                                    Remove
-                                                </button>
+
+                                                <div className="suggestion-bottom">
+                                                    <div className="instance-box" aria-label="Instances">
+                                                        <span className={`count-badge ${count > 0 ? 'active' : ''}`}>x{count}</span>
+                                                        <div className="count-controls" aria-label="Adjust count">
+                                                            <button
+                                                                type="button"
+                                                                className="count-btn plus"
+                                                                onClick={() => bumpErrorCount(err.startLine, err.endLine, err.errorId, 1)}
+                                                                aria-label="Increase count"
+                                                                title="Increase count"
+                                                            >
+                                                                +
+                                                            </button>
+                                                            {getErrorCount(err.startLine, err.endLine, err.errorId) > 0 && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="count-btn minus"
+                                                                    onClick={() => bumpErrorCount(err.startLine, err.endLine, err.errorId, -1)}
+                                                                    aria-label="Decrease count"
+                                                                    title="Decrease count"
+                                                                >
+                                                                    −
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="points-box" aria-label="Point deduction">
+                                                        <span className="deduction-value">-{shownDeduction}</span>
+                                                        <div className="points-controls" aria-label="Adjust points">
+                                                            <button
+                                                                type="button"
+                                                                className="points-btn plus"
+                                                                onClick={() => bumpErrorPoints(err.errorId, 1)}
+                                                                aria-label="Increase points for this error type"
+                                                                title="Increase points"
+                                                            >
+                                                                +
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="points-btn minus"
+                                                                onClick={() => bumpErrorPoints(err.errorId, -1)}
+                                                                disabled={ptsNow <= 0}
+                                                                aria-label="Decrease points for this error type"
+                                                                title="Decrease points"
+                                                            >
+                                                                −
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         )
                                     })}
