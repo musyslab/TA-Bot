@@ -822,7 +822,6 @@ class SubmissionRepository():
     def get_project_grade_info(self, project_id: int):
         # Get all students grade info from a project (ID, grade, submission ID, error json)
         grade_rows = StudentGrades.query.filter(StudentGrades.Pid == project_id).all()
-
         grades_by_student = {}
         for g in grade_rows:
             raw_pts = getattr(g, "ErrorPointsJson", None) or "{}"
@@ -838,10 +837,16 @@ class SubmissionRepository():
                 'error_points': pts
             }
 
+        # Get all student school id numbers
+        database_ids = list(grades_by_student.keys())
+        student_numbers = Users.query.filter(Users.Id.in_(database_ids)).all()
+        numbers_by_student = defaultdict(str)
+        for num in student_numbers:
+            numbers_by_student[num.Id] = num.StudentNumber
+
         # Get all errors by submission
         submission_ids = [v['submission_id'] for v in grades_by_student.values()]
         errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId.in_(submission_ids)).all()
-
         errors_by_submission = defaultdict(list)
         for e in errors:
             errors_by_submission[e.SubmissionId].append(e)
@@ -857,7 +862,7 @@ class SubmissionRepository():
             } for e in error_list]
 
             rows.append({
-                'id': sid,
+                'number': numbers_by_student[sid],
                 'grade': data['grade'],
                 'points': data['error_points'],
                 'scoring_mode': data['scoring_mode'],

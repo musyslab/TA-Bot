@@ -25,8 +25,6 @@ from dependency_injector.wiring import inject, Provide
 from container import Container
 from urllib.parse import unquote
 from openpyxl import Workbook
-from openpyxl.styles import Alignment
-from openpyxl.utils import get_column_letter
 from src.ai_suggestions import ERROR_DEFS
 
 ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
@@ -633,7 +631,7 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
     ws = wb.active
     wb.title = 'Grades'
 
-    headers = ['Student ID', 'Grade', 'Description']
+    headers = ['OrgDefinedId', f'{project_name} Points Grade', f'{project_name} Text Grade', 'End-of-Line Indicator']
     ws.append(headers)
 
     # Create excel rows
@@ -650,14 +648,17 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
             end = error['endLine']
             errorId = error['errorId']
             count = error['count']
+            error_def = error_defs_map.get(errorId)
             line_str = ''
 
             if scoring_mode == "perInstance":
                 pts = int(pts_dict[errorId]) * count
                 if count > 1:
-                    line_str += f'{count} x'
+                    line_str += f'{count}x '
             else:
                 pts = int(pts_dict[errorId])
+
+            line_str += f"[{error_def['label']}] "
 
             if start == end:
                 line_str += f'Line {start}'
@@ -667,7 +668,6 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
             line_str += f' (-{pts} pts):'
             desc_lines.append(line_str)
 
-            error_def = error_defs_map.get(errorId)
             if error_def:
                 desc_lines.append(f"{error_def['description']}")
                 desc_lines.append('')
@@ -676,18 +676,7 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
             desc_lines.append('Great Job!')
 
         description = "\n".join(desc_lines)
-        ws.append([row.get('id'), row.get('grade'), description])
-
-
-    # Wrap text for Description column
-    for row in ws.iter_rows(min_row=2, max_col=3, max_row=ws.max_row):
-        cell = row[2]
-        cell.alignment = Alignment(wrap_text=True)
-        # Approximate row height
-        lines = str(cell.value).count("\n") + 1
-        ws.row_dimensions[cell.row].height = lines * 20
-
-    ws.column_dimensions[get_column_letter(3)].width = 120
+        ws.append([row.get('number'), row.get('grade'), description, '#'])
 
     buffer = BytesIO()
     wb.save(buffer)
