@@ -448,18 +448,23 @@ export function AdminGrading() {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then((response) => {
-                const { errors } = response.data
+                const { errors, scoringMode: savedMode, errorPoints: savedPoints } = response.data
 
-                // Supports either:
-                // - legacy: [{startLine,endLine,errorId}, ...] (duplicates imply multiple counts)
-                // - counted: [{startLine,endLine,errorId,count}, ...]
-                for (const item of errors as Array<any>) {
-                    const start = Number(item.startLine)
-                    const end = Number(item.endLine)
-                    const errorId = String(item.errorId)
-                    const count = Number.isFinite(Number(item.count)) ? Math.max(1, Number(item.count)) : 1
-                    bumpErrorCount(start, end, errorId, count)
+                if (savedMode === 'perInstance' || savedMode === 'flatPerError') {
+                    setScoringMode(savedMode)
                 }
+
+                if (savedPoints && typeof savedPoints === 'object') {
+                    setErrorPoints((prev) => ({ ...prev, ...savedPoints }))
+                }
+
+                const nextErrors: ObservedError[] = (Array.isArray(errors) ? errors : []).map((item: any) => ({
+                    startLine: Number(item.startLine),
+                    endLine: Number(item.endLine),
+                    errorId: String(item.errorId),
+                    count: Math.max(1, Number(item.count ?? 1)),
+                }))
+                setObservedErrors(nextErrors)
             })
             .catch((err) => console.error('Could not load saved grading:', err))
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -469,15 +474,13 @@ export function AdminGrading() {
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
     const serializeErrorsForSave = (errs: ObservedError[]) => {
-        // Keep backend compatibility by flattening counts into repeated entries.
-        const flat: Array<{ startLine: number; endLine: number; errorId: string }> = []
-        for (const e of errs) {
-            const c = Math.max(1, Number(e.count ?? 1))
-            for (let i = 0; i < c; i++) {
-                flat.push({ startLine: e.startLine, endLine: e.endLine, errorId: e.errorId })
-            }
-        }
-        return flat
+        // New backend supports counts directly.
+        return errs.map((e) => ({
+            startLine: e.startLine,
+            endLine: e.endLine,
+            errorId: e.errorId,
+            count: Math.max(1, Number(e.count ?? 1)),
+        }))
     }
 
     const handleSave = () => {
@@ -489,6 +492,8 @@ export function AdminGrading() {
                 {
                     submissionId: submissionId,
                     grade: grade,
+                    scoringMode: scoringMode,
+                    errorPoints: errorPoints,
                     errors: serializeErrorsForSave(observedErrors),
                 },
                 {

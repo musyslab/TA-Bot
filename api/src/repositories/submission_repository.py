@@ -1,4 +1,5 @@
 from collections import defaultdict
+import json
 import os
 from src.repositories.database import db
 from .models import StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users, SubmissionManualErrors
@@ -703,42 +704,58 @@ class SubmissionRepository():
             db.session.rollback()
             return 0
 
-    def save_manual_grading(self, submission_id, grade, errors):
+    def save_manual_grading(self, submission_id, grade, scoring_mode, error_points, errors):
         try:
-            # update grade in StudentGrades table
-            sub = Submissions.query.get(submission_id) 
-            
-            sid = sub.User #student ID
-            pid = sub.Project # project ID
+            sub = Submissions.query.get(submission_id)
+            if sub is None:
+                return False
 
-            grades = StudentGrades.query.filter(StudentGrades.Sid == sid).filter(StudentGrades.Pid == pid).first()
+            sid = sub.User
+            pid = sub.Project
+
+            # Persist grade + grading configuration so refresh recomputes the same result.
+            grades = (StudentGrades.query
+                .filter(StudentGrades.Sid == sid)
+                .filter(StudentGrades.Pid == pid)
+                .first())
+
+            mode = scoring_mode if scoring_mode in ("perInstance", "flatPerError") else "perInstance"
+            points_json = json.dumps(error_points or {}, sort_keys=True)
+
             if grades:
-                grades.Grade = grade
+                grades.Grade = int(grade) if grade is not None else grades.Grade
+                grades.SubmissionId = int(submission_id)
+                grades.ScoringMode = mode
+                grades.ErrorPointsJson = points_json
+                grades.UpdatedAt = datetime.utcnow()
             else:
-                #add new grade entry if none exists
                 new_grade = StudentGrades(
                     Sid=sid,
                     Pid=pid,
-                    Grade=grade
+                    Grade=int(grade) if grade is not None else 0,
+                    SubmissionId=int(submission_id),
+                    ScoringMode=mode,
+                    ErrorPointsJson=points_json,
+                    UpdatedAt=datetime.utcnow(),
                 )
                 db.session.add(new_grade)
-            
-            # delete existing errors
+
+            # Replace error rows for this submission (now with counts).
             SubmissionManualErrors.query.filter_by(SubmissionId=submission_id).delete()
 
-            # add new errors
-            for error in errors:
+            for error in (errors or []):
                 new_err = SubmissionManualErrors(
-                    SubmissionId=submission_id,
-                    StartLine=error['startLine'],
-                    EndLine=error['endLine'],
-                    ErrorId=error['errorId']
+                    SubmissionId=int(submission_id),
+                    StartLine=int(error.get('startLine')),
+                    EndLine=int(error.get('endLine')),
+                    ErrorId=str(error.get('errorId')),
+                    Count=max(1, int(error.get('count', 1))),
                 )
                 db.session.add(new_err)
 
             db.session.commit()
             return True
-        except Exception as e:
+        except Exception:
             db.session.rollback()
             return False
             
@@ -749,9 +766,46 @@ class SubmissionRepository():
         
         # convert to list of dicts
         return [
-            {'startLine': e.StartLine, 'endLine': e.EndLine, 'errorId': e.ErrorId}
+            {
+                'startLine': e.StartLine,
+                'endLine': e.EndLine,
+                'errorId': e.ErrorId,
+                'count': getattr(e, "Count", 1) or 1
+            }
             for e in errors
         ]
+
+    def get_manual_grade_config(self, submission_id: int):
+        """
+        Return persisted manual grading config for the submission's (Sid,Pid) row in StudentGrades.
+        """
+        sub = Submissions.query.get(int(submission_id))
+        if sub is None:
+            return {"grade": None, "scoringMode": "perInstance", "errorPoints": {}}
+
+        sid = sub.User
+        pid = sub.Project
+
+        row = (StudentGrades.query
+            .filter(StudentGrades.Sid == sid)
+            .filter(StudentGrades.Pid == pid)
+            .first())
+
+        if row is None:
+            return {"grade": None, "scoringMode": "perInstance", "errorPoints": {}}
+
+        # ScoringMode and ErrorPointsJson may not exist yet if DB migration wasn't applied.
+        mode = getattr(row, "ScoringMode", None)
+        if mode not in ("perInstance", "flatPerError"):
+            mode = "perInstance"
+
+        raw_pts = getattr(row, "ErrorPointsJson", None) or "{}"
+        try:
+            pts = json.loads(raw_pts) if isinstance(raw_pts, str) else (raw_pts or {})
+        except Exception:
+            pts = {}
+
+        return {"grade": getattr(row, "Grade", None), "scoringMode": mode, "errorPoints": pts}
     
     def get_oh_visits_by_projectId(self, project_id):
         """

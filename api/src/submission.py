@@ -585,9 +585,10 @@ def save_grading(submission_repo: SubmissionRepository = Provide[Container.submi
     input_json = request.get_json()
     submission_id = input_json.get('submissionId')
     grade = input_json.get('grade')
-    errors = input_json.get('errors') # Expecting list: [{start: 10, end: 12, errorId: "ERROR1"}]
-
-    success = submission_repo.save_manual_grading(submission_id, grade, errors)
+    scoring_mode = input_json.get('scoringMode')
+    error_points = input_json.get('errorPoints')
+    errors = input_json.get('errors')  # Expecting list: [{startLine,endLine,errorId,count}, ...]
+    success = submission_repo.save_manual_grading(submission_id, grade, scoring_mode, error_points, errors)
 
     # 3. Respond to the frontend
     if success:
@@ -603,12 +604,11 @@ def get_grading(submission_id, submission_repo: SubmissionRepository = Provide[C
     # get errors from db
     error_list = submission_repo.get_manual_errors(submission_id)
     
-    # get current grade
-    submission = submission_repo.get_submission_by_submission_id(submission_id)
-    #current_grade = submission.Points if submission else 0
-    current_grade = None
+    cfg = submission_repo.get_manual_grade_config(submission_id)
     return jsonify({
         'success': True,
         'errors': error_list,
-        'grade': current_grade
+        'grade': cfg.get('grade'),
+        'scoringMode': cfg.get('scoringMode'),
+        'errorPoints': cfg.get('errorPoints'),
     })
