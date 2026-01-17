@@ -122,6 +122,25 @@
             }
 
         }
+
+        .export-btn {
+            margin-left: 12px;
+            min-height: 36px;
+            padding: 0.45rem 0.75rem;
+            border-radius: 10px;
+            background: #3b82f6;
+            border-color: #3b82f6;
+            color: #ffffff;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+
+            &:hover {
+                background: #2563eb;
+                border-color: #2563eb;
+            }
+
+        }
     }
 
     .actions-bar {

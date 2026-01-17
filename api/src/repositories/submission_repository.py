@@ -818,3 +818,50 @@ class SubmissionRepository():
             student_ids.append(i.StudentId)
 
         return student_ids
+
+    def get_project_grade_info(self, project_id: int):
+        # Get all students grade info from a project (ID, grade, submission ID, error json)
+        grade_rows = StudentGrades.query.filter(StudentGrades.Pid == project_id).all()
+
+        grades_by_student = {}
+        for g in grade_rows:
+            raw_pts = getattr(g, "ErrorPointsJson", None) or "{}"
+            try:
+                pts = json.loads(raw_pts) if isinstance(raw_pts, str) else (raw_pts or {})
+            except Exception:
+                pts = {}
+
+            grades_by_student[g.Sid] = {
+                'grade': getattr(g, "Grade", None),
+                'submission_id': getattr(g, "SubmissionId", None),
+                'scoring_mode': getattr(g, "ScoringMode", None),
+                'error_points': pts
+            }
+
+        # Get all errors by submission
+        submission_ids = [v['submission_id'] for v in grades_by_student.values()]
+        errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId.in_(submission_ids)).all()
+
+        errors_by_submission = defaultdict(list)
+        for e in errors:
+            errors_by_submission[e.SubmissionId].append(e)
+
+        rows = []
+        for sid, data in grades_by_student.items():
+            error_list = errors_by_submission.get(data['submission_id'], [])
+            error_data = [{
+                'errorId': getattr(e, "ErrorId", None),
+                'startLine': getattr(e, "StartLine", None),
+                'endLine': getattr(e, "EndLine", None),
+                'count': getattr(e, "Count", None)
+            } for e in error_list]
+
+            rows.append({
+                'id': sid,
+                'grade': data['grade'],
+                'points': data['error_points'],
+                'scoring_mode': data['scoring_mode'],
+                'description': error_data
+            })
+
+        return rows

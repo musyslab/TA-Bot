@@ -7,7 +7,7 @@ import MenuComponent from '../components/MenuComponent'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import '../../styling/AdminStudentRoster.scss'
 
-import { FaClone, FaDownload, FaEye, FaHandPaper } from 'react-icons/fa'
+import { FaClone, FaFileExport, FaDownload, FaEye, FaHandPaper } from 'react-icons/fa'
 
 const AdminStudentRoster = () => {
     const { class_id, id } = useParams<{ class_id: string; id: string }>()
@@ -151,6 +151,33 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         this.submitGrades = this.submitGrades.bind(this)
         this.exportGrades = this.exportGrades.bind(this)
         this.downloadStudentCode = this.downloadStudentCode.bind(this)
+        this.downloadProjectGrades = this.downloadProjectGrades.bind(this)
+    }
+
+    async downloadProjectGrades(rows: Row[]) {
+        try {
+            const url = `${import.meta.env.VITE_API_URL}/submissions/exportprojectgrades?project_id=${this.props.project_id}`
+            const res = await axios.get<Blob>(url, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                responseType: 'blob',
+            })
+
+            const cd = String((res.headers as any)?.['content-disposition'] ?? '')
+            const match = /filename\*?=(?:UTF-8''|")?([^\";]+)\"?/i.exec(cd)
+            const fname = match
+                ? decodeURIComponent(match[1])
+                : `${res.headers['project-name']}-grades.xlsx`
+
+            const a = document.createElement('a')
+            a.href = URL.createObjectURL(res.data)
+            a.download = fname
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(a.href)
+        } catch (_e) {
+            window.alert('Failed to export to D2L. Please try again.')
+        }
     }
 
     async downloadStudentCode(row: Row) {
@@ -796,6 +823,20 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                     >
                                         <FaClone aria-hidden="true" />
                                         &nbsp;Run Plagiarism Detector
+                                    </button>
+
+                                    &nbsp;&nbsp;
+
+                                    <button
+                                        type="button"
+                                        className="btn export-btn"
+                                        onClick={() => this.downloadProjectGrades(rowsForView)}
+                                        disabled={this.state.isLoading}
+                                        aria-label="Export Student Grades"
+                                        title="Export Student Grades"
+                                    >
+                                        <FaFileExport aria-hidden="true" />
+                                        &nbsp;Export to D2L
                                     </button>
 
                                     &nbsp;&nbsp;

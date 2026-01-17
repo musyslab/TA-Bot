@@ -24,6 +24,10 @@ from datetime import datetime
 from dependency_injector.wiring import inject, Provide
 from container import Container
 from urllib.parse import unquote
+from openpyxl import Workbook
+from openpyxl.styles import Alignment
+from openpyxl.utils import get_column_letter
+from src.ai_suggestions import ERROR_DEFS
 
 ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
@@ -612,3 +616,90 @@ def get_grading(submission_id, submission_repo: SubmissionRepository = Provide[C
         'scoringMode': cfg.get('scoringMode'),
         'errorPoints': cfg.get('errorPoints'),
     })
+
+@submission_api.route('/exportprojectgrades', methods=['GET'])
+@jwt_required()
+@inject
+def export_project_grades(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if(current_user.Role != ADMIN_ROLE):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    project_id = int(request.args.get("project_id"))
+
+    grade_list = submission_repo.get_project_grade_info(project_id)
+    project_name = project_repo.get_selected_project(project_id).Name
+
+    wb = Workbook()
+    ws = wb.active
+    wb.title = 'Grades'
+
+    headers = ['Student ID', 'Grade', 'Description']
+    ws.append(headers)
+
+    # Create excel rows
+    error_defs_map = {e['id']: e for e in ERROR_DEFS}
+    for row in grade_list:
+        pts_dict = row['points']
+        scoring_mode = row['scoring_mode']
+        error_data = row['description']
+        desc_lines = []
+        description = ''
+
+        for error in error_data:
+            start = error['startLine']
+            end = error['endLine']
+            errorId = error['errorId']
+            count = error['count']
+            line_str = ''
+
+            if scoring_mode == "perInstance":
+                pts = int(pts_dict[errorId]) * count
+                if count > 1:
+                    line_str += f'{count} x'
+            else:
+                pts = int(pts_dict[errorId])
+
+            if start == end:
+                line_str += f'Line {start}'
+            else:
+                line_str += f'Lines {start}-{end}'
+
+            line_str += f' (-{pts} pts):'
+            desc_lines.append(line_str)
+
+            error_def = error_defs_map.get(errorId)
+            if error_def:
+                desc_lines.append(f"{error_def['description']}")
+                desc_lines.append('')
+
+        if not error_data:
+            desc_lines.append('Great Job!')
+
+        description = "\n".join(desc_lines)
+        ws.append([row.get('id'), row.get('grade'), description])
+
+
+    # Wrap text for Description column
+    for row in ws.iter_rows(min_row=2, max_col=3, max_row=ws.max_row):
+        cell = row[2]
+        cell.alignment = Alignment(wrap_text=True)
+        # Approximate row height
+        lines = str(cell.value).count("\n") + 1
+        ws.row_dimensions[cell.row].height = lines * 20
+
+    ws.column_dimensions[get_column_letter(3)].width = 120
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    resp = send_file(
+        buffer,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        download_name=f'{project_name}-grades.xlsx',
+        as_attachment=True
+    )
+
+    resp.headers["Project-Name"] = project_name
+    resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Project-Name"
+    return resp
