@@ -175,6 +175,8 @@ export function AdminGrading() {
     const [aiSuggestError, setAiSuggestError] = useState<string | null>(null)
     const lastAiKeyRef = useRef<string>('')
     const aiAbortRef = useRef<AbortController | null>(null)
+    const [aiEverRequested, setAiEverRequested] = useState<boolean>(false)
+    const [aiHidden, setAiHidden] = useState<boolean>(false)
 
     // References for code lines
     const codeContainerRef = useRef<HTMLDivElement | null>(null)
@@ -253,6 +255,7 @@ export function AdminGrading() {
         const ctrl = new AbortController()
         aiAbortRef.current = ctrl
 
+        setAiEverRequested(true)
         setAiSuggestStatus('loading')
         setAiSuggestError(null)
 
@@ -817,104 +820,129 @@ export function AdminGrading() {
                         </div>
 
                         <div className="grading-section">
-                            <div className="section-label">AI suggestions</div>
-                            <div className="suggestions-grid">
-                                {aiSuggestStatus === 'loading' && <div className="muted small">Generating suggestions...</div>}
+                            <div className="ai-suggestions-picker">
+                                <div className="ai-suggestions-picker-header">
+                                    <span className="ai-suggestions-picker-title">AI suggestions</span>
+                                    <div className="ai-suggestions-actions">
+                                        {aiEverRequested && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    className="ai-suggest-btn"
+                                                    disabled={selectedRange === null || aiSuggestStatus === 'loading'}
+                                                    onClick={() => {
+                                                        if (!selectedRangeRef.current) return
+                                                        lastAiKeyRef.current = ''
+                                                        requestAiSuggestions(selectedRangeRef.current)
+                                                    }}
+                                                    title="Retry AI suggestions"
+                                                >
+                                                    Retry
+                                                </button>
 
-                                {aiSuggestStatus === 'error' && (
-                                    <div className="muted small">
-                                        {aiSuggestError ?? 'AI error.'}{' '}
-                                        <button
-                                            type="button"
-                                            className="linklike"
-                                            disabled={selectedRange === null}
-                                            onClick={() => {
-                                                if (!selectedRangeRef.current) return
-                                                lastAiKeyRef.current = ''
-                                                requestAiSuggestions(selectedRangeRef.current)
-                                            }}
-                                        >
-                                            Retry
-                                        </button>
+                                                <button
+                                                    type="button"
+                                                    className="ai-suggest-btn"
+                                                    onClick={() => setAiHidden((v) => !v)}
+                                                    title={aiHidden ? 'Show AI suggestions' : 'Hide AI suggestions'}
+                                                >
+                                                    {aiHidden ? 'Show' : 'Hide'}
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
-                                )}
+                                </div>
 
-                                {aiSuggestStatus === 'idle' && selectedRange !== null && aiSuggestionIds.length === 0 && <div className="muted small">No suggestions yet for this selection.</div>}
+                                <div className="ai-suggestions-picker-body">
+                                    {!aiHidden && (
+                                        <div className="suggestions-grid">
+                                            {aiSuggestStatus === 'loading' && <div className="muted small">Generating suggestions...</div>}
 
-                                {aiSuggestStatus !== 'loading' &&
-                                    aiSuggestionIds.map((errorId) => {
-                                        const meta = ERROR_MAP[errorId]
-                                        const label = meta?.label ?? errorId
-                                        const pts = meta?.points ?? 0
-                                        const desc = meta?.description ?? ''
-                                        const count = selectedRange === null ? 0 : selectedRangeCountsByErrorId[errorId] ?? 0
-                                        const shownDeduction = selectedRange === null ? 0 : computeDeduction(errorId, Math.max(1, count))
+                                            {aiSuggestStatus === 'error' && <div className="muted small">{aiSuggestError ?? 'AI error.'}</div>}
 
-                                        return (
-                                            <div key={`ai-${errorId}`} className="suggestion-card" title={desc}>
-                                                <div className="suggestion-top">
-                                                    <span className="suggestion-title">{label}</span>
-                                                </div>
+                                            {aiSuggestStatus === 'idle' && selectedRange !== null && aiSuggestionIds.length === 0 && (
+                                                <div className="muted small">No suggestions yet for this selection.</div>
+                                            )}
 
-                                                <div className="suggestion-bottom">
-                                                    <div className="instance-box" aria-label="Instances">
-                                                        <span className={`count-badge ${count > 0 ? 'active' : ''}`}>x{count}</span>
-                                                        <div className="count-controls" aria-label="Adjust count">
-                                                            <button
-                                                                type="button"
-                                                                className="count-btn plus"
-                                                                disabled={selectedRange === null}
-                                                                onClick={() => {
-                                                                    if (selectedRange === null) return
-                                                                    bumpErrorCount(selectedRange.start, selectedRange.end, errorId, 1)
-                                                                }}
-                                                                aria-label="Increase count"
-                                                                title="Increase count"
-                                                            >
-                                                                +
-                                                            </button>
-                                                            {selectedRange !== null && count > 0 && (
-                                                                <button
-                                                                    type="button"
-                                                                    className="count-btn minus"
-                                                                    onClick={() => bumpErrorCount(selectedRange.start, selectedRange.end, errorId, -1)}
-                                                                    aria-label="Decrease count"
-                                                                    title="Decrease count"
-                                                                >
-                                                                    −
-                                                                </button>
-                                                            )}
+                                            {aiSuggestStatus !== 'loading' &&
+                                                aiSuggestionIds.map((errorId) => {
+                                                    const meta = ERROR_MAP[errorId]
+                                                    const label = meta?.label ?? errorId
+                                                    const pts = meta?.points ?? 0
+                                                    const desc = meta?.description ?? ''
+                                                    const count = selectedRange === null ? 0 : selectedRangeCountsByErrorId[errorId] ?? 0
+                                                    const shownDeduction = selectedRange === null ? 0 : computeDeduction(errorId, Math.max(1, count))
+
+                                                    return (
+                                                        <div key={`ai-${errorId}`} className="suggestion-card" title={desc}>
+                                                            <div className="suggestion-top">
+                                                                <span className="suggestion-title">{label}</span>
+                                                            </div>
+
+                                                            <div className="suggestion-bottom">
+                                                                <div className="instance-box" aria-label="Instances">
+                                                                    <span className={`count-badge ${count > 0 ? 'active' : ''}`}>x{count}</span>
+                                                                    <div className="count-controls" aria-label="Adjust count">
+                                                                        <button
+                                                                            type="button"
+                                                                            className="count-btn plus"
+                                                                            disabled={selectedRange === null}
+                                                                            onClick={() => {
+                                                                                if (selectedRange === null) return
+                                                                                bumpErrorCount(selectedRange.start, selectedRange.end, errorId, 1)
+                                                                            }}
+                                                                            aria-label="Increase count"
+                                                                            title="Increase count"
+                                                                        >
+                                                                            +
+                                                                        </button>
+                                                                        {selectedRange !== null && count > 0 && (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="count-btn minus"
+                                                                                onClick={() => bumpErrorCount(selectedRange.start, selectedRange.end, errorId, -1)}
+                                                                                aria-label="Decrease count"
+                                                                                title="Decrease count"
+                                                                            >
+                                                                                −
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="points-box" aria-label="Point deduction">
+                                                                    <span className="deduction-value">{selectedRange === null ? `-${pts}` : `-${shownDeduction}`}</span>
+                                                                    <div className="points-controls" aria-label="Adjust points">
+                                                                        <button
+                                                                            type="button"
+                                                                            className="points-btn plus"
+                                                                            onClick={() => bumpErrorPoints(errorId, 1)}
+                                                                            aria-label="Increase points for this error type"
+                                                                            title="Increase points"
+                                                                        >
+                                                                            +
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="points-btn minus"
+                                                                            onClick={() => bumpErrorPoints(errorId, -1)}
+                                                                            disabled={pts <= 0}
+                                                                            aria-label="Decrease points for this error type"
+                                                                            title="Decrease points"
+                                                                        >
+                                                                            −
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                    </div>
+                                                    )
+                                                })}
+                                        </div>
+                                    )}
 
-                                                    <div className="points-box" aria-label="Point deduction">
-                                                        <span className="deduction-value">{selectedRange === null ? `-${pts}` : `-${shownDeduction}`}</span>
-                                                        <div className="points-controls" aria-label="Adjust points">
-                                                            <button
-                                                                type="button"
-                                                                className="points-btn plus"
-                                                                onClick={() => bumpErrorPoints(errorId, 1)}
-                                                                aria-label="Increase points for this error type"
-                                                                title="Increase points"
-                                                            >
-                                                                +
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="points-btn minus"
-                                                                onClick={() => bumpErrorPoints(errorId, -1)}
-                                                                disabled={pts <= 0}
-                                                                aria-label="Decrease points for this error type"
-                                                                title="Decrease points"
-                                                            >
-                                                                −
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
+                                    {aiHidden && <div className="muted small">AI suggestions are hidden.</div>}
+                                </div>
                             </div>
                         </div>
 

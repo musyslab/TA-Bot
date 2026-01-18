@@ -351,6 +351,58 @@
     }
 }
 
+.ai-suggestions-actions {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.ai-suggest-btn {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-weight: 900;
+    color: #111827;
+    font-size: 0.85rem;
+
+    &:hover {
+        background: #f3f4f6;
+    }
+
+    &:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+}
+
+.ai-suggestions-picker {
+    border: 1px solid #e6eaf0;
+    border-radius: 12px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.ai-suggestions-picker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 10px;
+    background: #eef2f6;
+}
+
+.ai-suggestions-picker-title {
+    font-weight: 900;
+    color: #111827;
+    font-size: 0.92rem;
+}
+
+.ai-suggestions-picker-body {
+    padding: 10px 10px;
+}
+
 /* AI suggestions */
 .suggestions-grid {
     display: grid;

@@ -182,37 +182,6 @@ def sanitize_suggestions(raw_ids: List[str]) -> List[str]:
     return clean[:3]
 
 
-def heuristic_fallback_from_diff(diff_long: str) -> List[str]:
-    """
-    Minimal fallback when the model output is invalid.
-    Uses rough signals from unified diffs.
-    """
-    dl = diff_long or ""
-    minus = len(re.findall(r"(?m)^-", dl))
-    plus = len(re.findall(r"(?m)^\+", dl))
-
-    picks: List[str] = []
-
-    # CONTENT is the right bucket for missing/extra lines in output diffs.
-    if plus > minus + 3:
-        picks.append("CONTENT")
-    if minus > plus + 3:
-        picks.append("CONTENT")
-
-    # If we have both sides but they differ, FORMAT is a reasonable default.
-    if "CONTENT" not in picks and (plus > 0 or minus > 0):
-        picks.append("FORMAT")
-
-    # Generic/common backups (must be valid IDs from ERROR_DEFS)
-    for cand in ["ORDER", "COMPUTE", "CONDITION", "LOOP", "INDEXING", "BRANCHING", "STATE_MISUSE", "INIT_STATE", "FUNCTIONS"]:
-        if cand not in picks:
-            picks.append(cand)
-        if len(picks) >= 3:
-            break
-
-    return picks[:3]
-
-
 def call_llm(prompt: str, temperature: float, max_tokens: int = 120) -> str:
     payload = {
         "model": LLM_MODEL,
@@ -318,20 +287,7 @@ def grading_suggestions(
         current_app.logger.warning(f"[ai_suggestions] LLM call failed: {e}")
         ids = []
 
-    # 2) If invalid/too short, retry once with stricter settings
-    if len(ids) < 2:
-        strict_prompt = prompt + "\nREMINDER: Output ONLY a JSON array like [\"OUTPUT_MISSING\",\"INPUT_PARSE\"]."
-        try:
-            out2 = call_llm(strict_prompt, temperature=0.0, max_tokens=80)
-            raw2 = extract_json_array(out2)
-            ids2 = sanitize_suggestions(raw2)
-            if len(ids2) >= 2:
-                ids = ids2
-        except Exception:
-            pass
-
-    # 3) Final fallback (guarantee 3)
     if len(ids) < 3:
-        ids = heuristic_fallback_from_diff(diff_long)
+        ids = []
 
     return make_response(json.dumps({"suggestions": ids}), 200, {"Content-Type": "application/json"})
