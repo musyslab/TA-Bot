@@ -64,9 +64,21 @@ def base64_decode_text(maybe_b64: Any) -> str:
         # If it's not actually base64, return as-is.
         return maybe_b64
 
+def strip_java_comments(src: str) -> str:
+    """
+    Best-effort comment stripper so main-class detection does not match words
+    inside comments like: "This class calculates ..."
+    """
+    if not src:
+        return ""
+    no_block = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    no_line = re.sub(r"(?m)//.*?$", "", no_block)
+    return no_line
+
 def extract_java_package_name(src: str) -> str:
     # e.g., "package assignment07;" or "package com.foo.bar;"
-    m = re.search(r"(?m)^\s*package\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*;", src or "")
+    src = strip_java_comments(src or "")
+    m = re.search(r"(?m)^\s*package\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*;", src)
     return (m.group(1).strip() if m else "")
 
 
@@ -76,9 +88,13 @@ def extract_main_class_name(src: str) -> str:
       - "assignment07.StudentTester" (preferred)
       - "StudentTester" (no package)
     """
+    src = strip_java_comments(src or "")
     if "public static void main(" not in src:
         return ""
-    m = re.search(r"\bclass\s+([A-Za-z_]\w*)\b", src)
+    m = re.search(
+        r"(?m)^\s*(?:public\s+)?(?:abstract\s+)?(?:final\s+)?class\s+([A-Za-z_]\w*)\b",
+        src,
+    )
     cls = (m.group(1) if m else "").strip()
     if not cls:
         return ""
@@ -88,9 +104,9 @@ def extract_main_class_name(src: str) -> str:
 def detect_multiple_mains(java_sources: List[Tuple[str, str]]) -> List[str]:
     mains: List[str] = []
     for (name, raw) in java_sources:
-        if "public static void main(" in raw:
-            cls = extract_main_class_name(raw)
-            mains.append(cls if cls else os.path.splitext(name)[0])
+        cls = extract_main_class_name(raw)
+        if cls:
+            mains.append(cls)
     return [m for m in mains if m]
 
 
@@ -235,7 +251,11 @@ def pick_java_main_class(java_sources: List[Tuple[str, str]], entry_override: st
 
     # No obvious main found. Fall back to first class name (qualified if packaged), then filename stem.
     for (name, raw) in java_sources:
-        m = re.search(r"\bclass\s+([A-Za-z_]\w*)\b", raw)
+        raw = strip_java_comments(raw or "")
+        m = re.search(
+            r"(?m)^\s*(?:public\s+)?(?:abstract\s+)?(?:final\s+)?class\s+([A-Za-z_]\w*)\b",
+            raw,
+        )
         if m:
             cls = m.group(1).strip()
             pkg = extract_java_package_name(raw)
