@@ -7,7 +7,7 @@ import MenuComponent from '../components/MenuComponent'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import '../../styling/AdminStudentRoster.scss'
 
-import { FaClone, FaDownload, FaEye } from 'react-icons/fa'
+import { FaClone, FaFileExport, FaDownload, FaEye, FaHandPaper } from 'react-icons/fa'
 
 const AdminStudentRoster = () => {
     const { class_id, id } = useParams<{ class_id: string; id: string }>()
@@ -61,6 +61,7 @@ class Row {
     grade: number
     StudentNumber: number
     IsLocked: boolean
+    attendedOfficeHours: boolean = false;
 }
 
 interface Option {
@@ -101,6 +102,10 @@ interface StudentListState {
         overlap_snippet_a?: string
         overlap_snippet_b?: string
     }>
+    // Marks Code//
+    plagiarismPage: number
+    plagiarismPageSize: number
+    // End of Change //
 }
 
 class StudentListInternal extends Component<StudentListProps, StudentListState> {
@@ -130,6 +135,10 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             sortBy: 'lastname',
             plagiarismModalIsOpen: false,
             plagiarismResults: [],
+            /* Marks Changes */
+            plagiarismPage: 1,
+            /* End Of Change */
+            plagiarismPageSize: 10,
         }
 
         this.handleClick = this.handleClick.bind(this)
@@ -142,6 +151,33 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         this.submitGrades = this.submitGrades.bind(this)
         this.exportGrades = this.exportGrades.bind(this)
         this.downloadStudentCode = this.downloadStudentCode.bind(this)
+        this.downloadProjectGrades = this.downloadProjectGrades.bind(this)
+    }
+
+    async downloadProjectGrades(rows: Row[]) {
+        try {
+            const url = `${import.meta.env.VITE_API_URL}/submissions/exportprojectgrades?project_id=${this.props.project_id}`
+            const res = await axios.get<Blob>(url, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                responseType: 'blob',
+            })
+
+            const cd = String((res.headers as any)?.['content-disposition'] ?? '')
+            const match = /filename\*?=(?:UTF-8''|")?([^\";]+)\"?/i.exec(cd)
+            const fname = match
+                ? decodeURIComponent(match[1])
+                : `${res.headers['project-name']}-grades.xlsx`
+
+            const a = document.createElement('a')
+            a.href = URL.createObjectURL(res.data)
+            a.download = fname
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(a.href)
+        } catch (_e) {
+            window.alert('Failed to export to D2L. Please try again.')
+        }
     }
 
     async downloadStudentCode(row: Row) {
@@ -173,18 +209,29 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
     }
 
     componentDidMount() {
-        axios
-            .post(
-                import.meta.env.VITE_API_URL + `/submissions/recentsubproject`,
-                { project_id: this.props.project_id },
-                {
-                    headers: {
-                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-                    },
-                }
-            )
-            .then((res) => {
-                const data = res.data
+        const submissionsRequest = axios.post(
+            import.meta.env.VITE_API_URL + `/submissions/recentsubproject`,
+            { project_id: this.props.project_id },
+            {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                },
+            }
+        );
+        const ohVisitsRequest = axios.post(
+            import.meta.env.VITE_API_URL + `/submissions/get_oh_visits_by_projectId`,
+            { project_id: this.props.project_id },
+            {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                },
+            }
+        );
+        Promise.all([submissionsRequest, ohVisitsRequest])
+            .then(([submissionsRes, officeHoursRes]) => {
+                const data = submissionsRes.data
+
+                const officeHoursAttendees = new Set(officeHoursRes.data);
                 const rows: Array<Row> = []
                 const lectureSet = new Set<number>([-1])
                 const labSet = new Set<number>([-1])
@@ -223,10 +270,11 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                     const lockRaw = String(student_output_data[11 + off] ?? '').toLowerCase().trim()
                     row.IsLocked = lockRaw === 'true' || lockRaw === '1' || lockRaw === 'locked'
 
+                    row.attendedOfficeHours = officeHoursAttendees.has(row.id);
+
                     rows.push(row)
                     return row
                 })
-
                 const lecture_numbers: Option[] = Array.from(lectureSet)
                     .filter((v) => v !== -1)
                     .sort((a, b) => a - b)
@@ -264,6 +312,9 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                 this.setState({
                     plagiarismResults: pairs,
                     plagiarismModalIsOpen: true,
+                    /* Marks Code */
+                    plagiarismPage: 1,
+                    /* End Of Code */
                     isLoading: false,
                 })
             })
@@ -467,6 +518,52 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
         // ===== Helpers for modal "CodePage-like" UI =====
         const code = this.state.selectedStudentCode || ''
+
+        // --- Pagination for plagiarism modal (10 per page) ---
+        const pageSize = this.state.plagiarismPageSize ?? 10
+
+        // --- Thresholds (easy to tune) ---
+        const SIM_THRESHOLD = 0.75
+        const MIN_OVERLAP_CHARS = 150
+
+        const raw = this.state.plagiarismResults ?? []
+
+        const score = (r: any) => ((r.similarity_token ?? 0) + (r.similarity_ast ?? 0)) / 2
+
+        const filteredPlagiarismResults = raw.filter((p) => {
+            const overlapA = (p.overlap_snippet_a ?? '').trim()
+            const overlapB = (p.overlap_snippet_b ?? '').trim()
+            const overlapChars = overlapA.length + overlapB.length
+
+            const hasOverlapSnippets = overlapChars > 0
+            const overlapOk = !hasOverlapSnippets || overlapChars >= MIN_OVERLAP_CHARS
+
+            return score(p) >= SIM_THRESHOLD && overlapOk
+        })
+
+        const sortedPlagiarismResults = [...filteredPlagiarismResults].sort((x, y) => {
+            const xScore = score(x)
+            const yScore = score(y)
+
+            if (yScore !== xScore) return yScore - xScore
+            if ((y.similarity_ast ?? 0) !== (x.similarity_ast ?? 0))
+                return (y.similarity_ast ?? 0) - (x.similarity_ast ?? 0)
+            return (y.similarity_token ?? 0) - (x.similarity_token ?? 0)
+        })
+
+        const totalResults = sortedPlagiarismResults.length
+        const totalPages = Math.max(1, Math.ceil(totalResults / pageSize))
+
+        const currentPage = Math.min(Math.max(this.state.plagiarismPage ?? 1, 1), totalPages)
+        const startIndex = (currentPage - 1) * pageSize
+
+        const pageResults = sortedPlagiarismResults.slice(startIndex, startIndex + pageSize)
+
+        const goToPage = (p: number) => {
+            const clamped = Math.max(1, Math.min(p, totalPages))
+            this.setState({ plagiarismPage: clamped })
+        }
+        // End of Changes
 
         function parseOutputs(raw: string): { expected: string; actual: string; hadDiff: boolean } {
             if (raw.includes('~~~diff~~~')) {
@@ -730,6 +827,20 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                                     &nbsp;&nbsp;
 
+                                    <button
+                                        type="button"
+                                        className="btn export-btn"
+                                        onClick={() => this.downloadProjectGrades(rowsForView)}
+                                        disabled={this.state.isLoading}
+                                        aria-label="Export Student Grades"
+                                        title="Export Student Grades"
+                                    >
+                                        <FaFileExport aria-hidden="true" />
+                                        &nbsp;Export Grades to D2L
+                                    </button>
+
+                                    &nbsp;&nbsp;
+
                                     <label className="filter-label" htmlFor="sortSelect">
                                         Sort by:&nbsp;
                                     </label>
@@ -763,18 +874,30 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                         <tbody className="table-body">
                                             {rowsForView.map((row) => {
                                                 if (row.hidden) return null
+                                                const renderStudentName = () => (
+                                                    <td className="student-name-cell">
+                                                        {row.Fname + ' ' + row.Lname}{' '}
 
+                                                        {row.attendedOfficeHours && (
+                                                            <span
+                                                                className="office-hours-indicator"
+                                                                data-tooltip="Attended Office Hours for this project"
+                                                            >
+                                                                <FaHandPaper aria-hidden="true" />
+                                                            </span>
+                                                        )}
+
+                                                        {row.IsLocked === true && (
+                                                            <button className="btn unlock-btn" onClick={() => this.handleUnlockClick(row.id)}>
+                                                                Unlock
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                );
                                                 if (row.subid === -1) {
                                                     return (
                                                         <tr className="student-row student-row--no-submission" key={`row-${row.id}-na`}>
-                                                            <td className="student-name-cell">
-                                                                {row.Fname + ' ' + row.Lname}{' '}
-                                                                {row.IsLocked === true && (
-                                                                    <button className="btn unlock-btn" onClick={() => this.handleUnlockClick(row.id)}>
-                                                                        Unlock
-                                                                    </button>
-                                                                )}
-                                                            </td>
+                                                            {renderStudentName()}
                                                             <td className="lecture-number-cell">{row.lecture_number}</td>
                                                             <td className="lab-number-cell">{row.lab_number}</td>
                                                             <td className="submissions-cell">N/A</td>
@@ -794,7 +917,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                 <Link
                                                                     to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
                                                                     className="btn grade-btn"
-                                                                    target="_blank"
                                                                     rel="noreferrer"
                                                                 >
                                                                     Grade
@@ -806,14 +928,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                                                 return (
                                                     <tr className="student-row" key={`row-${row.id}`}>
-                                                        <td className="student-name-cell">
-                                                            {row.Fname + ' ' + row.Lname}{' '}
-                                                            {row.IsLocked === true && (
-                                                                <button className="btn unlock-btn" onClick={() => this.handleUnlockClick(row.id)}>
-                                                                    Unlock
-                                                                </button>
-                                                            )}
-                                                        </td>
+                                                        {renderStudentName()}
                                                         <td className="lecture-number-cell">{row.lecture_number}</td>
                                                         <td className="lab-number-cell">{row.lab_number}</td>
                                                         <td className="submissions-cell">{row.numberOfSubmissions}</td>
@@ -825,7 +940,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                             <Link
                                                                 className="view-link"
                                                                 to={`/admin/${row.classId}/project/${this.props.project_id}/codeview/${row.subid}`}
-                                                                target="_blank"
                                                                 rel="noreferrer"
                                                             >
                                                                 <FaEye aria-hidden="true" /> View
@@ -853,7 +967,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                             <Link
                                                                 to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
                                                                 className="btn grade-btn"
-                                                                target="_blank"
                                                                 rel="noreferrer"
                                                             >
                                                                 Grade
@@ -887,68 +1000,93 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                                     <div className="modal-body">
                                         <div className="modal-header">
+                                            {/* Marks Code */}
                                             <div className="modal-title" id="plagiarism-modal-title">
-                                                Potentially Similar Submissions
+                                                Potentially Similar Submissions ({totalResults} pairs)
                                             </div>
+                                            {/* End of Marks Code */}
                                         </div>
 
                                         <div className="tab-content">
                                             <section className="tests-section">
-                                                <table className="results-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>Student A</th>
-                                                            <th>Student B</th>
-                                                            <th>Token Sim.</th>
-                                                            <th>AST Sim.</th>
-                                                            <th>Open</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {this.state.plagiarismResults.length === 0 && (
+                                                <div className="similar-modal-scroll">
+                                                    <table className="results-table">
+
+                                                        <thead>
                                                             <tr>
-                                                                <td className="no-data-message" colSpan={5}>
-                                                                    No similar pairs found (above threshold).
-                                                                </td>
+                                                                <th>Student A</th>
+                                                                <th>Student B</th>
+                                                                <th>Token Sim.</th>
+                                                                <th>AST Sim.</th>
+                                                                <th>Open</th>
                                                             </tr>
-                                                        )}
-
-                                                        {this.state.plagiarismResults.map((p, i) => {
-                                                            const pct = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%'
-                                                            const bucketClass = (v: number) => {
-                                                                const percent = v * 100
-                                                                if (percent < 40) return 'status-cell sim-low'
-                                                                if (percent < 60) return 'status-cell sim-medlow'
-                                                                if (percent < 75) return 'status-cell sim-medium'
-                                                                if (percent < 90) return 'status-cell sim-high'
-                                                                return 'status-cell sim-critical'
-                                                            }
-
-                                                            return (
-                                                                <tr key={`plag-${i}`}>
-                                                                    <td>{p.a.name}</td>
-                                                                    <td>{p.b.name}</td>
-                                                                    <td className={bucketClass(p.similarity_token)}>{pct(p.similarity_token)}</td>
-                                                                    <td className={bucketClass(p.similarity_ast)}>{pct(p.similarity_ast)}</td>
-                                                                    <td>
-                                                                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                                                            <Link
-                                                                                className="view-link"
-                                                                                to={`/admin/plagiarism/?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
-                                                                                    p.a.name
-                                                                                )}&bn=${encodeURIComponent(p.b.name)}`}
-                                                                                target="_blank"
-                                                                                rel="noreferrer"
-                                                                            >
-                                                                                <FaEye aria-hidden="true" /> View
-                                                                            </Link>
-                                                                        </div>
+                                                        </thead>
+                                                        <tbody>
+                                                            {this.state.plagiarismResults.length === 0 && (
+                                                                <tr>
+                                                                    <td className="no-data-message" colSpan={5}>
+                                                                        No similar pairs found (above threshold).
                                                                     </td>
                                                                 </tr>
-                                                            )
-                                                        })}
-                                                    </tbody>
-                                                </table>
+                                                            )}
+
+                                                            {pageResults.map((p, i) => {
+                                                                const pct = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%'
+                                                                const bucketClass = (v: number) => {
+                                                                    const percent = v * 100
+                                                                    if (percent < 40) return 'status-cell sim-low'
+                                                                    if (percent < 60) return 'status-cell sim-medlow'
+                                                                    if (percent < 75) return 'status-cell sim-medium'
+                                                                    if (percent < 90) return 'status-cell sim-high'
+                                                                    return 'status-cell sim-critical'
+                                                                }
+
+                                                                return (
+                                                                    <tr key={`plag-${i}`}>
+                                                                        <td>{p.a.name}</td>
+                                                                        <td>{p.b.name}</td>
+                                                                        <td className={bucketClass(p.similarity_token)}>{pct(p.similarity_token)}</td>
+                                                                        <td className={bucketClass(p.similarity_ast)}>{pct(p.similarity_ast)}</td>
+                                                                        <td>
+                                                                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                                                <Link
+                                                                                    className="view-link"
+                                                                                    to={`/admin/plagiarism/?ac=${p.a.class_id}&as=${p.a.submission_id}&bc=${p.b.class_id}&bs=${p.b.submission_id}&an=${encodeURIComponent(
+                                                                                        p.a.name
+                                                                                    )}&bn=${encodeURIComponent(p.b.name)}`}
+                                                                                    target="_blank"
+                                                                                    rel="noreferrer"
+                                                                                >
+                                                                                    <FaEye aria-hidden="true" /> View
+                                                                                </Link>
+                                                                            </div>
+                                                                        </td>
+                                                                    </tr>
+                                                                )
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div className="pagination">
+                                                    <button className="page-btn" onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1}>
+                                                        Prev
+                                                    </button>
+
+                                                    {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((p) => (
+                                                        <button
+                                                            key={`page-${p}`}
+                                                            className={`page-btn ${p === currentPage ? 'active' : ''}`}
+                                                            onClick={() => goToPage(p)}
+                                                        >
+                                                            {p}
+                                                        </button>
+                                                    ))}
+
+                                                    <button className="page-btn" onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages}>
+                                                        Next
+                                                    </button>
+                                                </div>
+
                                             </section>
                                         </div>
                                     </div>

@@ -11,6 +11,7 @@ import '../../styling/FileUploadCommon.scss'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import LoadingAnimation from '../components/LoadingAnimation'
 
+import { TbJson } from 'react-icons/tb'
 import {
     FaAlignJustify,
     FaCircleNotch,
@@ -60,7 +61,7 @@ const AdminProjectManage = () => {
     const [serverProjectLanguageSnapshot, setServerProjectLanguageSnapshot] = useState<string>('')
     const [SubmitButton, setSubmitButton] = useState<string>('Create new assignment')
     const [SubmitJSON, setSubmitJSON] = useState<string>('Submit JSON file')
-    const [getJSON, setGetJSON] = useState<string>('Export test cases')
+    const [getJSON, setGetJSON] = useState<string>('Export test cases to JSON')
     const [SolutionFiles, setSolutionFiles] = useState<File[]>([])
     const [serverSolutionFileNames, setServerSolutionFileNames] = useState<string[]>([])
     const [serverSolutionFileNamesSnapshot, setServerSolutionFileNamesSnapshot] = useState<string[]>([])
@@ -87,6 +88,19 @@ const AdminProjectManage = () => {
     const [additionalFileNames, setAdditionalFileNames] = useState<string[]>([])
     const [removedAdditionalFiles, setRemovedAdditionalFiles] = useState<string[]>([])
     const [mainJavaFileName, setMainJavaFileName] = useState<string>('')
+
+    // Lock page scroll whenever either modal is open
+    useEffect(() => {
+        const prev = document.body.style.overflow
+        if (modalOpen || previewOpen) {
+            document.body.style.overflow = 'hidden'
+        } else {
+            document.body.style.overflow = ''
+        }
+        return () => {
+            document.body.style.overflow = prev
+        }
+    }, [modalOpen, previewOpen])
 
     const API = import.meta.env.VITE_API_URL
     const authHeader = { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
@@ -212,10 +226,12 @@ const AdminProjectManage = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [ProjectLanguage, SolutionFiles, serverSolutionFileNames, edit, project_id])
 
+    const JSON_ICON_RE = /\.json$/i
     const CODE_ICON_RE = /\.(java|py|c|h|rkt|scm)$/i
     const TEXT_ICON_RE = /\.(txt|doc|docx|pdf)$/i
 
     function getFileIcon(filename: string): React.ReactNode {
+        if (JSON_ICON_RE.test(filename)) return <TbJson className="file-language-icon json" aria-hidden="true" />
         if (CODE_ICON_RE.test(filename)) return <FaCode className="file-language-icon" aria-hidden="true" />
         if (TEXT_ICON_RE.test(filename)) return <FaAlignJustify className="file-language-icon" aria-hidden="true" />
         return <FaTimes className="file-language-icon" aria-hidden="true" />
@@ -316,10 +332,10 @@ const AdminProjectManage = () => {
         return d
     })()
 
-    
+
     const [ProjectStartDate, setProjectStartDate] = useState<Date | null>(null)
     const [ProjectEndDate, setProjectEndDate] = useState<Date | null>(null)
-    
+
     const [overlapError, setOverlapError] = useState<boolean>(false)
 
     const highlightDates: Date[] =
@@ -350,7 +366,7 @@ const AdminProjectManage = () => {
 
         fetchProjects();
     }, []);
-    
+
     const blockedDates = useMemo(() => {
         const dates = [];
 
@@ -367,10 +383,10 @@ const AdminProjectManage = () => {
                 lastDay.setHours(0, 0, 0, 0);
 
                 while (currentDay <= lastDay) {
-                    
+
                     const dayStart = new Date(currentDay);
                     dayStart.setHours(0, 0, 0, 0); // 00:00:00
-                    
+
                     const dayEnd = new Date(currentDay);
                     dayEnd.setHours(23, 59, 0, 0); // 23:59
 
@@ -398,10 +414,11 @@ const AdminProjectManage = () => {
         });
     }, [projects]);
 
-    
+
     const handleTimeColors = (time) => {
         const isBlocked = projectRanges.some((range) => {
-            return time >= range.start && time <= range.end;
+            // Allow boundary-touching (end == start) without marking as blocked
+            return time > range.start && time < range.end;
         });
 
         return isBlocked ? "react-datepicker__time--highlighted-red" : null;
@@ -409,11 +426,11 @@ const AdminProjectManage = () => {
 
     const getInjectedTimes = (dateValue) => {
         if (!dateValue) return [];
-        
+
         const endOfDay = new Date(dateValue);
-        
+
         endOfDay.setHours(23, 59, 0, 0);
-        
+
         return [endOfDay];
     };
 
@@ -591,8 +608,9 @@ const AdminProjectManage = () => {
         const isNewDay = !previousDate || (date && date.toDateString() !== previousDate.toDateString());
 
         if (finalDate && isNewDay) {
-            const isBlocked = projectRanges.some(range => 
-                finalDate >= range.start && finalDate <= range.end
+            // Allow boundary-touching (end == start) without treating it as blocked
+            const isBlocked = projectRanges.some(range =>
+                finalDate > range.start && finalDate < range.end
             );
 
             if (isBlocked) {
@@ -601,11 +619,11 @@ const AdminProjectManage = () => {
 
                 let foundSafeTime = false;
 
-                const checkTime = (t) => projectRanges.some(r => t >= r.start && t <= r.end);
+                const checkTime = (t) => projectRanges.some(r => t > r.start && t < r.end);
 
                 while (candidate.getDate() === finalDate.getDate()) {
                     if (!checkTime(candidate)) {
-                        finalDate = candidate; 
+                        finalDate = candidate;
                         foundSafeTime = true;
                         break;
                     }
@@ -634,15 +652,15 @@ const AdminProjectManage = () => {
             return;
         }
 
-        
+
         const startToCheck = isStart ? finalDate : ProjectStartDate;
-        const endToCheck   = isStart ? ProjectEndDate : finalDate;
+        const endToCheck = isStart ? ProjectEndDate : finalDate;
 
         let overlap = false;
         for (const project of projectRanges) {
-            
-            
-            if (finalDate >= project.start && finalDate <= project.end) {
+
+
+            if (finalDate > project.start && finalDate < project.end) {
                 overlap = true;
                 break;
             }
@@ -886,6 +904,13 @@ const AdminProjectManage = () => {
         const files = target.files
 
         if (files != null && files.length === 1) {
+            if (!/\.json$/i.test(files[0].name)) {
+                window.alert('Test case upload must be a JSON file (.json).')
+                target.value = ''
+                setJsonFile(undefined)
+                setjsonfilename('')
+                return
+            }
             setJsonFile(files[0])
             setjsonfilename(files[0].name)
         } else {
@@ -1203,14 +1228,14 @@ const AdminProjectManage = () => {
                                                         dateFormat="yyyy-MM-dd h:mm aa"
                                                         highlightDates={[
                                                             {
-                                                                "react-datepicker__day--highlighted": highlightDates 
+                                                                "react-datepicker__day--highlighted": highlightDates
                                                             },
-            
+
                                                             {
                                                                 "react-datepicker__day--highlighted-red": blockedDates
                                                             }
                                                         ]}
-                                                        timeClassName={handleTimeColors}                                                   
+                                                        timeClassName={handleTimeColors}
                                                         selectsStart
                                                         startDate={ProjectStartDate}
                                                         endDate={ProjectEndDate}
@@ -1230,9 +1255,9 @@ const AdminProjectManage = () => {
                                                         dateFormat="yyyy-MM-dd h:mm aa"
                                                         highlightDates={[
                                                             {
-                                                                highlightDates 
+                                                                highlightDates
                                                             },
-                                                            
+
                                                             {
                                                                 "react-datepicker__day--highlighted-red": blockedDates
                                                             }
@@ -1642,6 +1667,16 @@ const AdminProjectManage = () => {
                                             </table>
                                         </div>
 
+                                        <div className="export-json-segment">
+                                            <button
+                                                type="button"
+                                                className="export-json-button"
+                                                onClick={get_testcase_json}
+                                            >
+                                                <FaDownload aria-hidden="true" /> {getJSON}
+                                            </button>
+                                        </div>
+
                                         <div className="or-separator">
                                             <span>or</span>
                                         </div>
@@ -1665,6 +1700,7 @@ const AdminProjectManage = () => {
                                                             id="jsonFile"
                                                             type="file"
                                                             className="file-input"
+                                                            accept=".json,application/json"
                                                             onChange={handleJsonFileChange}
                                                         />
                                                         <div className="file-drop-message">
@@ -1673,7 +1709,7 @@ const AdminProjectManage = () => {
                                                         </div>
                                                     </>
                                                 ) : (
-                                                    <div className="file-preview">
+                                                    <div className="file-preview json-file-preview">
                                                         <span className="file-icon-wrapper" aria-hidden="true">
                                                             <FaRegFile className="file-outline-icon" aria-hidden="true" />
                                                             {getFileIcon(jsonfilename)}
@@ -1712,10 +1748,6 @@ const AdminProjectManage = () => {
                                                         <FaUpload aria-hidden="true" /> {SubmitJSON}
                                                     </>
                                                 )}
-                                            </button>
-                                            <div className="json-button-spacer" />
-                                            <button type="button" className="get-json-button" onClick={get_testcase_json}>
-                                                <FaDownload aria-hidden="true" /> {getJSON}
                                             </button>
                                         </div>
                                     </div>

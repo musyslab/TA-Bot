@@ -125,10 +125,17 @@ CREATE TABLE `StudentGrades` (
   `Sid` int NOT NULL,
   `Pid` int NOT NULL,
   `Grade` int NOT NULL,
+  `SubmissionId` int DEFAULT NULL,
+  `ScoringMode` varchar(20) DEFAULT NULL,
+  `ErrorPointsJson` text,
+  `ErrorDefsJson` text,
+  `UpdatedAt` datetime DEFAULT NULL,
   PRIMARY KEY (`Sid`,`Pid`),
   KEY `fk2_idx` (`Pid`),
+  KEY `fk_studentgrades_submission_idx` (`SubmissionId`),
   CONSTRAINT `fk2` FOREIGN KEY (`Pid`) REFERENCES `Projects` (`Id`),
-  CONSTRAINT `fki` FOREIGN KEY (`Sid`) REFERENCES `Users` (`Id`)
+  CONSTRAINT `fki` FOREIGN KEY (`Sid`) REFERENCES `Users` (`Id`),
+  CONSTRAINT `fk_studentgrades_submission` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -281,9 +288,12 @@ DROP TABLE IF EXISTS `SubmissionManualErrors`;
 
 CREATE TABLE `SubmissionManualErrors` ( 
   `Id` int NOT NULL AUTO_INCREMENT, 
-  `SubmissionId` int NOT NULL, 
-  `LineNumber` int NOT NULL, 
-  `ErrorId` varchar(45) NOT NULL, 
+  `SubmissionId` int NOT NULL,
+  `StartLine` int NOT NULL,
+  `EndLine` int NOT NULL,
+  `ErrorId` varchar(45) NOT NULL,
+  `Count` int NOT NULL DEFAULT 1,
+  `Note` text,
   PRIMARY KEY (`Id`), 
   KEY `fk_sub_errors_idx` (`SubmissionId`), 
   CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE 

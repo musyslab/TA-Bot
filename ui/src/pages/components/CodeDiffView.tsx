@@ -180,11 +180,18 @@ type DiffViewProps = {
     codeContainerRef?: React.RefObject<HTMLDivElement | null>
     lineRefs?: React.MutableRefObject<Record<number, HTMLLIElement | null>>
     getLineClassName?: (lineNo: number) => string
-    onLineClick?: (lineNo: number, e: React.MouseEvent) => void
     onLineMouseEnter?: (lineNo: number) => void
     onLineMouseLeave?: (lineNo: number) => void
+    onLineMouseDown?: (lineNo: number) => void
+    onLineMouseUp?: () => void
     rightPanel?: React.ReactNode
     betweenDiffAndCode?: React.ReactNode
+    belowCode?: React.ReactNode
+    onActiveTestcaseChange?: (tc: { name: string; num: number; passed: boolean; longDiff: string; shortDiff: string }) => void
+
+    // If true: prevent selection/copying in the diff (student view).
+    // If false/undefined: allow selecting/copying (admin views).
+    disableCopy?: boolean
 }
 
 export default function DiffView(props: DiffViewProps) {
@@ -196,20 +203,26 @@ export default function DiffView(props: DiffViewProps) {
         codeContainerRef,
         lineRefs,
         getLineClassName,
-        onLineClick,
         onLineMouseEnter,
         onLineMouseLeave,
+        onLineMouseDown,
+        onLineMouseUp,
         rightPanel,
         betweenDiffAndCode,
+        belowCode,
+        onActiveTestcaseChange,
+        disableCopy = false,
     } = props
 
     const internalCodeContainerRef = useRef<HTMLDivElement | null>(null)
     const effectiveCodeContainerRef = codeContainerRef ?? internalCodeContainerRef
 
-    const copyBlockHandlers = {
-        onCopy: (e: React.ClipboardEvent) => e.preventDefault(),
-        onCut: (e: React.ClipboardEvent) => e.preventDefault(),
-    }
+    const copyBlockHandlers = disableCopy
+        ? {
+            onCopy: (e: React.ClipboardEvent) => e.preventDefault(),
+            onCut: (e: React.ClipboardEvent) => e.preventDefault(),
+        }
+        : {}
 
     const [testsLoaded, setTestsLoaded] = useState(false)
     const [payload, setPayload] = useState<AnyPayload>({ results: [] })
@@ -414,6 +427,18 @@ export default function DiffView(props: DiffViewProps) {
         [diffFilesAll, selectedDiffId]
     )
 
+    useEffect(() => {
+        if (!onActiveTestcaseChange) return
+        if (!selectedFile) return
+        onActiveTestcaseChange({
+            name: selectedFile.test,
+            num: selectedFile.num,
+            passed: selectedFile.passed,
+            longDiff: selectedFile.longDiff ?? '',
+            shortDiff: selectedFile.shortDiff ?? '',
+        })
+    }, [selectedFile, onActiveTestcaseChange])
+
     const showDiffModeToggle = useMemo(() => {
         if (!selectedFile || selectedFile.passed) return false
         return !selectedFile.shortDiffSameAsLong
@@ -471,11 +496,15 @@ export default function DiffView(props: DiffViewProps) {
                 ? 'java'
                 : 'clike'
 
-    const isLineClickable = Boolean(onLineClick)
+    const isLineClickable = Boolean(onLineMouseDown)
 
     const DiffViewSection = () => {
         return (
-            <section className="diff-view no-user-select" {...copyBlockHandlers} ref={diffViewRef}>
+            <section
+                className={`diff-view ${disableCopy ? 'no-user-select' : ''}`}
+                {...copyBlockHandlers}
+                ref={diffViewRef}
+            >
                 <aside className="diff-sidebar">
                     <ul className="diff-file-list">
                         {!testsLoaded && <li className="muted">Loading…</li>}
@@ -672,6 +701,7 @@ export default function DiffView(props: DiffViewProps) {
                     <div
                         className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
                         ref={effectiveCodeContainerRef}
+                        onMouseLeave={onLineMouseUp ? () => onLineMouseUp() : undefined}
                         role="region"
                         aria-label="Submitted source code"
                     >
@@ -688,11 +718,12 @@ export default function DiffView(props: DiffViewProps) {
                                         }}
                                         {...lineProps}
                                         className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
-                                        onClick={onLineClick ? (e) => onLineClick(lineNo, e) : undefined}
+                                        onMouseDown={onLineMouseDown ? () => onLineMouseDown(lineNo) : undefined}
                                         onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
                                         onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
+                                        onMouseUp={onLineMouseUp ? () => onLineMouseUp() : undefined}
                                         title={
-                                            onLineClick ? 'Click this line to add or view grading errors' : undefined
+                                            onLineMouseDown ? 'Click this line to add or view grading errors' : undefined
                                         }
                                     >
                                         <span className="gutter">
@@ -719,7 +750,7 @@ export default function DiffView(props: DiffViewProps) {
             {rightPanel ? (
                 <div className="diff-code-panel">
                     <div className="diff-and-code">
-                        <DiffViewSection/>
+                        <DiffViewSection />
 
                         {betweenDiffAndCode}
 
@@ -753,17 +784,18 @@ export default function DiffView(props: DiffViewProps) {
                                         </div>
                                     )}
 
-                                    <CodeSection/>
+                                    <CodeSection />
                                 </>
                             )}
                         </section>
+                        {belowCode}
                     </div>
 
                     {rightPanel}
                 </div>
             ) : (
                 <>
-                    <DiffViewSection/>
+                    <DiffViewSection />
 
                     {betweenDiffAndCode}
 
@@ -797,10 +829,11 @@ export default function DiffView(props: DiffViewProps) {
                                     </div>
                                 )}
 
-                                <CodeSection/>
+                                <CodeSection />
                             </>
                         )}
                     </section>
+                    {belowCode}
                 </>
             )}
         </>

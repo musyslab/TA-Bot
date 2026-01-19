@@ -280,10 +280,20 @@ class ProjectRepository():
         db.session.commit()
     
     def get_className_by_projectId(self, project_id):
-        project = Projects.query.filter(Projects.Id == project_id).first()
-        class_obj = Classes.query.filter(Classes.Id ==project.ClassId).first()
-        return class_obj.Name
+        try:
+            pid = int(project_id)
+        except (TypeError, ValueError):
+            return ""
 
+        project = Projects.query.filter(Projects.Id == pid).first()
+        if project is None:
+            return ""
+
+        class_obj = Classes.query.filter(Classes.Id == project.ClassId).first()
+        if class_obj is None:
+            return ""
+
+        return class_obj.Name
 
     def get_class_id_by_name(self, class_name):
         class_id = Classes.query.filter(Classes.Name==class_name).first().Id

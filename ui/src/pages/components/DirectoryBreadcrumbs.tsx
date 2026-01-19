@@ -11,13 +11,22 @@ interface DirectoryBreadcrumbsProps {
     items: DirectoryCrumb[]
     trailingSeparator?: boolean // true => "Class Selection/"
     className?: string
+    confirmOnNavigate?: boolean
+    confirmMessage?: string
 }
 
 const DirectoryBreadcrumbs: React.FC<DirectoryBreadcrumbsProps> = ({
     items,
     trailingSeparator = false,
     className = "",
+    confirmOnNavigate = false,
+    confirmMessage = "You have unsaved changes. Leave this page?",
 }) => {
+    const handleLinkClick = (e: React.MouseEvent) => {
+        if (!confirmOnNavigate) return
+        const ok = window.confirm(confirmMessage)
+        if (!ok) e.preventDefault()
+    }
     return (
         <nav className={`directory ${className}`.trim()} aria-label="Directory">
             <ol className="directory__list">
@@ -27,7 +36,7 @@ const DirectoryBreadcrumbs: React.FC<DirectoryBreadcrumbsProps> = ({
 
                     const content =
                         item.to && !isLast ? (
-                            <Link className="directory__link" to={item.to}>
+                            <Link className="directory__link" to={item.to} onClick={handleLinkClick}>
                                 {item.label}
                             </Link>
                         ) : (

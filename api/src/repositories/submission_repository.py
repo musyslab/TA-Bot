@@ -1,4 +1,5 @@
 from collections import defaultdict
+import json
 import os
 from src.repositories.database import db
 from .models import StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users, SubmissionManualErrors
@@ -192,7 +193,14 @@ class SubmissionRepository():
 
     def Submit_Student_OH_question(self, question, user_id, project_id):
         dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        student_question = OHVisits(StudentQuestionscol=question, StudentId=user_id, dismissed=0, ruling=-1, TimeSubmitted=dt_string, projectId=project_id)
+        student_question = OHVisits(
+            StudentQuestionscol=question,
+            StudentId=user_id,
+            dismissed=0,
+            ruling=-1,
+            TimeSubmitted=dt_string,
+            projectId=int(project_id),
+        )
         db.session.add(student_question)
         db.session.commit()
         return str(student_question.Sqid)
@@ -696,41 +704,70 @@ class SubmissionRepository():
             db.session.rollback()
             return 0
 
-    def save_manual_grading(self, submission_id, grade, errors):
+    def save_manual_grading(self, submission_id, grade, scoring_mode, error_points, errors, error_defs):
         try:
-            # update grade in StudentGrades table
-            sub = Submissions.query.get(submission_id) 
-            
-            sid = sub.User #student ID
-            pid = sub.Project # project ID
+            sub = Submissions.query.get(submission_id)
+            if sub is None:
+                return False
 
-            grades = StudentGrades.query.filter(StudentGrades.Sid == sid).filter(StudentGrades.Pid == pid).first()
+            sid = sub.User
+            pid = sub.Project
+
+            # Persist grade + grading configuration so refresh recomputes the same result.
+            grades = (StudentGrades.query
+                .filter(StudentGrades.Sid == sid)
+                .filter(StudentGrades.Pid == pid)
+                .first())
+
+            mode = scoring_mode if scoring_mode in ("perInstance", "flatPerError") else "perInstance"
+            clean_pts = {}
+            for k, v in ((error_points or {}).items() if isinstance(error_points, dict) else []):
+                try:
+                    clean_pts[str(k)] = max(0, int(v))
+                except Exception:
+                    pass
+            points_json = json.dumps(clean_pts, sort_keys=True)
+
+            # error_defs now stores custom defs INCLUDING default points
+            defs_json = json.dumps(error_defs or {}, sort_keys=True)
+
             if grades:
-                grades.Grade = grade
+                grades.Grade = int(grade) if grade is not None else grades.Grade
+                grades.SubmissionId = int(submission_id)
+                grades.ScoringMode = mode
+                grades.ErrorPointsJson = points_json
+                grades.ErrorDefsJson = defs_json
+                grades.UpdatedAt = datetime.utcnow()
             else:
-                #add new grade entry if none exists
                 new_grade = StudentGrades(
                     Sid=sid,
                     Pid=pid,
-                    Grade=grade
+                    Grade=int(grade) if grade is not None else 0,
+                    SubmissionId=int(submission_id),
+                    ScoringMode=mode,
+                    ErrorPointsJson=points_json,
+                    ErrorDefsJson=defs_json,
+                    UpdatedAt=datetime.utcnow(),
                 )
                 db.session.add(new_grade)
-            
-            # delete existing errors
+
+            # Replace error rows for this submission (now with counts).
             SubmissionManualErrors.query.filter_by(SubmissionId=submission_id).delete()
 
-            # add new errors
-            for error in errors:
+            for error in (errors or []):
                 new_err = SubmissionManualErrors(
-                    SubmissionId=submission_id,
-                    LineNumber=error['line'],
-                    ErrorId=error['errorId']
+                    SubmissionId=int(submission_id),
+                    StartLine=int(error.get('startLine')),
+                    EndLine=int(error.get('endLine')),
+                    ErrorId=str(error.get('errorId')),
+                    Count=max(1, int(error.get('count', 1))),
+                    Note=str(error.get('note', '') or ''),
                 )
                 db.session.add(new_err)
 
             db.session.commit()
             return True
-        except Exception as e:
+        except Exception:
             db.session.rollback()
             return False
             
@@ -741,6 +778,123 @@ class SubmissionRepository():
         
         # convert to list of dicts
         return [
-            {'line': e.LineNumber, 'errorId': e.ErrorId} 
+            {
+                'startLine': e.StartLine,
+                'endLine': e.EndLine,
+                'errorId': e.ErrorId,
+                'count': getattr(e, "Count", 1) or 1,
+                'note': getattr(e, "Note", "") or ""
+            }
             for e in errors
         ]
+
+    def get_manual_grade_config(self, submission_id: int):
+        """
+        Return persisted manual grading config for the submission's (Sid,Pid) row in StudentGrades.
+        """
+        sub = Submissions.query.get(int(submission_id))
+        if sub is None:
+            return {"grade": None, "scoringMode": "perInstance", "errorPoints": {}}
+
+        sid = sub.User
+        pid = sub.Project
+
+        row = (StudentGrades.query
+            .filter(StudentGrades.Sid == sid)
+            .filter(StudentGrades.Pid == pid)
+            .first())
+
+        if row is None:
+            return {"grade": None, "scoringMode": "perInstance", "errorPoints": {}}
+
+        # ScoringMode and ErrorPointsJson may not exist yet if DB migration wasn't applied.
+        mode = getattr(row, "ScoringMode", None)
+        if mode not in ("perInstance", "flatPerError"):
+            mode = "perInstance"
+
+        raw_pts = getattr(row, "ErrorPointsJson", None) or "{}"
+        try:
+            pts = json.loads(raw_pts) if isinstance(raw_pts, str) else (raw_pts or {})
+        except Exception:
+            pts = {}
+
+        raw_defs = getattr(row, "ErrorDefsJson", None) or "{}"
+        try:
+            defs = json.loads(raw_defs) if isinstance(raw_defs, str) else (raw_defs or {})
+        except Exception:
+            defs = {}
+
+        return {"grade": getattr(row, "Grade", None), "scoringMode": mode, "errorPoints": pts, "errorDefs": defs}
+    
+    def get_oh_visits_by_projectId(self, project_id):
+        """
+        Helper to get all OHVisits entries for a given project_id.
+        Returns list of OHVisits objects.
+        """
+        visits = OHVisits.query.filter(OHVisits.projectId == project_id).filter(OHVisits.ruling == 1).all()
+        student_ids = []
+        for i in visits:
+            student_ids.append(i.StudentId)
+
+        return student_ids
+
+    def get_project_grade_info(self, project_id: int):
+        # Get all students grade info from a project (ID, grade, submission ID, error json)
+        grade_rows = StudentGrades.query.filter(StudentGrades.Pid == project_id).all()
+        grades_by_student = {}
+        for g in grade_rows:
+            raw_pts = getattr(g, "ErrorPointsJson", None) or "{}"
+            try:
+                pts = json.loads(raw_pts) if isinstance(raw_pts, str) else (raw_pts or {})
+            except Exception:
+                pts = {}
+
+            raw_defs = getattr(g, "ErrorDefsJson", None) or "{}"
+            try:
+                defs = json.loads(raw_defs) if isinstance(raw_defs, str) else (raw_defs or {})
+            except Exception:
+                defs = {}    
+
+            grades_by_student[g.Sid] = {
+                'grade': getattr(g, "Grade", None),
+                'submission_id': getattr(g, "SubmissionId", None),
+                'scoring_mode': getattr(g, "ScoringMode", None),
+                'error_points': pts,
+                'error_defs': defs
+            }
+
+        # Get all student school id numbers
+        database_ids = list(grades_by_student.keys())
+        student_numbers = Users.query.filter(Users.Id.in_(database_ids)).all()
+        numbers_by_student = defaultdict(str)
+        for num in student_numbers:
+            numbers_by_student[num.Id] = num.StudentNumber
+
+        # Get all errors by submission
+        submission_ids = [v['submission_id'] for v in grades_by_student.values()]
+        errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId.in_(submission_ids)).all()
+        errors_by_submission = defaultdict(list)
+        for e in errors:
+            errors_by_submission[e.SubmissionId].append(e)
+
+        rows = []
+        for sid, data in grades_by_student.items():
+            error_list = errors_by_submission.get(data['submission_id'], [])
+            error_data = [{
+                'errorId': getattr(e, "ErrorId", None),
+                'startLine': getattr(e, "StartLine", None),
+                'endLine': getattr(e, "EndLine", None),
+                'count': getattr(e, "Count", None),
+                'note': getattr(e, "Note", "") or ""
+            } for e in error_list]
+
+            rows.append({
+                'number': numbers_by_student[sid],
+                'grade': data['grade'],
+                'points': data['error_points'],
+                'scoring_mode': data['scoring_mode'],
+                'error_defs': data['error_defs'],
+                'description': error_data
+            })
+
+        return rows

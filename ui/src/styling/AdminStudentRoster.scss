@@ -122,6 +122,25 @@
             }
 
         }
+
+        .export-btn {
+            margin-left: 12px;
+            min-height: 36px;
+            padding: 0.45rem 0.75rem;
+            border-radius: 10px;
+            background: #3b82f6;
+            border-color: #3b82f6;
+            color: #ffffff;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+
+            &:hover {
+                background: #2563eb;
+                border-color: #2563eb;
+            }
+
+        }
     }
 
     .actions-bar {
@@ -325,4 +344,202 @@
             }
         }
     }
+}
+
+.office-hours-indicator {
+  position: relative;
+  display: inline-block;
+  margin-left: 8px;
+  color: #17a2b8;
+  cursor: help;
+  font-size: 1.1em;
+  vertical-align: middle;
+
+  &::after,
+  &::before {
+    position: absolute;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease-in-out;
+    z-index: 1000;
+    pointer-events: none;
+  }
+
+  &::after {
+    content: attr(data-tooltip);
+    bottom: 125%; 
+    
+    left: -0.5rem; 
+    transform: none; 
+    
+    background-color: #333;
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+    font-size: 0.85rem;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  }
+
+  &::before {
+    content: "";
+    bottom: 115%;
+    
+    left: 50%; 
+    transform: translateX(-50%); 
+    
+    border-width: 5px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+  }
+
+  &:hover {
+    &::after {
+      opacity: 1;
+      visibility: visible;
+      bottom: 135%; 
+    }
+
+    &::before {
+      opacity: 1;
+      visibility: visible;
+      bottom: 125%;
+    }
+  }
+}
+
+/* ===== Similarity heat styling (yellow -> orange -> red) ===== */
+.testcase-modal .results-table td.status-cell {
+    font-weight: 800;
+}
+
+/* low similarity: neutral */
+.testcase-modal .results-table td.status-cell.sim-low {
+    color: #111827;
+    background: transparent;
+}
+
+/* 40-60%: yellow */
+.testcase-modal .results-table td.status-cell.sim-medlow {
+    color: #92400e;
+    background: rgba(252, 211, 77, 0.22);
+    /* amber */
+}
+
+/* 60-75%: orange */
+.testcase-modal .results-table td.status-cell.sim-medium {
+    color: #9a3412;
+    background: rgba(251, 146, 60, 0.22);
+    /* orange */
+}
+
+/* 75-90%: red-orange */
+.testcase-modal .results-table td.status-cell.sim-high {
+    color: #9f1239;
+    background: rgba(244, 63, 94, 0.16);
+    /* rose */
+}
+
+/* 90-100%: red */
+.testcase-modal .results-table td.status-cell.sim-critical {
+    color: #7f1d1d;
+    background: rgba(239, 68, 68, 0.18);
+    /* red */
+}
+
+/* ===== Pagination bar styling ===== */
+.testcase-modal .pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 0 4px;
+}
+
+.testcase-modal .page-btn {
+    min-width: 34px;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    color: #111827;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.testcase-modal .page-btn:hover {
+    background: #f3f4f6;
+}
+
+.testcase-modal .page-btn.active {
+    background: #111827;
+    border-color: #111827;
+    color: #fff;
+}
+
+.testcase-modal .page-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* ===== Fix close (X) layering ===== */
+
+/* Ensure overlay is behind modal */
+.modal-overlay {
+    z-index: 1000;
+}
+
+/* Ensure modal is above overlay */
+.testcase-modal {
+    position: fixed;
+    /* important for z-index to behave predictably */
+    z-index: 1100;
+}
+
+/* Make X sit above EVERYTHING inside the modal */
+.testcase-modal .modal-close-button {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 1200;
+    /* higher than modal content */
+}
+
+/* Give header room so X doesn't overlap the title */
+.testcase-modal .modal-header {
+    padding-right: 60px;
+}
+
+/* ===== "View" button styling in plagiarism modal ===== */
+.testcase-modal .results-table td .view-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+
+    padding: 6px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+
+    background: #ffffff;
+    color: #1d4ed8;
+    font-weight: 700;
+    text-decoration: none;
+
+    min-height: 32px;
+    line-height: 1;
+}
+
+.testcase-modal .results-table td .view-link:hover {
+    background: #f3f4f6;
+    text-decoration: none;
+}
+
+.testcase-modal .results-table td .view-link:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
 }

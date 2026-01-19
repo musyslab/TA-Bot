@@ -60,6 +60,17 @@
     max-width: 750px;
 }
 
+/* JSON upload preview: vertically center filename in the preview row */
+.file-preview.json-file-preview {
+    align-items: center;
+}
+
+.file-icon-wrapper .file-language-icon.json {
+    font-size: 15px !important;
+    top: calc(50% + 5px);
+    left: 50%;
+}
+
 .exchange-icon {
     position: absolute;
     top: -12px;
