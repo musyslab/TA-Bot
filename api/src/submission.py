@@ -1,7 +1,6 @@
 from datetime import timedelta
 import os
 import threading
-
 import requests
 import urllib3
 from src.repositories.user_repository import UserRepository
@@ -26,6 +25,34 @@ from container import Container
 from urllib.parse import unquote
 from openpyxl import Workbook
 from src.ai_suggestions import ERROR_DEFS
+
+# Default grading error definitions (must match AdminGrading.tsx BASE_ERROR_DEFS).
+# We store them here so exports can resolve default point values when ErrorPointsJson
+# only contains overrides (for DB efficiency).
+ADMIN_GRADING_ERROR_DEFS = [
+    {"id": "MISSPELL", "label": "Spelling or word substitution error", "description": "A word or short phrase is wrong compared to expected output (including valid English words used incorrectly, missing/extra letters, or wrong small words) when the rest of the line is otherwise correct.", "points": 10},
+    {"id": "FORMAT", "label": "Formatting mismatch", "description": "Correct content but incorrect formatting (spacing/newlines/case/spelling/precision).", "points": 5},
+    {"id": "CONTENT", "label": "Missing or extra required content", "description": "Required value/line is missing, or additional unexpected value/line is produced.", "points": 20},
+    {"id": "ORDER", "label": "Order mismatch", "description": "Reads inputs or prints outputs in the wrong order relative to the required sequence.", "points": 15},
+    {"id": "INIT_STATE", "label": "Incorrect initialization", "description": "Uses uninitialized values or starts with the wrong initial state.", "points": 20},
+    {"id": "STATE_MISUSE", "label": "Incorrect variable or state use", "description": "Wrong variable used, wrong type behavior (truncation), overwritten state, or flag not managed correctly.", "points": 15},
+    {"id": "COMPUTE", "label": "Incorrect computation", "description": "Wrong formula, precedence, numeric operation, or derived value.", "points": 20},
+    {"id": "CONDITION", "label": "Incorrect condition logic", "description": "Incorrect comparison, boundary, compound logic, or missing edge case handling.", "points": 15},
+    {"id": "BRANCHING", "label": "Incorrect branching structure", "description": "Wrong if/elif/else structure (misbound else), missing default case, or missing break in selection-like logic.", "points": 15},
+    {"id": "LOOP", "label": "Incorrect loop logic", "description": "Wrong bounds/termination, update/control error, off-by-one, wrong nesting, or accumulation error.", "points": 20},
+    {"id": "INDEXING", "label": "Incorrect indexing or collection setup", "description": "Out-of-bounds, wrong base/range, or incorrect array/string/list setup (size or contents).", "points": 20},
+    {"id": "FUNCTIONS", "label": "Incorrect function behavior or use", "description": "Wrong return behavior (missing/ignored/wrong type) or incorrect function use (scope/order/unnecessary re-calls).", "points": 15},
+    {"id": "COMPILE", "label": "Program did not compile", "description": "Code fails to compile or run due to syntax errors, missing imports/includes, or build/runtime errors that prevent execution.", "points": 40},
+]
+
+ADMIN_GRADING_DEFAULT_DEFS_MAP = {
+    e["id"]: {
+        "label": e.get("label", e["id"]),
+        "description": e.get("description", ""),
+        "points": int(e.get("points", 0) or 0),
+    }
+    for e in ADMIN_GRADING_ERROR_DEFS
+}
 
 ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
@@ -589,8 +616,9 @@ def save_grading(submission_repo: SubmissionRepository = Provide[Container.submi
     grade = input_json.get('grade')
     scoring_mode = input_json.get('scoringMode')
     error_points = input_json.get('errorPoints')
+    error_defs = input_json.get('errorDefs')
     errors = input_json.get('errors')  # Expecting list: [{startLine,endLine,errorId,count}, ...]
-    success = submission_repo.save_manual_grading(submission_id, grade, scoring_mode, error_points, errors)
+    success = submission_repo.save_manual_grading(submission_id, grade, scoring_mode, error_points, errors, error_defs)
 
     # 3. Respond to the frontend
     if success:
@@ -613,6 +641,7 @@ def get_grading(submission_id, submission_repo: SubmissionRepository = Provide[C
         'grade': cfg.get('grade'),
         'scoringMode': cfg.get('scoringMode'),
         'errorPoints': cfg.get('errorPoints'),
+        'errorDefs': cfg.get('errorDefs'),
     })
 
 @submission_api.route('/exportprojectgrades', methods=['GET'])
@@ -635,11 +664,21 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
     ws.append(headers)
 
     # Create excel rows
-    error_defs_map = {e['id']: e for e in ERROR_DEFS}
+    base_defs_map = dict(ADMIN_GRADING_DEFAULT_DEFS_MAP)
+
     for row in grade_list:
-        pts_dict = row['points']
+        pts_dict = row['points'] or {}
         scoring_mode = row['scoring_mode']
         error_data = row['description']
+        row_defs = row.get('error_defs') or {}
+        defs_map = dict(base_defs_map)
+        for k, v in (row_defs.items() if isinstance(row_defs, dict) else []):
+            if isinstance(v, dict):
+                defs_map[str(k)] = {
+                    'label': str(v.get('label', k)),
+                    'description': str(v.get('description', '')),
+                    'points': int(v.get('points', 0) or 0),
+                }
         desc_lines = []
         description = ''
 
@@ -648,17 +687,29 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
             end = error['endLine']
             errorId = error['errorId']
             count = error['count']
-            error_def = error_defs_map.get(errorId)
+            note = error.get('note', '')
+            error_def = defs_map.get(errorId, {'label': errorId, 'description': '', 'points': 0})
             line_str = ''
 
+            base_pts = int(error_def.get('points', 0) or 0)
+            # ErrorPointsJson now stores overrides only. If there is no override, use base_pts.
+            override_raw = pts_dict.get(errorId) if isinstance(pts_dict, dict) else None
+            if override_raw is None:
+                eff_pts = base_pts
+            else:
+                try:
+                    eff_pts = max(0, int(override_raw))
+                except Exception:
+                    eff_pts = base_pts
+
             if scoring_mode == "perInstance":
-                pts = int(pts_dict[errorId]) * count
+                pts = eff_pts * count
                 if count > 1:
                     line_str += f'{count}x '
             else:
-                pts = int(pts_dict[errorId])
+                pts = eff_pts
 
-            line_str += f"[{error_def['label']}] "
+            line_str += f"[{error_def.get('label', errorId)}] "
 
             if start == end:
                 line_str += f'Line {start}'
@@ -668,9 +719,9 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
             line_str += f' (-{pts} pts):'
             desc_lines.append(line_str)
 
-            if error_def:
-                desc_lines.append(f"{error_def['description']}")
-                desc_lines.append('')
+            if isinstance(note, str) and note.strip():
+                desc_lines.append(f"Note: {note.strip()}")
+            desc_lines.append('')
 
         if not error_data:
             desc_lines.append('Great Job!')

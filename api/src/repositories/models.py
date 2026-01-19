@@ -117,6 +117,7 @@ class StudentGrades(db.Model):
     SubmissionId = Column(Integer, ForeignKey('Submissions.Id'))
     ScoringMode = Column(String(20))
     ErrorPointsJson = Column(String(10000))
+    ErrorDefsJson = Column(String(20000))
     UpdatedAt = Column(DateTime)
 
 class StudentSuggestions(db.Model):
@@ -149,8 +150,9 @@ class SubmissionChargeRedeptions(db.Model):
 class SubmissionManualErrors(db.Model):
     __tablename__ = "SubmissionManualErrors"
     Id = Column(Integer, primary_key=True, autoincrement=True)
-    SubmissionId = Column(Integer)
+    SubmissionId = Column(Integer, ForeignKey('Submissions.Id'))
     StartLine = Column(Integer)
     EndLine = Column(Integer)
-    ErrorId = Column(String(45))
+    ErrorId = Column(String(80))
     Count = Column(Integer)
+    Note = Column(String(2000))

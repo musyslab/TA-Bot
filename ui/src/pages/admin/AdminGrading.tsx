@@ -22,6 +22,7 @@ type ObservedError = {
     endLine: number
     errorId: string
     count: number
+    note?: string
 }
 
 type LineRange = {
@@ -137,20 +138,55 @@ export function AdminGrading() {
         [],
     )
 
-    // Points are now editable (global per errorId for this grading session/page).
-    const [errorPoints, setErrorPoints] = useState<Record<string, number>>(() => {
+    // Custom (user-created) error defs for this grading session/page (persisted with grading config)
+    const [customErrorDefs, setCustomErrorDefs] = useState<ErrorOption[]>([])
+    const [newCustomLabel, setNewCustomLabel] = useState<string>('')
+    const [newCustomPoints, setNewCustomPoints] = useState<number>(10)
+    const [customAddError, setCustomAddError] = useState<string | null>(null)
+
+    const makeCustomErrorId = () => `CUST_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`.toUpperCase()
+
+    const addCustomErrorDef = () => {
+        const label = newCustomLabel.trim()
+        if (!label) {
+            setCustomAddError('Label is required.')
+            return
+        }
+        const id = makeCustomErrorId()
+        const pts = Number.isFinite(newCustomPoints) ? Math.max(0, Math.floor(newCustomPoints)) : 0
+
+        setCustomErrorDefs((prev) => [...prev, { id, label, description: '', points: pts }])
+        setErrorPoints((prev) => ({ ...prev, [id]: pts }))
+        setNewCustomLabel('')
+        setNewCustomPoints(10)
+        setCustomAddError(null)
+        setSaveStatus('idle')
+    }
+
+    const ALL_ERROR_DEFS = useMemo<ErrorOption[]>(() => [...BASE_ERROR_DEFS, ...customErrorDefs], [BASE_ERROR_DEFS, customErrorDefs])
+
+    // Store ONLY overrides (modified points). Defaults come from ALL_ERROR_DEFS.
+    const [errorPoints, setErrorPoints] = useState<Record<string, number>>({})
+
+    const DEFAULT_POINTS_MAP = useMemo<Record<string, number>>(() => {
         const m: Record<string, number> = {}
-        for (const e of BASE_ERROR_DEFS) m[e.id] = e.points
+        for (const e of ALL_ERROR_DEFS) m[e.id] = Number.isFinite(e.points) ? Math.max(0, e.points) : 0
         return m
-    })
+    }, [ALL_ERROR_DEFS])
+
+    const getEffectivePoints = (errorId: string) => {
+        const o = errorPoints[errorId]
+        if (Number.isFinite(o)) return Math.max(0, o)
+        return Number.isFinite(DEFAULT_POINTS_MAP[errorId]) ? Math.max(0, DEFAULT_POINTS_MAP[errorId]) : 0
+    }
 
     const ERROR_DEFS = useMemo<ErrorOption[]>(
         () =>
-            BASE_ERROR_DEFS.map((e) => ({
+            ALL_ERROR_DEFS.map((e) => ({
                 ...e,
-                points: Number.isFinite(errorPoints[e.id]) ? Math.max(0, errorPoints[e.id]) : e.points,
+                points: getEffectivePoints(e.id),
             })),
-        [BASE_ERROR_DEFS, errorPoints],
+        [ALL_ERROR_DEFS, errorPoints, DEFAULT_POINTS_MAP],
     )
 
     const ERROR_MAP = useMemo<Record<string, ErrorOption>>(() => {
@@ -162,8 +198,15 @@ export function AdminGrading() {
     const bumpErrorPoints = (errorId: string, delta: number) => {
         if (!delta) return
         setErrorPoints((prev) => {
-            const cur = Number.isFinite(prev[errorId]) ? prev[errorId] : 0
-            const next = Math.max(0, cur + delta)
+            const curEffective = Number.isFinite(prev[errorId]) ? prev[errorId] : getEffectivePoints(errorId)
+            const next = Math.max(0, curEffective + delta)
+            const def = Number.isFinite(DEFAULT_POINTS_MAP[errorId]) ? Math.max(0, DEFAULT_POINTS_MAP[errorId]) : 0
+
+            // If back to default, remove override key.
+            if (next === def) {
+                const { [errorId]: _removed, ...rest } = prev
+                return rest
+            }
             return { ...prev, [errorId]: next }
         })
         setSaveStatus('idle')
@@ -202,7 +245,7 @@ export function AdminGrading() {
             const idx = prev.findIndex((e) => e.startLine === start && e.endLine === end && e.errorId === errorId)
             if (idx === -1) {
                 if (delta < 0) return prev
-                return [...prev, { startLine: start, endLine: end, errorId: errorId, count: delta }]
+                return [...prev, { startLine: start, endLine: end, errorId: errorId, count: delta, note: '' }]
             }
 
             const next = [...prev]
@@ -217,6 +260,13 @@ export function AdminGrading() {
             return next
         })
 
+        setSaveStatus('idle')
+    }
+
+    const setErrorNote = (start: number, end: number, errorId: string, note: string) => {
+        setObservedErrors((prev) =>
+            prev.map((e) => (e.startLine === start && e.endLine === end && e.errorId === errorId ? { ...e, note } : e)),
+        )
         setSaveStatus('idle')
     }
 
@@ -293,6 +343,12 @@ export function AdminGrading() {
         const pts = ERROR_MAP[errorId]?.points ?? 0
         if (scoringMode === 'flatPerError') return pts
         return pts * Math.max(1, count)
+    }
+
+    const autoResizeTextarea = (el: HTMLTextAreaElement | null) => {
+        if (!el) return
+        el.style.height = 'auto'
+        el.style.height = `${el.scrollHeight}px`
     }
 
     const totalPoints = useMemo(() => {
@@ -451,14 +507,28 @@ export function AdminGrading() {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then((response) => {
-                const { errors, scoringMode: savedMode, errorPoints: savedPoints } = response.data
+                const { errors, scoringMode: savedMode, errorPoints: savedPoints, errorDefs: savedDefs } = response.data
 
                 if (savedMode === 'perInstance' || savedMode === 'flatPerError') {
                     setScoringMode(savedMode)
                 }
 
                 if (savedPoints && typeof savedPoints === 'object') {
-                    setErrorPoints((prev) => ({ ...prev, ...savedPoints }))
+                    setErrorPoints(savedPoints as Record<string, number>)
+                } else {
+                    setErrorPoints({})
+                }
+
+                if (savedDefs && typeof savedDefs === 'object') {
+                    const defsArr: ErrorOption[] = Object.entries(savedDefs).map(([id, meta]) => ({
+                        id: String(id),
+                        label: String((meta as any)?.label ?? id),
+                        description: String((meta as any)?.description ?? ''),
+                        points: Number.isFinite((meta as any)?.points) ? Math.max(0, Number((meta as any).points)) : 0,
+                    }))
+                    setCustomErrorDefs(defsArr)
+                } else {
+                    setCustomErrorDefs([])
                 }
 
                 const nextErrors: ObservedError[] = (Array.isArray(errors) ? errors : []).map((item: any) => ({
@@ -466,8 +536,26 @@ export function AdminGrading() {
                     endLine: Number(item.endLine),
                     errorId: String(item.errorId),
                     count: Math.max(1, Number(item.count ?? 1)),
+                    note: typeof item.note === 'string' ? item.note : '',
                 }))
                 setObservedErrors(nextErrors)
+
+                const modeForSig: ScoringMode = savedMode === 'flatPerError' ? 'flatPerError' : 'perInstance'
+                const pointsForSig = savedPoints && typeof savedPoints === 'object' ? (savedPoints as Record<string, number>) : {}
+                const defsForSig: ErrorOption[] =
+                    savedDefs && typeof savedDefs === 'object'
+                        ? Object.entries(savedDefs).map(([id, meta]) => ({
+                            id: String(id),
+                            label: String((meta as any)?.label ?? id),
+                            description: String((meta as any)?.description ?? ''),
+                            points: Number.isFinite((meta as any)?.points) ? Math.max(0, Number((meta as any).points)) : 0,
+                        }))
+                        : []
+
+                savedSignatureRef.current = computeSignatureFromParts(nextErrors, modeForSig, pointsForSig, defsForSig)
+                setIsDirty(false)
+                setSaveStatus('idle')
+
             })
             .catch((err) => console.error('Could not load saved grading:', err))
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -476,6 +564,70 @@ export function AdminGrading() {
     // Handles saving grading errors
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
+    // Unsaved changes tracking (dirty state)
+    const [isDirty, setIsDirty] = useState<boolean>(false)
+    const savedSignatureRef = useRef<string>('') // last loaded/saved snapshot
+
+    const computeSignatureFromParts = (
+        errs: ObservedError[],
+        mode: ScoringMode,
+        points: Record<string, number>,
+        defs: ErrorOption[],
+    ) => {
+        const sortedErrs = [...errs].sort((a, b) => {
+            if (a.startLine !== b.startLine) return a.startLine - b.startLine
+            if (a.endLine !== b.endLine) return a.endLine - b.endLine
+            return a.errorId.localeCompare(b.errorId)
+        })
+
+        const sortedDefs = [...defs]
+            .map((d) => ({
+                id: String(d.id),
+                label: String(d.label ?? ''),
+                description: String(d.description ?? ''),
+                points: Math.max(0, Math.floor(Number(d.points ?? 0))),
+            }))
+            .sort((a, b) => a.id.localeCompare(b.id))
+
+        const sortedPointsEntries = Object.entries(points ?? {})
+            .map(([k, v]) => [String(k), Math.max(0, Math.floor(Number(v ?? 0)))] as const)
+            .sort(([a], [b]) => a.localeCompare(b))
+
+        return JSON.stringify({
+            scoringMode: mode,
+            errorPoints: sortedPointsEntries,
+            errorDefs: sortedDefs,
+            errors: sortedErrs.map((e) => ({
+                startLine: Number(e.startLine),
+                endLine: Number(e.endLine),
+                errorId: String(e.errorId),
+                count: Math.max(1, Number(e.count ?? 1)),
+                note: String(e.note ?? ''),
+            })),
+        })
+    }
+
+    const currentSignature = useMemo(
+        () => computeSignatureFromParts(observedErrors, scoringMode, errorPoints, customErrorDefs),
+        [observedErrors, scoringMode, errorPoints, customErrorDefs],
+    )
+
+    useEffect(() => {
+        const dirty = savedSignatureRef.current !== '' && currentSignature !== savedSignatureRef.current
+        setIsDirty(dirty)
+    }, [currentSignature])
+
+    // Warn before leaving the page if there are unsaved changes (tab close/refresh/navigate away)
+    useEffect(() => {
+        const onBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (!isDirty) return
+            e.preventDefault()
+            e.returnValue = ''
+        }
+        window.addEventListener('beforeunload', onBeforeUnload)
+        return () => window.removeEventListener('beforeunload', onBeforeUnload)
+    }, [isDirty])
+
     const serializeErrorsForSave = (errs: ObservedError[]) => {
         // New backend supports counts directly.
         return errs.map((e) => ({
@@ -483,11 +635,17 @@ export function AdminGrading() {
             endLine: e.endLine,
             errorId: e.errorId,
             count: Math.max(1, Number(e.count ?? 1)),
+            note: (e.note ?? '').toString(),
         }))
     }
 
     const handleSave = () => {
         setSaveStatus('saving')
+
+        const customDefsForSave: Record<string, { label: string; description: string; points: number }> = {}
+        for (const e of customErrorDefs) {
+            customDefsForSave[e.id] = { label: e.label, description: '', points: Math.max(0, Math.floor(Number(e.points ?? 0))) }
+        }
 
         axios
             .post(
@@ -497,6 +655,7 @@ export function AdminGrading() {
                     grade: grade,
                     scoringMode: scoringMode,
                     errorPoints: errorPoints,
+                    errorDefs: customDefsForSave,
                     errors: serializeErrorsForSave(observedErrors),
                 },
                 {
@@ -507,7 +666,8 @@ export function AdminGrading() {
             )
             .then((response) => {
                 setSaveStatus('saved')
-                console.log(response.data)
+                savedSignatureRef.current = currentSignature
+                setIsDirty(false)
             })
             .catch((error) => {
                 console.error('Failed to save:', error)
@@ -560,6 +720,8 @@ export function AdminGrading() {
                     { label: 'Student List', to: `/admin/${cid}/project/${pid}` },
                     { label: 'Grade Submission' },
                 ]}
+                confirmOnNavigate={isDirty}
+                confirmMessage="You have unsaved changes. Leave this page?"
             />
 
             <div className="pageTitle">Grade Submission: {studentName || 'Unknown Student'}</div>
@@ -672,10 +834,29 @@ export function AdminGrading() {
                                                     <span className="all-errors-line-title">{start === end ? `Line ${start}` : `Lines ${start}-${end}`}</span>
                                                     <span className="all-errors-line-meta">
                                                         {totalCountForRange} {totalCountForRange === 1 ? 'instance' : 'instances'}, -{totalPointsForRange}
+                                                        {isDirty && (
+                                                            <span className="unsaved-badge" title="You have unsaved changes">
+                                                                Unsaved
+                                                            </span>
+                                                        )}
                                                     </span>
                                                 </button>
 
                                                 <div className="all-errors-line-body">
+                                                    <div className="all-errors-table-header" role="row">
+                                                        <div className="col label" role="columnheader">
+                                                            Error
+                                                        </div>
+                                                        <div className="col instances" role="columnheader">
+                                                            Instances
+                                                        </div>
+                                                        <div className="col note" role="columnheader">
+                                                            Comment
+                                                        </div>
+                                                        <div className="col points" role="columnheader">
+                                                            Points
+                                                        </div>
+                                                    </div>
                                                     {errors.map((err, idx) => {
                                                         const meta = ERROR_MAP[err.errorId]
                                                         const label = meta?.label ?? err.errorId
@@ -685,9 +866,11 @@ export function AdminGrading() {
 
                                                         return (
                                                             <div key={`${start}-${end}-${err.errorId}-${idx}`} className="all-errors-item" title={desc}>
-                                                                <div className="all-errors-item-left">
+                                                                <div className="col label">
                                                                     <span className="all-errors-item-label">{label}</span>
+                                                                </div>
 
+                                                                <div className="col instances">
                                                                     <div className="instance-box" aria-label="Instances">
                                                                         <span className={`count-badge ${count > 0 ? 'active' : ''}`}>x{count}</span>
                                                                         <div className="count-controls" aria-label="Adjust count">
@@ -715,28 +898,42 @@ export function AdminGrading() {
                                                                     </div>
                                                                 </div>
 
-                                                                <div className="points-box" aria-label="Point deduction">
-                                                                    <span className="deduction-value">-{shownDeduction}</span>
-                                                                    <div className="points-controls" aria-label="Adjust points">
-                                                                        <button
-                                                                            type="button"
-                                                                            className="points-btn plus"
-                                                                            onClick={() => bumpErrorPoints(err.errorId, 1)}
-                                                                            aria-label="Increase points for this error type"
-                                                                            title="Increase points"
-                                                                        >
-                                                                            +
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            className="points-btn minus"
-                                                                            onClick={() => bumpErrorPoints(err.errorId, -1)}
-                                                                            disabled={(ERROR_MAP[err.errorId]?.points ?? 0) <= 0}
-                                                                            aria-label="Decrease points for this error type"
-                                                                            title="Decrease points"
-                                                                        >
-                                                                            −
-                                                                        </button>
+                                                                <textarea
+                                                                    className="col note error-note"
+                                                                    rows={1}
+                                                                    value={err.note ?? ''}
+                                                                    onChange={(e) => {
+                                                                        setErrorNote(start, end, err.errorId, e.target.value)
+                                                                        autoResizeTextarea(e.currentTarget)
+                                                                    }}
+                                                                    onInput={(e) => autoResizeTextarea(e.currentTarget)}
+                                                                    placeholder="Add optional comment"
+                                                                />
+
+                                                                <div className="col points">
+                                                                    <div className="points-box" aria-label="Point deduction">
+                                                                        <span className="deduction-value">-{shownDeduction}</span>
+                                                                        <div className="points-controls" aria-label="Adjust points">
+                                                                            <button
+                                                                                type="button"
+                                                                                className="points-btn plus"
+                                                                                onClick={() => bumpErrorPoints(err.errorId, 1)}
+                                                                                aria-label="Increase points for this error type"
+                                                                                title="Increase points"
+                                                                            >
+                                                                                +
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                className="points-btn minus"
+                                                                                onClick={() => bumpErrorPoints(err.errorId, -1)}
+                                                                                disabled={(ERROR_MAP[err.errorId]?.points ?? 0) <= 0}
+                                                                                aria-label="Decrease points for this error type"
+                                                                                title="Decrease points"
+                                                                            >
+                                                                                −
+                                                                            </button>
+                                                                        </div>
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -1024,10 +1221,37 @@ export function AdminGrading() {
                                             )
                                         })}
                                     </div>
+
+                                    <div className="custom-error-builder" aria-label="Add custom grading category">
+                                        <div className="custom-error-title">Add a custom category</div>
+                                        <input
+                                            className="custom-error-input"
+                                            type="text"
+                                            value={newCustomLabel}
+                                            onChange={(e) => setNewCustomLabel(e.target.value)}
+                                            placeholder="Category label (required)"
+                                        />
+                                        <div className="custom-error-row">
+                                            <input
+                                                className="custom-error-points"
+                                                type="number"
+                                                min={0}
+                                                value={Number.isFinite(newCustomPoints) ? newCustomPoints : 0}
+                                                onChange={(e) => setNewCustomPoints(Number(e.target.value))}
+                                            />
+                                            <button type="button" className="custom-error-add-btn" onClick={addCustomErrorDef}>
+                                                Add
+                                            </button>
+                                        </div>
+                                        {customAddError && <div className="muted small">{customAddError}</div>}
+                                    </div>
+
                                 </div>
+
                             </details>
 
                             {selectedRange === null && <div className="muted small">Select a line to enable adjusting.</div>}
+
                         </div>
 
                         <div className="grading-section">

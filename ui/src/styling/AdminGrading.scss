@@ -598,7 +598,23 @@
         color: #374151;
         white-space: nowrap;
         font-size: 0.9rem;
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
     }
+}
+
+.unsaved-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    background: rgba(245, 158, 11, 0.12);
+    color: #92400e;
+    font-size: 0.78rem;
+    font-weight: 900;
 }
 
 .all-errors-line-body {
@@ -606,29 +622,57 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+
+    /* Responsive table: allow horizontal scroll when space is tight */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.all-errors-table-header {
+    display: grid;
+    grid-template-columns:
+        minmax(140px, 3fr) minmax(140px, 1fr) minmax(100px, 6fr) minmax(120px, max-content);
+
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid #f1f5f9;
+    border-radius: 10px;
+    background: #f8fafc;
+    min-width: 700px;
+
+    .col {
+        font-weight: 900;
+        color: #374151;
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+    }
+
+    .col.points {
+        margin-left: 9px;
+    }
+
+    .col.instances {
+        margin-left: 3px;
+    }
+
+    .col.note {
+        margin-left: 3px;
+    }
 }
 
 .all-errors-item {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns:
+        minmax(140px, 3fr) minmax(140px, 1fr) minmax(100px, 6fr) minmax(120px, max-content);
     gap: 8px;
     align-items: center;
-
     border: 1px solid #f1f5f9;
     border-radius: 10px;
     padding: 8px 8px;
     background: #ffffff;
-
-    .all-errors-item-left {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        min-width: 0;
-    }
-
-    .points-box {
-        justify-self: end;
-    }
+    min-width: 700px;
 
     .all-errors-item-label {
         font-weight: 800;
@@ -639,6 +683,80 @@
         font-weight: 900;
         color: #b91c1c;
         white-space: nowrap;
+    }
+}
+
+.error-note {
+    width: 100%;
+    border: 1px solid #d6dbe3;
+    border-radius: 10px;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 0.85rem;
+    background: #ffffff;
+    resize: none;
+    overflow: hidden;
+    min-height: 36px;
+    line-height: 1.25;
+}
+
+.all-errors-item .col.points {
+    justify-self: end;
+}
+
+/* Custom error builder at bottom of All errors */
+.custom-error-builder {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #eef2f6;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.custom-error-title {
+    font-weight: 900;
+    color: #111827;
+    font-size: 0.9rem;
+}
+
+.custom-error-input,
+.custom-error-textarea,
+.custom-error-points {
+    width: 100%;
+    border: 1px solid #d6dbe3;
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: #ffffff;
+    font: inherit;
+    font-size: 0.85rem;
+    color: #111827;
+}
+
+.custom-error-textarea {
+    min-height: 60px;
+    resize: vertical;
+}
+
+.custom-error-row {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 8px;
+    align-items: center;
+}
+
+.custom-error-add-btn {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 8px 10px;
+    cursor: pointer;
+    font-weight: 900;
+    color: #111827;
+    font-size: 0.85rem;
+
+    &:hover {
+        background: #f3f4f6;
     }
 }
 

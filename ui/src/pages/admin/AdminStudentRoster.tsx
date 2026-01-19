@@ -836,7 +836,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                         title="Export Student Grades"
                                     >
                                         <FaFileExport aria-hidden="true" />
-                                        &nbsp;Export to D2L
+                                        &nbsp;Export Grades to D2L
                                     </button>
 
                                     &nbsp;&nbsp;

@@ -128,6 +128,7 @@ CREATE TABLE `StudentGrades` (
   `SubmissionId` int DEFAULT NULL,
   `ScoringMode` varchar(20) DEFAULT NULL,
   `ErrorPointsJson` text,
+  `ErrorDefsJson` text,
   `UpdatedAt` datetime DEFAULT NULL,
   PRIMARY KEY (`Sid`,`Pid`),
   KEY `fk2_idx` (`Pid`),
@@ -292,6 +293,7 @@ CREATE TABLE `SubmissionManualErrors` (
   `EndLine` int NOT NULL,
   `ErrorId` varchar(45) NOT NULL,
   `Count` int NOT NULL DEFAULT 1,
+  `Note` text,
   PRIMARY KEY (`Id`), 
   KEY `fk_sub_errors_idx` (`SubmissionId`), 
   CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE 

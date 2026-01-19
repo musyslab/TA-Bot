@@ -704,7 +704,7 @@ class SubmissionRepository():
             db.session.rollback()
             return 0
 
-    def save_manual_grading(self, submission_id, grade, scoring_mode, error_points, errors):
+    def save_manual_grading(self, submission_id, grade, scoring_mode, error_points, errors, error_defs):
         try:
             sub = Submissions.query.get(submission_id)
             if sub is None:
@@ -720,13 +720,23 @@ class SubmissionRepository():
                 .first())
 
             mode = scoring_mode if scoring_mode in ("perInstance", "flatPerError") else "perInstance"
-            points_json = json.dumps(error_points or {}, sort_keys=True)
+            clean_pts = {}
+            for k, v in ((error_points or {}).items() if isinstance(error_points, dict) else []):
+                try:
+                    clean_pts[str(k)] = max(0, int(v))
+                except Exception:
+                    pass
+            points_json = json.dumps(clean_pts, sort_keys=True)
+
+            # error_defs now stores custom defs INCLUDING default points
+            defs_json = json.dumps(error_defs or {}, sort_keys=True)
 
             if grades:
                 grades.Grade = int(grade) if grade is not None else grades.Grade
                 grades.SubmissionId = int(submission_id)
                 grades.ScoringMode = mode
                 grades.ErrorPointsJson = points_json
+                grades.ErrorDefsJson = defs_json
                 grades.UpdatedAt = datetime.utcnow()
             else:
                 new_grade = StudentGrades(
@@ -736,6 +746,7 @@ class SubmissionRepository():
                     SubmissionId=int(submission_id),
                     ScoringMode=mode,
                     ErrorPointsJson=points_json,
+                    ErrorDefsJson=defs_json,
                     UpdatedAt=datetime.utcnow(),
                 )
                 db.session.add(new_grade)
@@ -750,6 +761,7 @@ class SubmissionRepository():
                     EndLine=int(error.get('endLine')),
                     ErrorId=str(error.get('errorId')),
                     Count=max(1, int(error.get('count', 1))),
+                    Note=str(error.get('note', '') or ''),
                 )
                 db.session.add(new_err)
 
@@ -770,7 +782,8 @@ class SubmissionRepository():
                 'startLine': e.StartLine,
                 'endLine': e.EndLine,
                 'errorId': e.ErrorId,
-                'count': getattr(e, "Count", 1) or 1
+                'count': getattr(e, "Count", 1) or 1,
+                'note': getattr(e, "Note", "") or ""
             }
             for e in errors
         ]
@@ -805,7 +818,13 @@ class SubmissionRepository():
         except Exception:
             pts = {}
 
-        return {"grade": getattr(row, "Grade", None), "scoringMode": mode, "errorPoints": pts}
+        raw_defs = getattr(row, "ErrorDefsJson", None) or "{}"
+        try:
+            defs = json.loads(raw_defs) if isinstance(raw_defs, str) else (raw_defs or {})
+        except Exception:
+            defs = {}
+
+        return {"grade": getattr(row, "Grade", None), "scoringMode": mode, "errorPoints": pts, "errorDefs": defs}
     
     def get_oh_visits_by_projectId(self, project_id):
         """
@@ -830,11 +849,18 @@ class SubmissionRepository():
             except Exception:
                 pts = {}
 
+            raw_defs = getattr(g, "ErrorDefsJson", None) or "{}"
+            try:
+                defs = json.loads(raw_defs) if isinstance(raw_defs, str) else (raw_defs or {})
+            except Exception:
+                defs = {}    
+
             grades_by_student[g.Sid] = {
                 'grade': getattr(g, "Grade", None),
                 'submission_id': getattr(g, "SubmissionId", None),
                 'scoring_mode': getattr(g, "ScoringMode", None),
-                'error_points': pts
+                'error_points': pts,
+                'error_defs': defs
             }
 
         # Get all student school id numbers
@@ -858,7 +884,8 @@ class SubmissionRepository():
                 'errorId': getattr(e, "ErrorId", None),
                 'startLine': getattr(e, "StartLine", None),
                 'endLine': getattr(e, "EndLine", None),
-                'count': getattr(e, "Count", None)
+                'count': getattr(e, "Count", None),
+                'note': getattr(e, "Note", "") or ""
             } for e in error_list]
 
             rows.append({
@@ -866,6 +893,7 @@ class SubmissionRepository():
                 'grade': data['grade'],
                 'points': data['error_points'],
                 'scoring_mode': data['scoring_mode'],
+                'error_defs': data['error_defs'],
                 'description': error_data
             })
 
