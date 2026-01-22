@@ -358,7 +358,6 @@ const AdminProjectManage = () => {
                     return p.Id !== project_id;
                 });
                 setProjects(otherProjects);
-                console.log("Projects loaded:", otherProjects);
             } catch (err) {
                 console.log(err);
             }
