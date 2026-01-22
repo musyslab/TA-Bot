@@ -22,7 +22,7 @@ services:
     container_name: backend
     restart: unless-stopped
     build:
-      context: api
+      context: backend
     environment:
       DB_USER: "user"
       DB_PASSWORD: "password"
@@ -34,7 +34,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - "./api:/app"
+      - "./backend:/app"
       - "./tabot-files:/tabot-files"
     depends_on:
       db:
@@ -44,11 +44,11 @@ services:
     container_name: frontend
     restart: unless-stopped
     build:
-      context: ui
+      context: frontend
     environment:
       BROWSER: "none"  
     volumes:
-      - "./ui:/app"
+      - "./frontend:/app"
       - "/app/node_modules"
     ports:
       - "3000:3000"

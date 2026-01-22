@@ -1,4 +1,4 @@
-// ui/src/pages/components/CodeDiffView.tsx
+// frontend/src/pages/components/CodeDiffView.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { FaRegCheckSquare, FaChevronDown } from 'react-icons/fa'

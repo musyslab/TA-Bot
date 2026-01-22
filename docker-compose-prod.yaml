@@ -23,7 +23,7 @@ services:
     container_name: backend
     restart: unless-stopped
     build:
-      context: api
+      context: backend
       dockerfile: Dockerfile.prod
     environment:
       DB_USER: "user"
@@ -39,7 +39,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - "./api:/app"
+      - "./backend:/app"
       - "./tabot-files:/tabot-files"
     depends_on:
       db:
@@ -49,10 +49,10 @@ services:
     container_name: frontend
     restart: unless-stopped
     build:
-      context: ui
+      context: frontend
       dockerfile: Dockerfile.prod
     volumes:
-      - "./ui:/app"
+      - "./frontend:/app"
     ports:
       - "127.0.0.1:8008:3000"
     depends_on:

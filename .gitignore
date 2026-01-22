@@ -4,6 +4,6 @@ __pycache__/
 
 tabot-files/project-files
 
-ui/package-lock.json
+frontend/package-lock.json
 
-ui/node_modules
+frontend/node_modules

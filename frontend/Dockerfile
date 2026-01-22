@@ -1,4 +1,4 @@
-# ui/Dockerfile.dev
+# frontend/Dockerfile.dev
 FROM node:24.12.0
 
 WORKDIR /app
