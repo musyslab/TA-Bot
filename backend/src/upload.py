@@ -181,13 +181,40 @@ def file_upload(
         project_id_arg = str(project.Id)
         class_id_arg = str(class_id)
 
+        # Include teacher-provided "additional files" in the Judge0 sandbox for student runs.
+        # DB stores basenames (or JSON list). Resolve them to absolute paths under the teacher solution folder.
+        add_payload = ""
+        try:
+            sol_root = getattr(project, "solutionpath", "") or ""
+            teacher_base_dir = sol_root if os.path.isdir(sol_root) else os.path.dirname(sol_root)
+
+            raw = (getattr(project, "AdditionalFilePath", "") or "").strip()
+            if raw.startswith("[") or raw.startswith("{"):
+                lst = json.loads(raw)
+            else:
+                lst = [raw] if raw else []
+
+            abs_list = []
+            for p in (lst or []):
+                if not p:
+                    continue
+                if os.path.isabs(p):
+                    abs_list.append(p)
+                else:
+                    abs_list.append(os.path.join(teacher_base_dir, os.path.basename(p)))
+
+            # Pass both base_dir (for resolving testcase-level basenames) and project files list
+            add_payload = json.dumps({"base_dir": teacher_base_dir, "files": abs_list})
+        except Exception:
+            add_payload = ""
+
         cmd = [
             "python", grading_script,
             username,
             project.Language,
             str(testcase_info_json),
             path,
-            "",
+            add_payload,
             project_id_arg,
             class_id_arg
         ]

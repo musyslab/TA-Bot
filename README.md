@@ -14,8 +14,6 @@ Launch Ubuntu App
 
 Make username/password
 
-Make Ubuntu Default (Optional). Open a CMD terminal and type: ```wsl --set-default Ubuntu```
-
 ## Install packages:
 
 In Ubuntu:
@@ -56,11 +54,11 @@ Make it so you don't have to run sudo everytime in docker:
 
 Enter Github username and personal access token (not password)
 
-Go into UI folder:
+Go into frontend folder:
 
 ```npm install``` 
 
-Still in the UI folder, create a file named: ```.env```
+Still in the frontend folder, create a file named: ```.env```
 
 Add the following line to that file: ```VITE_API_URL=http://localhost:5000/api```
 
@@ -68,7 +66,7 @@ Add the following line to that file: ```VITE_API_URL=http://localhost:5000/api``
 
 ## Run TA-Bot
 
-Go up a directory (from the UI folder) and run:
+Go up a directory (from the frontend folder) and run:
 
 ```docker compose up```
 
@@ -96,14 +94,6 @@ Get a github personal access token (PAT)
 
 ```cd into the frontend/backend directory```
 
-```docker build -f Dockerfile.prod -t ghcr.io/musyslab/tabot-<frontend/backend>:v<VERSION_NUMBER>-tbs-research .```
+```docker build -f Dockerfile.prod -t ghcr.io/musyslab/tabot-<frontend/backend>:v<VERSION_NUMBER> .```
 
-```docker push ghcr.io/musyslab/tabot-<frontend/backend>:v<VERSION_NUMBER>-tbs-research```
-
-## Commands for Sam when he's dumb
-
-```wsl --list```
-
-```wsl --unregister <distro-name>```
-
-```(wsl --unregister Ubuntu)```
+```docker push ghcr.io/musyslab/tabot-<frontend/backend>:v<VERSION_NUMBER>```

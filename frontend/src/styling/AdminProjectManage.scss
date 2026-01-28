@@ -574,6 +574,15 @@ body {
           }
         }
 
+        tr.hidden-testcase td {
+          background: #f3f4f6;
+          color: #6b7280;
+        }
+
+        tr.hidden-testcase:hover td {
+          background: #e5e7eb;
+        }
+
         // "Add Test Case" row: bold button, rounded bottom
         tr:last-child td.add-row-cell {
           border-bottom-left-radius: 8px;
@@ -621,6 +630,66 @@ body {
         &:focus {
           background: #217dbb;
         }
+      }
+
+      /* Toggle under Edit button */
+      .testcase-hidden-toggle {
+        margin-top: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        color: #475569;
+      }
+
+      .testcase-hidden-toggle .toggle-label {
+        font-weight: 600;
+      }
+
+      .testcase-hidden-toggle .switch {
+        position: relative;
+        display: inline-block;
+        width: 42px;
+        height: 24px;
+      }
+
+      .testcase-hidden-toggle .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .testcase-hidden-toggle .switch .slider {
+        position: absolute;
+        cursor: pointer;
+        inset: 0;
+        background: #cbd5e1;
+        border: 1px solid #94a3b8;
+        transition: 0.2s;
+        border-radius: 999px;
+      }
+
+      .testcase-hidden-toggle .switch .slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        top: 2px;
+        background: #ffffff;
+        transition: 0.2s;
+        border-radius: 999px;
+        box-shadow: 0 1px 2px rgba(2, 6, 23, .15);
+      }
+
+      .testcase-hidden-toggle .switch input:checked+.slider {
+        background: #10b981;
+        border-color: #10b981;
+      }
+
+      .testcase-hidden-toggle .switch input:checked+.slider:before {
+        transform: translateX(18px);
       }
 
       // Add Test Case button

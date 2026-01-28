@@ -213,6 +213,84 @@ def parse_entry_class_and_additional_files(value: Any) -> Tuple[str, Any]:
 
     return entry_class, additional_files
 
+def parse_project_additional_payload(raw: Any) -> Tuple[str, List[str]]:
+    """
+    upload.py passes either:
+      - "" (no additional)
+      - JSON list: ["abs/path/a.txt", ...]
+      - JSON dict: {"base_dir": "...", "files": ["abs/path/a.txt", ...]}
+    Returns (base_dir, files_abs_or_mixed)
+    """
+    if not raw:
+        return "", []
+    obj: Any = raw
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return "", []
+        if s.startswith("[") or s.startswith("{"):
+            try:
+                obj = json.loads(s)
+            except Exception:
+                return "", []
+        else:
+            # treat as single path
+            return "", [s]
+
+    if isinstance(obj, dict):
+        base_dir = str(obj.get("base_dir", "") or "").strip()
+        files = obj.get("files", []) or []
+        if not isinstance(files, list):
+            files = [files]
+        out = [str(x) for x in files if str(x or "").strip()]
+        return base_dir, out
+
+    if isinstance(obj, list):
+        out = [str(x) for x in obj if str(x or "").strip()]
+        return "", out
+
+    return "", []
+
+
+def resolve_additional_files(files: Any, *, base_dir: str) -> List[str]:
+    """
+    Ensure basenames in testcase additional_files resolve to teacher base_dir.
+    Leaves absolute paths untouched.
+    """
+    if not files:
+        return []
+    lst: Any = files
+    if isinstance(files, str):
+        s = files.strip()
+        if not s:
+            return []
+        if s.startswith("[") or s.startswith("{"):
+            try:
+                lst = json.loads(s)
+            except Exception:
+                lst = [s]
+        else:
+            lst = [s]
+    if isinstance(lst, dict):
+        # Back-compat: { "files": [...] } possible
+        lst = lst.get("files", []) or []
+    if not isinstance(lst, list):
+        lst = [lst]
+
+    out: List[str] = []
+    for p in lst:
+        p = str(p or "").strip()
+        if not p:
+            continue
+        if os.path.isabs(p):
+            out.append(p)
+        elif base_dir:
+            out.append(os.path.join(base_dir, os.path.basename(p)))
+        else:
+            # last resort: keep as-is
+            out.append(p)
+    return out
+
 
 def admin_run(language: str, user_input: str, path: str, additional_files: Any) -> str:
     # Accept JSON-encoded additional files from the repo/db.
@@ -235,8 +313,7 @@ def admin_run(language: str, user_input: str, path: str, additional_files: Any) 
     print(combined)
     return combined
 
-
-def run(student_name: str, language: str, testcases_json: str, path: str, root: str) -> int:
+def run(student_name: str, language: str, testcases_json: str, path: str, additional_file_path: Any, root: str) -> int:
     output_dir = pick_output_directory(path, root)
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, "testcases.json")
@@ -245,6 +322,10 @@ def run(student_name: str, language: str, testcases_json: str, path: str, root: 
     testcase_items = normalize_testcase_items(testcases_obj)
 
     results: List[Dict[str, Any]] = []
+
+    # Project-level additional files (teacher-provided)
+    proj_base_dir, proj_files = parse_project_additional_payload(additional_file_path)
+    proj_files = resolve_additional_files(proj_files, base_dir=proj_base_dir)
 
     for key, value in testcase_items:
         # Expected tuple layout (backward-compatible):
@@ -268,11 +349,21 @@ def run(student_name: str, language: str, testcases_json: str, path: str, root: 
 
         entry_class, testcase_additional_files = parse_entry_class_and_additional_files(value)
 
+        # Merge project additional files + testcase additional files
+        tc_files = resolve_additional_files(testcase_additional_files, base_dir=proj_base_dir)
+        merged_additional: List[str] = []
+        seen = set()
+        for p in (proj_files + tc_files):
+            if not p or p in seen:
+                continue
+            seen.add(p)
+            merged_additional.append(p)
+
         runner_resp = execute_test(
             path,
             testcase_in,
             language,
-            testcase_additional_files,
+            merged_additional,
             entry_class=entry_class,
         )
 
@@ -350,7 +441,7 @@ def main() -> int:
         admin_run(args.language, args.testcase_json, args.paths, args.additional_file_path)
         return 0
 
-    return run(args.student_name, args.language, args.testcase_json, args.paths, args.root)
+    return run(args.student_name, args.language, args.testcase_json, args.paths, args.additional_file_path, args.root)
 
 
 if __name__ == "__main__":

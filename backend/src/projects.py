@@ -796,7 +796,8 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
                 testcase["description"],
                 testcase["input"],
                 testcase["output"],
-                class_id
+                class_id,
+                bool(testcase.get("hidden", False)),
             )
 
     return make_response("Testcase Added", HTTPStatus.OK)
@@ -819,6 +820,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     project_id = request.form.get('project_id', '').strip()
     description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
+    hidden_raw = request.form.get('hidden', '').strip()
     
     if id_val == '' or name == '' or input_data == '' or project_id == '' or description == '' or class_id == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
@@ -830,6 +832,12 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         class_id_int = int(class_id)
     except ValueError:
         return make_response("Invalid numeric id", HTTPStatus.BAD_REQUEST)
+
+    def parse_hidden(v: str) -> bool:
+        s = (v or "").strip().lower()
+        return s in ("1", "true", "yes", "y", "on")
+
+    hidden = parse_hidden(hidden_raw)
 
     # Auto-recompute expected output when editing a testcase.
     # If the project's language is Python, run the saved solution with the new input
@@ -844,11 +852,9 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         # Fall back to the submitted output if recomputation fails
         pass
 
-    project_repo.add_or_update_testcase(project_id, id_val, name, description, input_data, output, class_id_int)
+    project_repo.add_or_update_testcase(project_id, id_val, name, description, input_data, output, class_id_int, hidden)
 
     return make_response("Testcase Added", HTTPStatus.OK)
-    
-
 
 @projects_api.route('/remove_testcase', methods=['POST'])
 @jwt_required()

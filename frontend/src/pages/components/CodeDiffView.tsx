@@ -1,7 +1,7 @@
-// ui/src/pages/components/CodeDiffView.tsx
+// frontend/src/pages/components/CodeDiffView.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
-import { FaRegCheckSquare, FaChevronDown } from 'react-icons/fa'
+import { FaRegCheckSquare, FaChevronDown, FaLock } from 'react-icons/fa'
 import { diffChars } from 'diff'
 import { Highlight, themes } from 'prism-react-renderer'
 import '../../styling/CodeDiffView.scss'
@@ -12,6 +12,7 @@ type NewJsonResult = {
     name: string
     description?: string
     passed: boolean
+    hidden?: boolean
     shortDiff?: string
     longDiff?: string
     shortDiffSameAsLong?: boolean
@@ -22,6 +23,7 @@ type LegacyJsonTest = {
     type?: number
     description?: string
     name?: string
+    hidden?: boolean
 }
 
 type LegacyJsonResult = {
@@ -45,6 +47,7 @@ type DiffEntry = {
     shortDiff: string
     longDiff: string
     shortDiffSameAsLong: boolean
+    hidden: boolean
 }
 
 type CodeFile = {
@@ -192,6 +195,11 @@ type DiffViewProps = {
     // If true: prevent selection/copying in the diff (student view).
     // If false/undefined: allow selecting/copying (admin views).
     disableCopy?: boolean
+
+    // If true: show the "Output hidden" banner, but still reveal the diff/output below (admin views).
+    // If false/undefined: keep hidden outputs hidden (student view).
+    revealHiddenOutput?: boolean
+
 }
 
 export default function DiffView(props: DiffViewProps) {
@@ -212,6 +220,7 @@ export default function DiffView(props: DiffViewProps) {
         belowCode,
         onActiveTestcaseChange,
         disableCopy = false,
+        revealHiddenOutput = false,
     } = props
 
     const internalCodeContainerRef = useRef<HTMLDivElement | null>(null)
@@ -356,6 +365,7 @@ export default function DiffView(props: DiffViewProps) {
                 const rr = (r ?? {}) as NewJsonResult
                 const testName = String(rr.name ?? `Test ${idx + 1}`)
                 const passed = Boolean(rr.passed)
+                const hidden = Boolean((rr as any).hidden)
                 const shortDiff = String(rr.shortDiff ?? '')
                 const longDiff = String(rr.longDiff ?? '')
                 const shortDiffSameAsLong = Boolean((rr as any).shortDiffSameAsLong)
@@ -371,6 +381,7 @@ export default function DiffView(props: DiffViewProps) {
                     shortDiff,
                     longDiff,
                     shortDiffSameAsLong,
+                    hidden,
                 })
             })
             return entries.sort((a, b) => Number(a.passed) - Number(b.passed) || a.test.localeCompare(b.test))
@@ -384,6 +395,7 @@ export default function DiffView(props: DiffViewProps) {
             const t = rr.test ?? {}
             const testName = String(t.name ?? `Test ${idx + 1}`)
             const desc = String(t.description ?? '')
+            const hidden = Boolean((t as any).hidden)
             const rawOut = (skipped ? ['This test did not run due to a configuration issue.'] : (t.output || [])).join(
                 '\n'
             )
@@ -401,6 +413,7 @@ export default function DiffView(props: DiffViewProps) {
                 shortDiff: passed ? '' : unified,
                 longDiff: passed ? '' : unified,
                 shortDiffSameAsLong: !passed && !skipped,
+                hidden,
             })
 
             // If there was no explicit diff, still show something readable
@@ -441,8 +454,9 @@ export default function DiffView(props: DiffViewProps) {
 
     const showDiffModeToggle = useMemo(() => {
         if (!selectedFile || selectedFile.passed) return false
+        if (selectedFile.hidden && !revealHiddenOutput) return false
         return !selectedFile.shortDiffSameAsLong
-    }, [selectedFile])
+    }, [selectedFile, revealHiddenOutput])
 
     // If short and long are identical, force long so we never show an empty "short".
     useEffect(() => {
@@ -455,12 +469,14 @@ export default function DiffView(props: DiffViewProps) {
     const selectedDiffText = useMemo(() => {
         if (!selectedFile) return ''
         if (selectedFile.passed) return ''
+        if (selectedFile.hidden && !revealHiddenOutput) return ''
         if (selectedFile.shortDiffSameAsLong) return selectedFile.longDiff ?? ''
         return diffMode === 'short' ? (selectedFile.shortDiff ?? '') : (selectedFile.longDiff ?? '')
-    }, [selectedFile, diffMode])
+    }, [selectedFile, diffMode, revealHiddenOutput])
 
     const hasIntraInSelected = useMemo(() => {
         if (!selectedFile || selectedFile.passed) return false
+        if (selectedFile.hidden && !revealHiddenOutput) return false
         const txt = selectedDiffText || ''
         const lines = txt.split('\n')
         for (let i = 0; i < lines.length - 1; i++) {
@@ -481,7 +497,7 @@ export default function DiffView(props: DiffViewProps) {
             if (areSimilarForIntra(delText, addText)) return true
         }
         return false
-    }, [selectedFile, selectedDiffText])
+    }, [selectedFile, selectedDiffText, revealHiddenOutput])
 
     const selectedCode = useMemo(() => {
         if (codeFiles.length === 0) return null
@@ -558,7 +574,7 @@ export default function DiffView(props: DiffViewProps) {
                         )}
 
                         {/* Button 2: Diff Finder */}
-                        {selectedFile && !selectedFile.passed && (
+                        {selectedFile && !selectedFile.passed && (!selectedFile.hidden || revealHiddenOutput) && (
                             <button
                                 type="button"
                                 className={`btn toggle-intra ${intraEnabled ? 'on' : 'off'}`}
@@ -583,7 +599,24 @@ export default function DiffView(props: DiffViewProps) {
                     <div className="diff-code">
                         {!selectedFile && <div className="muted">Select a test on the left to view its diff.</div>}
 
-                        {selectedFile && selectedFile.passed && (
+                        {selectedFile && selectedFile.hidden && (
+                            <div className="diff-content">
+                                <div className="diff-empty hidden" role="status" aria-live="polite">
+                                    <div className="empty-icon" aria-hidden="true">
+                                        <FaLock />
+                                    </div>
+                                    <div className="empty-text">
+                                        <div className="empty-title">Output hidden</div>
+                                        <div className="empty-subtitle">
+                                            This testcase’s output is hidden. Result: {selectedFile.passed ? 'Passed' : 'Failed'}.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {selectedFile && (!selectedFile.hidden || revealHiddenOutput) && selectedFile.passed && (
+
                             <div className="diff-content">
                                 <div className="diff-empty" role="status" aria-live="polite">
                                     <div className="empty-icon" aria-hidden="true">
@@ -597,7 +630,7 @@ export default function DiffView(props: DiffViewProps) {
                             </div>
                         )}
 
-                        {selectedFile && !selectedFile.passed && (
+                        {selectedFile && (!selectedFile.hidden || revealHiddenOutput) && !selectedFile.passed && (
                             <div className="diff-content">
                                 {(() => {
                                     const txt = selectedDiffText || ''

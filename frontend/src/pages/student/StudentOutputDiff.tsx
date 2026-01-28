@@ -1,4 +1,4 @@
-// ui/src/pages/student/StudentOutputDiff.tsx
+// frontend/src/pages/student/StudentOutputDiff.tsx
 import React from 'react'
 import { useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'

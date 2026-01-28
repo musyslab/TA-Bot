@@ -1,4 +1,4 @@
-// ui/src/pages/admin/AdminViewStudentCode.tsx
+// frontend/src/pages/admin/AdminViewStudentCode.tsx
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 import { useParams } from 'react-router-dom'
@@ -74,7 +74,7 @@ export function AdminViewStudentCode() {
                 View Submission Code: {studentName || 'Unknown Student'}
             </div>
 
-            <DiffView submissionId={submissionId} classId={cid} />
+            <DiffView submissionId={submissionId} classId={cid} revealHiddenOutput />
         </div>
     )
 }
