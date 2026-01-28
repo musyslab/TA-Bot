@@ -34,6 +34,7 @@ class Testcase {
         this.description = ''
         this.input = ''
         this.output = ''
+        this.hidden = false
     }
 
     id: number
@@ -41,6 +42,7 @@ class Testcase {
     description: string
     input: string
     output: string
+    hidden: boolean
 }
 
 const AdminProjectManage = () => {
@@ -118,6 +120,16 @@ const AdminProjectManage = () => {
     const isJavaFileName = (n: string) => /\.java$/i.test(n)
 
     const basename = (p: string) => (p || '').split(/[\\/]/).pop() || ''
+
+    const parseHidden = (v: any): boolean => {
+        if (typeof v === 'boolean') return v
+        if (typeof v === 'number') return v !== 0
+        if (typeof v === 'string') {
+            const s = v.trim().toLowerCase()
+            return s === '1' || s === 'true' || s === 'yes' || s === 'y'
+        }
+        return false
+    }
 
     type SolutionLang = 'java' | 'python' | 'c' | 'racket'
     const solutionLangFor = (name: string): SolutionLang | null => {
@@ -451,6 +463,7 @@ const AdminProjectManage = () => {
                     testcase.description = values[2]
                     testcase.input = values[3]
                     testcase.output = values[4]
+                    testcase.hidden = parseHidden((values as any)[5])
 
                     rows.push(testcase)
                     return testcase
@@ -462,6 +475,7 @@ const AdminProjectManage = () => {
                 testcase.description = ''
                 testcase.input = ''
                 testcase.output = ''
+                testcase.hidden = false
 
                 rows.push(testcase)
                 setTestcases(rows)
@@ -536,6 +550,13 @@ const AdminProjectManage = () => {
         })
     }
 
+    function handleHiddenChange(testcase_id: number, hidden: boolean) {
+        setModalDraft(prev => {
+            if (prev && prev.id === testcase_id) return { ...prev, hidden }
+            return prev
+        })
+    }
+
     function buttonhandleTrashClick(testcase: number) {
         let test: Testcase = new Testcase()
         for (let i = 0; i < testcases.length; i++) {
@@ -580,6 +601,7 @@ const AdminProjectManage = () => {
                     testcase.description = values[2]
                     testcase.input = values[3]
                     testcase.output = values[4]
+                    testcase.hidden = parseHidden((values as any)[5])
                     rows.push(testcase)
 
                     return testcase
@@ -591,6 +613,7 @@ const AdminProjectManage = () => {
                 testcase.description = ''
                 testcase.input = ''
                 testcase.output = ''
+                testcase.hidden = false
 
                 rows.push(testcase)
                 setTestcases(rows)
@@ -841,12 +864,37 @@ const AdminProjectManage = () => {
             t.description = ''
             t.input = ''
             t.output = ''
+            t.hidden = false
             setModalDraft(t)
         } else {
             const source = testcases.find(tc => tc.id === TestCaseId)
             let draft: Testcase | null = null
             if (source) draft = { ...source } as Testcase
             setModalDraft(draft)
+        }
+    }
+
+    async function setHiddenFromRow(tc: Testcase, hidden: boolean) {
+        const formData = new FormData()
+        formData.append('id', tc.id.toString())
+        formData.append('name', tc.name)
+        formData.append('project_id', project_id.toString())
+        formData.append('class_id', classId.toString())
+        formData.append('input', tc.input.toString())
+        formData.append('output', tc.output.toString())
+        formData.append('description', tc.description.toString())
+        formData.append('hidden', hidden ? 'true' : 'false')
+
+        try {
+            setSubmittingTestcase(true)
+            await axios.post(import.meta.env.VITE_API_URL + `/projects/add_or_update_testcase`, formData, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+            })
+            await reloadtests()
+        } catch (error) {
+            console.log(error)
+        } finally {
+            setSubmittingTestcase(false)
         }
     }
 
@@ -1012,6 +1060,7 @@ const AdminProjectManage = () => {
         formData.append('input', modalDraft.input.toString())
         formData.append('output', modalDraft.output.toString())
         formData.append('description', modalDraft.description.toString())
+        formData.append('hidden', modalDraft.hidden ? 'true' : 'false')
 
         if (modalDraft.name === '' || modalDraft.input === '' || modalDraft.description === '') {
             window.alert('Please fill out all fields')
@@ -1050,6 +1099,7 @@ const AdminProjectManage = () => {
                     testcase.description = values[2]
                     testcase.input = values[3]
                     testcase.output = values[4]
+                    testcase.hidden = parseHidden((values as any)[5])
                     rows.push(testcase)
                     return testcase
                 })
@@ -1631,7 +1681,11 @@ const AdminProjectManage = () => {
                                                     {testcases
                                                         .filter(tc => tc.id !== -1)
                                                         .map(tc => (
-                                                            <tr key={tc.id}>
+                                                            <tr
+                                                                key={tc.id}
+                                                                className={tc.hidden ? 'hidden-testcase' : undefined}
+                                                                aria-label={tc.hidden ? 'Hidden test case' : undefined}
+                                                            >
                                                                 <td>{tc.name}</td>
                                                                 <td>
                                                                     <pre className="testcase-input">{tc.input}</pre>
@@ -1648,6 +1702,20 @@ const AdminProjectManage = () => {
                                                                     >
                                                                         <FaEdit aria-hidden="true" /> Edit
                                                                     </button>
+
+                                                                    <div className="testcase-hidden-toggle">
+                                                                        <span className="toggle-label">Hidden</span>
+                                                                        <label className="switch">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={!!tc.hidden}
+                                                                                onChange={(e) => setHiddenFromRow(tc, e.currentTarget.checked)}
+                                                                                aria-label="Toggle hidden test case"
+                                                                            />
+                                                                            <span className="slider" aria-hidden="true" />
+                                                                        </label>
+                                                                    </div>
+
                                                                 </td>
                                                             </tr>
                                                         ))}
@@ -1875,6 +1943,17 @@ const AdminProjectManage = () => {
                                                     />
                                                 </div>
                                             </div>
+                                        </div>
+
+                                        <div className="form-field modal-checkbox">
+                                            <label>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!!selectedTestCase?.hidden}
+                                                    onChange={(e) => handleHiddenChange(selectedTestCaseId!, e.currentTarget.checked)}
+                                                />
+                                                Hidden test case
+                                            </label>
                                         </div>
 
                                         <div className="modal-action-buttons">

@@ -25,6 +25,7 @@ from container import Container
 from urllib.parse import unquote
 from openpyxl import Workbook
 from src.ai_suggestions import ERROR_DEFS
+from src.repositories.models import Testcases
 
 # Default grading error definitions (must match AdminGrading.tsx BASE_ERROR_DEFS).
 # We store them here so exports can resolve default point values when ErrorPointsJson
@@ -75,7 +76,6 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
 
     def sanitize_yaml_block(yaml_block: dict) -> dict:
         new_yaml = (yaml_block or {}).copy()
-        new_yaml.pop("hidden", None)
         return new_yaml
 
     def parse_suite(yaml_block: dict) -> int:
@@ -141,6 +141,38 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
         submission = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid)
         current_level=submission_repo.get_current_level(submission.Id,current_user.Id)
     output = convert_tap_to_json(submission.OutputFilepath, current_user.Role, 0, False)
+    # Attach hidden flags from DB Testcases table (source of truth)
+    try:
+        obj = json.loads(output) if isinstance(output, str) else (output or {})
+        results = obj.get("results", None) if isinstance(obj, dict) else None
+        if isinstance(results, list) and int(projectid) != -1:
+            tcs = Testcases.query.filter(Testcases.ProjectId == int(projectid)).all()
+            hidden_by_name = {
+                (str(getattr(tc, "Name", "") or "").strip().lower()): bool(getattr(tc, "Hidden", False))
+                for tc in (tcs or [])
+            }
+
+            for r in results:
+                if not isinstance(r, dict):
+                    continue
+                name = None
+                if isinstance(r.get("name"), str):
+                    name = r.get("name")
+                elif isinstance(r.get("test"), dict) and isinstance(r["test"].get("name"), str):
+                    name = r["test"]["name"]
+
+                key = (str(name or "").strip().lower())
+                is_hidden = hidden_by_name.get(key, False)
+
+                # New grader/UI reads r.hidden; legacy reads r.test.hidden
+                r["hidden"] = is_hidden
+                if isinstance(r.get("test"), dict):
+                    r["test"]["hidden"] = is_hidden
+
+            output = json.dumps(obj, sort_keys=True, indent=4)
+    except Exception:
+        pass
+
     return make_response(output, HTTPStatus.OK)
 
 @submission_api.route('/codefinder', methods=['GET'])

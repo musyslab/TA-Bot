@@ -253,6 +253,7 @@ CREATE TABLE `Testcases` (
   `Description` text,
   `input` text,
   `Output` text,
+  `Hidden` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Id_UNIQUE` (`Id`),
   KEY `tc_fk_idx` (`ProjectId`),

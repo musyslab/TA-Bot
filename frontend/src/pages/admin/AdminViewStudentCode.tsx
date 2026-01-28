@@ -74,7 +74,7 @@ export function AdminViewStudentCode() {
                 View Submission Code: {studentName || 'Unknown Student'}
             </div>
 
-            <DiffView submissionId={submissionId} classId={cid} />
+            <DiffView submissionId={submissionId} classId={cid} revealHiddenOutput />
         </div>
     )
 }

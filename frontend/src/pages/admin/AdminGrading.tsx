@@ -729,6 +729,7 @@ export function AdminGrading() {
             <DiffView
                 submissionId={submissionId}
                 classId={cid}
+                revealHiddenOutput
                 diffViewRef={diffViewRef}
                 codeSectionTitle="Submitted Code (click lines to mark errors)"
                 onActiveTestcaseChange={(tc) => {

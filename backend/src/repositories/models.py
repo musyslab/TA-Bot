@@ -96,6 +96,7 @@ class Testcases(db.Model):
     Description = Column(String)
     input = Column(String)
     Output = Column(String)
+    Hidden = Column(Boolean, default=False)
 
 class OHVisits(db.Model):
     __tablename__ = "OHVisits"
