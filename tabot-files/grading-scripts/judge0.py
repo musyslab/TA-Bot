@@ -157,6 +157,12 @@ def read_text_file(path: str) -> str:
     with open(path, "r", errors="ignore") as fh:
         return fh.read()
 
+def bash_single_quote(s: str) -> str:
+    """
+    Return a bash-safe single-quoted string 
+    Handles embedded single quotes by closing/opening quotes: 'foo'"'"'bar'
+    """
+    return "'" + (s or "").replace("'", "'\"'\"'") + "'"
 
 def collect_student_files(student_path: str, kind: str) -> List[Tuple[str, bytes]]:
     """
@@ -314,7 +320,19 @@ def build_compile_and_run_scripts(kind: str, student_relpaths: List[str], entry_
 
     if kind == "python":
         entry_py = pick_python_entry(student_relpaths, entry_class)
-        run_script = f"#!/usr/bin/env bash\nset -e\npython3 {entry_py}\n"
+        entry_q = bash_single_quote(entry_py)
+        # Guard against "waiting for stdin" hangs (missing input lines).
+        # Many Judge0 sandboxes include coreutils `timeout`, but fall back if not present.
+        run_script = (
+            "#!/usr/bin/env bash\n"
+            "set -e\n"
+            "if command -v timeout >/dev/null 2>&1; then\n"
+            f"  timeout 3s python3 -u {entry_q} || rc=$?\n"
+            "  exit ${rc:-0}\n"
+            "else\n"
+            f"  python3 -u {entry_q}\n"
+            "fi\n"
+        )
         return None, run_script, None
 
     return None, "#!/usr/bin/env bash\nset -e\necho 'Unsupported language'\nexit 1\n", "Unsupported language"
