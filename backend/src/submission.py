@@ -23,7 +23,8 @@ from datetime import datetime
 from dependency_injector.wiring import inject, Provide
 from container import Container
 from urllib.parse import unquote
-from openpyxl import Workbook
+import csv
+from io import StringIO
 from src.ai_suggestions import ERROR_DEFS
 from src.repositories.models import Testcases
 
@@ -688,12 +689,11 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
     grade_list = submission_repo.get_project_grade_info(project_id)
     project_name = project_repo.get_selected_project(project_id).Name
 
-    wb = Workbook()
-    ws = wb.active
-    wb.title = 'Grades'
+    sio = StringIO()
+    writer = csv.writer(sio, lineterminator="\n")
 
     headers = ['OrgDefinedId', f'{project_name} Points Grade', f'{project_name} Text Grade', 'End-of-Line Indicator']
-    ws.append(headers)
+    writer.writerow(headers)
 
     # Create excel rows
     base_defs_map = dict(ADMIN_GRADING_DEFAULT_DEFS_MAP)
@@ -759,19 +759,19 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
             desc_lines.append('Great Job!')
 
         description = "\n".join(desc_lines)
-        ws.append([row.get('number'), row.get('grade'), description, '#'])
+        writer.writerow([row.get('number'), row.get('grade'), description, '#'])
 
-    buffer = BytesIO()
-    wb.save(buffer)
+    buffer = BytesIO(sio.getvalue().encode("utf-8"))
     buffer.seek(0)
 
     resp = send_file(
         buffer,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        download_name=f'{project_name}-grades.xlsx',
+        mimetype='text/csv; charset=utf-8',
+        download_name=f'{project_name}-grades.csv',
         as_attachment=True
     )
 
     resp.headers["Project-Name"] = project_name
     resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Project-Name"
+    resp.headers["Cache-Control"] = "no-store"
     return resp

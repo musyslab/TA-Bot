@@ -285,19 +285,32 @@ CREATE TABLE `Users` (
 --
 -- Table structure for table `SubmissionManualErrors`
 --
-DROP TABLE IF EXISTS `SubmissionManualErrors`; 
+DROP TABLE IF EXISTS `SubmissionManualErrors`;
 
-CREATE TABLE `SubmissionManualErrors` ( 
-  `Id` int NOT NULL AUTO_INCREMENT, 
+CREATE TABLE `SubmissionManualErrors` (
+  `Id` int NOT NULL AUTO_INCREMENT,
   `SubmissionId` int NOT NULL,
   `StartLine` int NOT NULL,
   `EndLine` int NOT NULL,
   `ErrorId` varchar(45) NOT NULL,
   `Count` int NOT NULL DEFAULT 1,
   `Note` text,
-  PRIMARY KEY (`Id`), 
-  KEY `fk_sub_errors_idx` (`SubmissionId`), 
-  CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE 
+  PRIMARY KEY (`Id`),
+  KEY `fk_sub_errors_idx` (`SubmissionId`),
+  CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+--
+-- Seed rows requested
+--
+
+INSERT INTO `Classes` (`Id`, `Name`, `Tid`)
+VALUES (1, 'COSC 1010', '1');
+
+INSERT INTO `Labs` (`Id`, `Name`, `ClassId`)
+VALUES (1, '401', 1);
+
+INSERT INTO `LectureSections` (`Id`, `Name`, `ClassId`)
+VALUES (1, '101', 1);
 
 SET FOREIGN_KEY_CHECKS=1;

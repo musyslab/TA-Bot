@@ -4,7 +4,7 @@ This project was originally developed and maintained by Jack Forden and Alex Geb
 
 It is currently maintained by Sam Mazzone.
 
-# How to install TA-Bot
+# How to install TA-Bot (if on Windows)
 
 ## Install WSL Ubuntu
 
@@ -82,7 +82,7 @@ In DBBeaver, connect to: ```localhost:3306```
 
 ## Setup Database for First Time Use
 
-Currently, manual setup required. Classes, lectures, and labs need to be manually added
+Classes, lectures, and labs need to be customized 
 
 ## Pushing Docker Image to Production:
 

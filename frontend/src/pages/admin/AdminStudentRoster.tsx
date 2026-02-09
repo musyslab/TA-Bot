@@ -164,9 +164,9 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
             const cd = String((res.headers as any)?.['content-disposition'] ?? '')
             const match = /filename\*?=(?:UTF-8''|")?([^\";]+)\"?/i.exec(cd)
-            const fname = match
-                ? decodeURIComponent(match[1])
-                : `${res.headers['project-name']}-grades.xlsx`
+        const fname = match
+            ? decodeURIComponent(match[1])
+            : `${res.headers['project-name']}-grades.csv`
 
             const a = document.createElement('a')
             a.href = URL.createObjectURL(res.data)
