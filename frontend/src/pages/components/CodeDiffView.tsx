@@ -3,8 +3,27 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { FaRegCheckSquare, FaChevronDown, FaLock } from 'react-icons/fa'
 import { diffChars } from 'diff'
-import { Highlight, themes } from 'prism-react-renderer'
 import '../../styling/CodeDiffView.scss'
+import { Highlight, themes, Prism } from 'prism-react-renderer'
+
+// Ensure Prism languages (like Java) are registered once per page load.
+let prismLangsLoaded = false
+let prismLangsPromise: Promise<void> | null = null
+function ensurePrismLangsLoaded() {
+    if (prismLangsLoaded) return Promise.resolve()
+    if (prismLangsPromise) return prismLangsPromise
+
+        ; (globalThis as any).Prism = (globalThis as any).Prism ?? Prism
+    prismLangsPromise = Promise.all([
+        import('prismjs/components/prism-java'),
+        // Optional: keep python explicit too (safe even if already present)
+        import('prismjs/components/prism-python'),
+    ]).then(() => {
+        prismLangsLoaded = true
+    })
+
+    return prismLangsPromise
+}
 
 type DiffMode = 'short' | 'long'
 
@@ -235,6 +254,12 @@ export default function DiffView(props: DiffViewProps) {
 
     const [testsLoaded, setTestsLoaded] = useState(false)
     const [payload, setPayload] = useState<AnyPayload>({ results: [] })
+
+    // Force a rerender after Prism languages load so Highlight can use the grammar.
+    const [, forcePrismRefresh] = useState(0)
+    useEffect(() => {
+        ensurePrismLangsLoaded().then(() => forcePrismRefresh((v) => v + 1))
+    }, [])
 
     const [codeFiles, setCodeFiles] = useState<CodeFile[]>([])
     const [selectedCodeFile, setSelectedCodeFile] = useState<string>('')
