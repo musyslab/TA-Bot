@@ -18,6 +18,7 @@ from subprocess import Popen
 from src.repositories.class_repository import ClassRepository
 from src.repositories.user_repository import UserRepository
 from src.repositories.submission_repository import SubmissionRepository
+from src.repositories.models import Submissions
 from flask import Blueprint, Response, send_file, current_app
 from flask import make_response
 from http import HTTPStatus
@@ -108,9 +109,38 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
     new_projects = []
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
-        new_projects.append(ProjectJson(proj.Id, proj.Name, proj.Start.strftime("%x %X"), proj.End.strftime("%x %X"), thisdic[proj.Id]).toJson())
+        new_projects.append(json.dumps({
+            "Id": proj.Id,
+            "Name": proj.Name,
+            "Start": proj.Start.strftime("%x %X"),
+            "End": proj.End.strftime("%x %X"),
+            "TotalSubmissions": thisdic[proj.Id],
+            "PracticeProblemsEnabled": project_repo.get_practice_problems_enabled(proj.Id),
+        }))
     return jsonify(new_projects)
 
+@projects_api.route('/set_practice_problems_enabled', methods=['POST'])
+@jwt_required()
+@inject
+def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    data = request.get_json(silent=True) or {}
+    try:
+        pid = int(str(data.get('project_id', 0)) or 0)
+    except ValueError:
+        pid = 0
+    enabled = bool(data.get('enabled', False))
+
+    if pid <= 0:
+        return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
+
+    try:
+        project_repo.set_practice_problems_enabled(pid, enabled)
+        return jsonify({'ok': True, 'enabled': enabled})
+    except Exception:
+        return make_response({'ok': False}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
 @projects_api.route('/list_solution_files', methods=['GET'])
 @jwt_required()
@@ -263,6 +293,9 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     end_date = request.form.get('end_date', '')
     language = request.form.get('language', '')
     class_id = request.form.get('class_id', '')
+    practice_raw = (request.form.get('practice_problems_enabled', '') or '').strip().lower()
+    practice_enabled = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+
     if name == '' or start_date == '' or end_date == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
@@ -298,7 +331,7 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     selected_path = path
     new_project_id = project_repo.create_project(
         name, start_date, end_date, language, class_id,
-        selected_path, assignmentdesc_path, json.dumps(add_names)
+        selected_path, assignmentdesc_path, json.dumps(add_names), practice_enabled
     )
 
     return make_response(str(new_project_id), HTTPStatus.OK)
@@ -326,6 +359,9 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     start_date = request.form.get('start_date', '')
     end_date = request.form.get('end_date', '')
     language = request.form.get('language', '')
+    practice_raw = (request.form.get('practice_problems_enabled', '') or '').strip().lower()
+    practice_enabled = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+
     if name == '' or start_date == '' or end_date == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
@@ -483,7 +519,7 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
 
     project_repo.edit_project(
         name, start_date, end_date, language, pid,
-        path, assignmentdesc_path, json.dumps(add_names)
+        path, assignmentdesc_path, json.dumps(add_names), practice_enabled   
     )
 
     # Recompute testcase outputs **against the path we just wrote**, so we don't depend on
@@ -757,7 +793,9 @@ def get_testcases(project_repo: ProjectRepository = Provide[Container.project_re
         return make_response(message, HTTPStatus.UNAUTHORIZED)
 
     project_id = request.args.get('id')
-    testcases = project_repo.get_testcases(project_id)
+    practice_raw = (request.args.get('practice', '') or '').strip().lower()
+    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    testcases = project_repo.get_testcases(project_id, practice=practice)
 
     return make_response(json.dumps(testcases), HTTPStatus.OK)
 
@@ -774,6 +812,9 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
 
     file = request.files['file']
     project_id = request.form["project_id"]
+    practice_raw = (request.form.get('practice', '') or '').strip().lower()
+    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+
     try:
         proj = project_repo.get_selected_project(int(project_id))
         class_id = int(getattr(proj, "ClassId", 0) or 0)
@@ -798,6 +839,7 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
                 testcase["output"],
                 class_id,
                 bool(testcase.get("hidden", False)),
+                bool(testcase.get("practice", practice)),
             )
 
     return make_response("Testcase Added", HTTPStatus.OK)
@@ -821,6 +863,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
     hidden_raw = request.form.get('hidden', '').strip()
+    practice_raw = request.form.get('practice', '').strip()
     
     if id_val == '' or name == '' or input_data == '' or project_id == '' or description == '' or class_id == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
@@ -838,6 +881,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         return s in ("1", "true", "yes", "y", "on")
 
     hidden = parse_hidden(hidden_raw)
+    practice = parse_hidden(practice_raw)
 
     # Auto-recompute expected output when editing a testcase.
     # If the project's language is Python, run the saved solution with the new input
@@ -852,7 +896,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         # Fall back to the submitted output if recomputation fails
         pass
 
-    project_repo.add_or_update_testcase(project_id, id_val, name, description, input_data, output, class_id_int, hidden)
+    project_repo.add_or_update_testcase(project_id, id_val, name, description, input_data, output, class_id_int, hidden, practice)
 
     return make_response("Testcase Added", HTTPStatus.OK)
 
@@ -880,7 +924,14 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
     new_projects = []
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
-        new_projects.append(ProjectJson(proj.Id, proj.Name, proj.Start.strftime("%x %X"), proj.End.strftime("%x %X"), thisdic[proj.Id]).toJson())
+        new_projects.append(json.dumps({
+            "Id": proj.Id,
+            "Name": proj.Name,
+            "Start": proj.Start.strftime("%x %X"),
+            "End": proj.End.strftime("%x %X"),
+            "TotalSubmissions": thisdic[proj.Id],
+            "PracticeProblemsEnabled": project_repo.get_practice_problems_enabled(proj.Id),
+        }))
     return jsonify(new_projects)
 
 @projects_api.route('/getAssignmentDescription', methods=['GET'])
@@ -928,8 +979,19 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
     input_json = request.get_json()
     project_id = input_json['ProjectId']
     user_id = input_json['userID']
+    practice_raw = (input_json or {}).get('practice', False)
+    practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
-    submissions = submission_repo.get_most_recent_submission_by_project(project_id, [user_id])
+    if practice and hasattr(Submissions, "IsPractice"):
+        sub = (
+            Submissions.query
+            .filter(Submissions.Project == project_id, Submissions.User == user_id, Submissions.IsPractice == True)
+            .order_by(Submissions.Time.desc())
+            .first()
+        )
+        submissions = {user_id: sub} if sub else {}
+    else:
+        submissions = submission_repo.get_most_recent_submission_by_project(project_id, [user_id])
 
     test_info = []
     grading_data = {}

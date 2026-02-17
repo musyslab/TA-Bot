@@ -115,6 +115,25 @@ CREATE TABLE `Projects` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `PracticeProjects`
+--
+
+DROP TABLE IF EXISTS `PracticeProjects`;
+CREATE TABLE `PracticeProjects` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `ProjectId` int NOT NULL,
+  `Enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `Language` varchar(45) DEFAULT NULL,
+  `solutionpath` varchar(1000) DEFAULT NULL,
+  `AsnDescriptionPath` varchar(1000) DEFAULT NULL,
+  `AdditionalFilePath` varchar(200) DEFAULT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `ProjectId_UNIQUE` (`ProjectId`),
+  CONSTRAINT `fk_PracticeProjects_Project` FOREIGN KEY (`ProjectId`)
+    REFERENCES `Projects` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
 -- Table structure for table `StudentGrades`
 --
 
@@ -229,6 +248,7 @@ CREATE TABLE `Submissions` (
   `Project` int NOT NULL,
   `CodeFilepath` varchar(256) NOT NULL,
   `IsPassing` tinyint(1) NOT NULL,
+  `IsPractice` tinyint(1) NOT NULL,
   `TestCaseResults` text,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `idSubmissions_UNIQUE` (`Id`),
@@ -254,6 +274,7 @@ CREATE TABLE `Testcases` (
   `input` text,
   `Output` text,
   `Hidden` tinyint(1) NOT NULL DEFAULT 0,
+  `Practice` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Id_UNIQUE` (`Id`),
   KEY `tc_fk_idx` (`ProjectId`),

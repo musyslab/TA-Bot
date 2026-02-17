@@ -26,7 +26,7 @@ from urllib.parse import unquote
 import csv
 from io import StringIO
 from src.ai_suggestions import ERROR_DEFS
-from src.repositories.models import Testcases
+from src.repositories.models import Testcases, Submissions
 
 # Default grading error definitions (must match AdminGrading.tsx BASE_ERROR_DEFS).
 # We store them here so exports can resolve default point values when ErrorPointsJson
@@ -259,6 +259,8 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
     input_json = request.get_json()
     projectid = input_json['project_id']
+    practice_raw = (input_json or {}).get('practice', False)
+    practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
     class_name = project_repo.get_className_by_projectId(projectid)
     class_id = project_repo.get_class_id_by_name(class_name)
     users = user_repo.get_all_users_by_cid(class_id)
@@ -266,14 +268,32 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
     userids=[]
     for user in users:
         userids.append(user.Id)
-    bucket = submission_repo.get_most_recent_submission_by_project(projectid, userids)
-    submission_counter_dict = submission_repo.submission_counter(projectid, userids)
+
+    if practice and hasattr(Submissions, "IsPractice"):
+        bucket = {}
+        submission_counter_dict = {uid: 0 for uid in userids}
+        subs = (
+            Submissions.query
+            .filter(Submissions.Project == projectid, Submissions.User.in_(userids), Submissions.IsPractice == True)
+            .order_by(Submissions.User.asc(), Submissions.Time.desc())
+            .all()
+        )
+        for s in subs:
+            uid = int(getattr(s, "User", 0) or 0)
+            if uid in submission_counter_dict:
+                submission_counter_dict[uid] += 1
+                if uid not in bucket:
+                    bucket[uid] = s
+    else:
+        bucket = submission_repo.get_most_recent_submission_by_project(projectid, userids)
+        submission_counter_dict = submission_repo.submission_counter(projectid, userids)
+
     user_lectures_dict = user_repo.get_user_lectures(userids, class_id)
     user_labs_dict = user_repo.get_user_labs(userids, class_id)
     for user in users:
         if int(user.Role) == 0:
             if user.Id in bucket:
-                student_grade = project_repo.get_student_grade(projectid, user.Id)
+                student_grade = 0 if practice else project_repo.get_student_grade(projectid, user.Id)
                 student_id = user_repo.get_StudentNumber(user.Id)
                 studentattempts[user.Id]=[
                     user.Lastname,
@@ -281,7 +301,7 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
                     user_lectures_dict[user.Id],
                     user_labs_dict[user.Id],
                     submission_counter_dict[user.Id],
-                    bucket[user.Id].Time.strftime("%x %X"),
+                    bucket[user.Id].Time.isoformat(),
                     bucket[user.Id].IsPassing,
                     bucket[user.Id].Id,
                     str(class_id),

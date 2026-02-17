@@ -4,19 +4,15 @@ import random
 import shutil
 import subprocess
 from typing import Optional, Dict
-
 from flask import send_file
-
 from sqlalchemy.sql.expression import asc
-from .models import Projects, StudentGrades, Submissions, Testcases, Classes
+from .models import Projects, PracticeProjects, StudentGrades, Submissions, Testcases, Classes
 from src.repositories.database import db
 from sqlalchemy import desc, and_
 from datetime import datetime
 from pyston import PystonClient,File
 import asyncio
 import json
-
-
 
 class ProjectRepository():
 
@@ -77,14 +73,58 @@ class ProjectRepository():
         class_projects = Projects.query.filter(Projects.ClassId==class_id)
         return class_projects
     
-    def create_project(self, name: str, start: datetime, end: datetime, language:str, class_id:int, file_path:str, description_path:str, additional_file_path:str):
-        project = Projects(Name=name, Start=start, End=end, Language=language,
-                            ClassId=class_id, solutionpath=file_path,
-                            AsnDescriptionPath=description_path,
-                            AdditionalFilePath=additional_file_path)
+    def create_project(self, name: str, start: datetime, end: datetime, language:str, class_id:int, file_path:str, description_path:str, additional_file_path:str, practice_problems_enabled: bool = False):
+        project = Projects(
+            Name=name,
+            Start=start,
+            End=end,
+            Language=language,
+            ClassId=class_id,
+            solutionpath=file_path,
+            AsnDescriptionPath=description_path,
+            AdditionalFilePath=additional_file_path,
+        )
+
         db.session.add(project)
         db.session.commit()
+
+        # Dedicated practice-problems row linked to the main project
+        if bool(practice_problems_enabled):
+            pp = PracticeProjects(
+                ProjectId=project.Id,
+                Enabled=True,
+                Language=language,
+                solutionpath=file_path,
+                AsnDescriptionPath=description_path,
+                AdditionalFilePath=additional_file_path,
+            )
+            db.session.add(pp)
+            db.session.commit()
+
         return project.Id
+
+    def set_practice_problems_enabled(self, project_id: int, enabled: bool):
+        project = Projects.query.filter(Projects.Id == project_id).first()
+        if project is None:
+            return
+        pp = PracticeProjects.query.filter(PracticeProjects.ProjectId == project_id).first()
+        if pp is None:
+            pp = PracticeProjects(
+                ProjectId=project_id,
+                Enabled=bool(enabled),
+                Language=project.Language,
+                solutionpath=project.solutionpath,
+                AsnDescriptionPath=project.AsnDescriptionPath,
+                AdditionalFilePath=getattr(project, "AdditionalFilePath", "") or "",
+            )
+            db.session.add(pp)
+        else:
+            pp.Enabled = bool(enabled)
+        db.session.commit()
+
+    def get_practice_problems_enabled(self, project_id: int) -> bool:
+        pp = PracticeProjects.query.filter(PracticeProjects.ProjectId == project_id).first()
+        return bool(pp and getattr(pp, "Enabled", False))
         
     def get_project(self, project_id:int) -> Projects:
         project_data = Projects.query.filter(Projects.Id == project_id).first()
@@ -112,10 +152,11 @@ class ProjectRepository():
             str(project_solutionFile),
             str(project_descriptionfile),
             project_additionalfiles,
+            self.get_practice_problems_enabled(project_data.Id),
         ]
         return project
 
-    def edit_project(self, name: str, start: datetime, end: datetime, language:str, project_id:int, path:str, description_path:str, additional_file_path:str):
+    def edit_project(self, name: str, start: datetime, end: datetime, language:str, project_id:int, path:str, description_path:str, additional_file_path:str, practice_problems_enabled: bool = False):
         project = Projects.query.filter(Projects.Id == project_id).first()
         project.Name = name
         project.Start = start
@@ -124,10 +165,25 @@ class ProjectRepository():
         project.solutionpath = path
         project.AsnDescriptionPath = description_path
         project.AdditionalFilePath = additional_file_path
-        db.session.commit() 
+
+        # Upsert practice-project row
+        pp = PracticeProjects.query.filter(PracticeProjects.ProjectId == project_id).first()
+        if pp is None:
+            pp = PracticeProjects(ProjectId=project_id)
+            db.session.add(pp)
+        pp.Enabled = bool(practice_problems_enabled)
+        pp.Language = language
+        pp.solutionpath = path
+        pp.AsnDescriptionPath = description_path
+        pp.AdditionalFilePath = additional_file_path
+
+        db.session.commit()
         
-    def get_testcases(self, project_id: int) -> Dict[int, list]:
-        testcases = Testcases.query.filter(Testcases.ProjectId == project_id).all()
+    def get_testcases(self, project_id: int, practice: bool = False) -> Dict[int, list]:
+        testcases = Testcases.query.filter(
+            Testcases.ProjectId == project_id,
+            Testcases.Practice == bool(practice),
+        ).all()
         testcase_info: Dict[int, list] = {}
         for test in testcases:
             testcase_data = []
@@ -150,6 +206,7 @@ class ProjectRepository():
         output: str,
         class_id: int,
         hidden: bool = False,
+        practice: bool = False,
     ):
         from flask import current_app
 
@@ -218,6 +275,7 @@ class ProjectRepository():
                 input=input_data,
                 Output=output,
                 Hidden=bool(hidden),
+                Practice=bool(practice),
             )
             db.session.add(testcase)
         else:
@@ -226,6 +284,7 @@ class ProjectRepository():
             testcase.input = input_data
             testcase.Output = output
             testcase.Hidden = bool(hidden)
+            testcase.Practice = bool(practice)
 
         db.session.commit()
 
@@ -270,6 +329,7 @@ class ProjectRepository():
                 test.Output,
                 add_list,
                 bool(getattr(test, "Hidden", False)),
+                bool(getattr(test, "Practice", False)),
             ]
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)

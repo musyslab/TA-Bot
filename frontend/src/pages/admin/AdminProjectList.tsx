@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { Helmet } from "react-helmet";
 import { Link, useParams } from "react-router-dom";
@@ -14,6 +14,7 @@ interface ProjectObject {
     Start: string;
     End: string;
     TotalSubmissions: number;
+    PracticeProblemsEnabled?: boolean;
 }
 
 export default function AdminProjectList() {
@@ -148,54 +149,100 @@ export default function AdminProjectList() {
                 <tbody className="projects-table-body">
                     {projectsByStartAsc.map((project) => {
                         const active = isProjectActive(project);
+                        const practiceOn = !!project.PracticeProblemsEnabled;
                         return (
-                            <tr
-                                className={`project-row${active ? " is-active" : ""}`}
-                                key={project.Id}
-                                aria-current={active ? "true" : undefined}
-                            >
-                                <td className="project-name">
-                                    {project.Name}
-                                    {active && (
-                                        <span
-                                            className="badge-active"
-                                            title="Project is active today"
-                                            aria-label="Project is active today"
-                                        >
-                                            ● Active
-                                        </span>
-                                    )}
-                                </td>
 
-                                <td className="project-start">{formatDate12h(project.Start)}</td>
-                                <td className="project-end">{formatDate12h(project.End)}</td>
-                                <td className="project-total-submissions">{project.TotalSubmissions}</td>
+                            <Fragment key={project.Id}>
+                                <tr
+                                    className={`project-row${active ? " is-active" : ""}`}
+                                    aria-current={active ? "true" : undefined}
+                                >
+                                    <td className="project-name">
+                                        {project.Name}
+                                        {active && (
+                                            <span
+                                                className="badge-active"
+                                                title="Project is active today"
+                                                aria-label="Project is active today"
+                                            >
+                                                ● Active
+                                            </span>
+                                        )}
+                                    </td>
 
-                                <td className="project-review">
-                                    <Link className="button button-review" to={`/admin/${classId}/project/${project.Id}`}>
-                                        <FaEye aria-hidden="true" />
-                                        <span className="button-text">Review</span>
-                                    </Link>
-                                </td>
+                                    <td className="project-start">{formatDate12h(project.Start)}</td>
+                                    <td className="project-end">{formatDate12h(project.End)}</td>
+                                    <td className="project-total-submissions">{project.TotalSubmissions}</td>
 
-                                <td className="project-edit">
-                                    <Link className="button button-edit" to={`/admin/${classId}/project/manage/${project.Id}`}>
-                                        <FaEdit aria-hidden="true" />
-                                        <span className="button-text">Edit</span>
-                                    </Link>
-                                </td>
+                                    <td className="project-review">
+                                        <Link className="button button-review" to={`/admin/${classId}/project/${project.Id}`}>
+                                            <FaEye aria-hidden="true" />
+                                            <span className="button-text">Review</span>
+                                        </Link>
+                                    </td>
 
-                                {/* <td className="project-export">
-                  <button
-                    type="button"
-                    className="button button-export"
-                    onClick={() => handleExport(project.Id)}
-                  >
-                    <FaFileArchive aria-hidden="true" />
-                    <span className="button-text">Export</span>
-                  </button>
-                </td> */}
-                            </tr>
+                                    <td className="project-edit">
+                                        <Link className="button button-edit" to={`/admin/${classId}/project/manage/${project.Id}`}>
+                                            <FaEdit aria-hidden="true" />
+                                            <span className="button-text">Edit</span>
+                                        </Link>
+                                    </td>
+
+                                    {/* <td className="project-export">
+                      <button
+                        type="button"
+                        className="button button-export"
+                        onClick={() => handleExport(project.Id)}
+                      >
+                        <FaFileArchive aria-hidden="true" />
+                        <span className="button-text">Export</span>
+                      </button>
+                    </td> */}
+                                </tr>
+
+                                {practiceOn && (
+                                    <tr className="project-row practice-sub">
+                                        <td className="project-name">
+                                            <span className="practice-subdir">
+                                                <span className="practice-subdir-icon" aria-hidden="true">
+                                                    ↳
+                                                </span>
+                                                Practice Problems: {project.Name}
+                                            </span>
+                                        </td>
+
+                                        <td className="project-start">
+                                            <span className="practice-muted">{"\u00A0"}</span>
+                                        </td>
+                                        <td className="project-end">
+                                            <span className="practice-muted">{"\u00A0"}</span>
+                                        </td>
+
+                                        <td className="project-total-submissions">{"\u00A0"}</td>
+
+                                        <td className="project-review">
+                                            <Link
+                                                className="button button-review"
+                                                to={`/admin/${classId}/project/${project.Id}?practice=1`}
+                                            >
+                                                <FaEye aria-hidden="true" />
+                                                <span className="button-text">Review</span>
+                                            </Link>
+                                        </td>
+
+                                        <td className="project-edit">
+                                            <Link
+                                                className="button button-edit"
+                                                to={`/admin/${classId}/project/${project.Id}/practice`}
+                                            >
+                                                <FaEdit aria-hidden="true" />
+                                                <span className="button-text">Edit</span>
+                                            </Link>
+                                        </td>
+                                    </tr>
+                                )}
+                            </Fragment>
+
                         );
                     })}
                 </tbody>

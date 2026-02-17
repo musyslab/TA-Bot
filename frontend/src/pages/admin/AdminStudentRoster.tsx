@@ -2,7 +2,7 @@
 import React, { Component } from 'react'
 import axios from 'axios'
 import { Helmet } from 'react-helmet'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import MenuComponent from '../components/MenuComponent'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import '../../styling/AdminStudentRoster.scss'
@@ -11,6 +11,7 @@ import { FaClone, FaFileExport, FaDownload, FaEye, FaHandPaper } from 'react-ico
 
 const AdminStudentRoster = () => {
     const { class_id, id } = useParams<{ class_id: string; id: string }>()
+    const { search } = useLocation()
 
     if (!class_id || !id) {
         return <div>Error: project id missing or invalid</div>
@@ -21,7 +22,10 @@ const AdminStudentRoster = () => {
         return <div>Error: project id missing or invalid</div>
     }
 
-    return <StudentListInternal project_id={project_id} class_id={class_id} />
+    const practiceParam = (new URLSearchParams(search).get('practice') || '').toLowerCase()
+    const isPractice = ['1', 'true', 'yes', 'y', 'on'].includes(practiceParam)
+
+    return <StudentListInternal project_id={project_id} class_id={class_id} isPractice={isPractice} />
 }
 
 export default AdminStudentRoster
@@ -29,6 +33,7 @@ export default AdminStudentRoster
 interface StudentListProps {
     project_id: number
     class_id: string
+    isPractice: boolean
 }
 
 class Row {
@@ -164,9 +169,9 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
             const cd = String((res.headers as any)?.['content-disposition'] ?? '')
             const match = /filename\*?=(?:UTF-8''|")?([^\";]+)\"?/i.exec(cd)
-        const fname = match
-            ? decodeURIComponent(match[1])
-            : `${res.headers['project-name']}-grades.csv`
+            const fname = match
+                ? decodeURIComponent(match[1])
+                : `${res.headers['project-name']}-grades.csv`
 
             const a = document.createElement('a')
             a.href = URL.createObjectURL(res.data)
@@ -211,7 +216,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
     componentDidMount() {
         const submissionsRequest = axios.post(
             import.meta.env.VITE_API_URL + `/submissions/recentsubproject`,
-            { project_id: this.props.project_id },
+            { project_id: this.props.project_id, practice: this.props.isPractice },
             {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -481,7 +486,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         axios
             .post(
                 import.meta.env.VITE_API_URL + `/projects/ProjectGrading`,
-                { userID: UserId, ProjectId: this.props.project_id },
+                { userID: UserId, ProjectId: this.props.project_id, practice: this.props.isPractice },
                 {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -765,11 +770,13 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                     items={[
                         { label: 'Class Selection', to: '/admin/classes' },
                         { label: 'Project List', to: `/admin/${this.props.class_id}/projects/` },
-                        { label: 'Student List' },
+                        { label: this.props.isPractice ? 'Practice Submissions' : 'Student List' },
                     ]}
                 />
 
-                <div className="pageTitle">Grade or Review Student Submissions</div>
+                <div className="pageTitle">
+                    {this.props.isPractice ? 'Review Practice Submissions' : 'Grade or Review Student Submissions'}
+                </div>
 
                 <div className="main-grid">
                     <>
@@ -813,33 +820,37 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                                     &nbsp;&nbsp;
 
-                                    <button
-                                        type="button"
-                                        className="btn plagiarism-btn"
-                                        onClick={this.handleClick}
-                                        disabled={this.state.isLoading}
-                                        aria-label="Run Plagiarism Detector"
-                                        title="Run Plagiarism Detector"
-                                    >
-                                        <FaClone aria-hidden="true" />
-                                        &nbsp;Run Plagiarism Detector
-                                    </button>
+                                    {!this.props.isPractice && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="btn plagiarism-btn"
+                                                onClick={this.handleClick}
+                                                disabled={this.state.isLoading}
+                                                aria-label="Run Plagiarism Detector"
+                                                title="Run Plagiarism Detector"
+                                            >
+                                                <FaClone aria-hidden="true" />
+                                                &nbsp;Run Plagiarism Detector
+                                            </button>
 
-                                    &nbsp;&nbsp;
+                                            &nbsp;&nbsp;
 
-                                    <button
-                                        type="button"
-                                        className="btn export-btn"
-                                        onClick={() => this.downloadProjectGrades(rowsForView)}
-                                        disabled={this.state.isLoading}
-                                        aria-label="Export Student Grades"
-                                        title="Export Student Grades"
-                                    >
-                                        <FaFileExport aria-hidden="true" />
-                                        &nbsp;Export Grades to D2L
-                                    </button>
+                                            <button
+                                                type="button"
+                                                className="btn export-btn"
+                                                onClick={() => this.downloadProjectGrades(rowsForView)}
+                                                disabled={this.state.isLoading}
+                                                aria-label="Export Student Grades"
+                                                title="Export Student Grades"
+                                            >
+                                                <FaFileExport aria-hidden="true" />
+                                                &nbsp;Export Grades to D2L
+                                            </button>
 
-                                    &nbsp;&nbsp;
+                                            &nbsp;&nbsp;
+                                        </>
+                                    )}
 
                                     <label className="filter-label" htmlFor="sortSelect">
                                         Sort by:&nbsp;
@@ -867,7 +878,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                 <th className="col-status">Status</th>
                                                 <th className="col-view">View</th>
                                                 <th className="col-download">Download</th>
-                                                <th className="col-grade">Grade</th>
+                                                {!this.props.isPractice && <th className="col-grade">Grade</th>}
                                             </tr>
                                         </thead>
 
@@ -905,23 +916,25 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                             <td className="status-cell">N/A</td>
                                                             <td className="view-cell">N/A</td>
                                                             <td className="download-cell">N/A</td>
-                                                            <td className="grade-cell">
-                                                                <input
-                                                                    className="grade-input"
-                                                                    type="text"
-                                                                    placeholder="optional"
-                                                                    value={row.grade}
-                                                                    onChange={(e) => this.handleGradeChange(e, row)}
-                                                                    disabled
-                                                                />
-                                                                <Link
-                                                                    to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
-                                                                    className="btn grade-btn"
-                                                                    rel="noreferrer"
-                                                                >
-                                                                    Grade
-                                                                </Link>
-                                                            </td>
+                                                            {!this.props.isPractice && (
+                                                                <td className="grade-cell">
+                                                                    <input
+                                                                        className="grade-input"
+                                                                        type="text"
+                                                                        placeholder="optional"
+                                                                        value={row.grade}
+                                                                        onChange={(e) => this.handleGradeChange(e, row)}
+                                                                        disabled
+                                                                    />
+                                                                    <Link
+                                                                        to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
+                                                                        className="btn grade-btn"
+                                                                        rel="noreferrer"
+                                                                    >
+                                                                        Grade
+                                                                    </Link>
+                                                                </td>
+                                                            )}
                                                         </tr>
                                                     )
                                                 }
@@ -955,23 +968,25 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                 <FaDownload aria-hidden="true" />
                                                             </button>
                                                         </td>
-                                                        <td className="grade-cell">
-                                                            <input
-                                                                className="grade-input"
-                                                                type="text"
-                                                                placeholder="optional"
-                                                                value={row.grade}
-                                                                onChange={(e) => this.handleGradeChange(e, row)}
-                                                                disabled
-                                                            />
-                                                            <Link
-                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
-                                                                className="btn grade-btn"
-                                                                rel="noreferrer"
-                                                            >
-                                                                Grade
-                                                            </Link>
-                                                        </td>
+                                                        {!this.props.isPractice && (
+                                                            <td className="grade-cell">
+                                                                <input
+                                                                    className="grade-input"
+                                                                    type="text"
+                                                                    placeholder="optional"
+                                                                    value={row.grade}
+                                                                    onChange={(e) => this.handleGradeChange(e, row)}
+                                                                    disabled
+                                                                />
+                                                                <Link
+                                                                    to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
+                                                                    className="btn grade-btn"
+                                                                    rel="noreferrer"
+                                                                >
+                                                                    Grade
+                                                                </Link>
+                                                            </td>
+                                                        )}
                                                     </tr>
                                                 )
                                             })}

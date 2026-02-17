@@ -1,8 +1,8 @@
-import React, { use, useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import { useNavigate, useParams } from 'react-router-dom'
-import { eachDayOfInterval, set } from 'date-fns'
+import { eachDayOfInterval } from 'date-fns'
 import axios from 'axios'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -90,6 +90,14 @@ const AdminProjectManage = () => {
     const [additionalFileNames, setAdditionalFileNames] = useState<string[]>([])
     const [removedAdditionalFiles, setRemovedAdditionalFiles] = useState<string[]>([])
     const [mainJavaFileName, setMainJavaFileName] = useState<string>('')
+    const [practiceProblemsEnabled, setPracticeProblemsEnabled] = useState<boolean>(false)
+    const [serverPracticeProblemsEnabledSnapshot, setServerPracticeProblemsEnabledSnapshot] = useState<boolean>(false)
+
+    async function togglePracticeProblemsEnabled() {
+        const next = !practiceProblemsEnabled
+        setPracticeProblemsEnabled(next)
+    }
+
 
     // Lock page scroll whenever either modal is open
     useEffect(() => {
@@ -497,6 +505,9 @@ const AdminProjectManage = () => {
                         setProjectEndDate(new Date(data[project_id][2]))
                         setProjectLanguage(data[project_id][3])
                         setServerProjectLanguageSnapshot(data[project_id][3])
+                        const ppe = parseHidden(data[project_id][7])
+                        setPracticeProblemsEnabled(ppe)
+                        setServerPracticeProblemsEnabledSnapshot(ppe)
                         setSolutionFileNames([])
                         setSolutionFiles([])
                         const serverDesc = (data[project_id][5] || '') as string
@@ -705,6 +716,7 @@ const AdminProjectManage = () => {
             formData.append('file', JsonFile!)
             formData.append('project_id', project_id.toString())
             formData.append('class_id', classId.toString())
+            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
 
             await axios.post(import.meta.env.VITE_API_URL + `/projects/json_add_testcases`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -771,6 +783,7 @@ const AdminProjectManage = () => {
             formData.append('end_date', formatDateTimeLocal(ProjectEndDate))
             formData.append('language', ProjectLanguage)
             formData.append('class_id', classId.toString())
+            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
 
             const res = await axios.post(`${import.meta.env.VITE_API_URL}/projects/create_project`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -838,6 +851,7 @@ const AdminProjectManage = () => {
             formData.append('end_date', formatDateTimeLocal(ProjectEndDate!))
             formData.append('language', ProjectLanguage)
             formData.append('class_id', classId.toString())
+            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
 
             await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_project`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -1641,6 +1655,31 @@ const AdminProjectManage = () => {
                                                         </div>
                                                     </div>
                                                 )}
+                                            </div>
+
+                                            <div className="practice-problems-toggle">
+                                                <button
+                                                    type="button"
+                                                    className={`toggle-practice-problems ${practiceProblemsEnabled ? 'on' : 'off'}`}
+                                                    aria-pressed={practiceProblemsEnabled}
+                                                    onClick={togglePracticeProblemsEnabled}
+                                                >
+                                                    {practiceProblemsEnabled ? 'Practice problems: On' : 'Practice problems: Off'}
+                                                </button>
+
+                                                {practiceProblemsEnabled &&
+                                                    edit &&
+                                                    project_id > 0 &&
+                                                    practiceProblemsEnabled === serverPracticeProblemsEnabledSnapshot && (
+
+                                                        <button
+                                                            type="button"
+                                                            className="manage-practice-problems-link"
+                                                            onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice`)}
+                                                        >
+                                                            Manage practice problems
+                                                        </button>
+                                                    )}
                                             </div>
 
                                             <button

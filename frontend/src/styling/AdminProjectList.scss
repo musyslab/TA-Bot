@@ -159,6 +159,50 @@
                 min-width: 0;
                 text-align: center;
             }
+
+            .project-review .button svg,
+            .project-edit .button svg,
+            .project-export .button svg {
+                font-size: 1.1rem;
+                flex: 0 0 auto;
+            }
+        }
+
+        .project-row.practice-sub {
+            background: #fbfbfb;
+
+            td {
+                font-size: 0.98rem;
+                color: #444444;
+                background: #fbfbfb;
+            }
+
+            &:hover td {
+                background: #fbfbfb;
+            }
+
+            td:first-child {
+                border-left: 4px solid #d7d7d7;
+            }
+
+            .practice-subdir {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.45rem;
+                font-weight: 600;
+            }
+
+            .practice-subdir-icon {
+                opacity: 0.7;
+                font-size: 1.6rem;
+                line-height: 1;
+                position: relative;
+                top: -8px;
+            }
+
+            .practice-muted {
+                color: #888888;
+            }
         }
 
         .project-row.is-active {
@@ -212,7 +256,7 @@
     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
     width: 80%;
     margin-top: 15px;
-    display: flex; 
+    display: flex;
     justify-content: center;
     margin: 15px auto 0;
 
@@ -227,14 +271,6 @@
 /* When width is 1200px or less, slightly reduce font sizes */
 @media (max-width: 1200px) {
     .projects-table {
-        .projects-table-head {
-            .projects-table-row {
-                .projects-table-header {
-                    font-size: 0.9rem;
-                }
-            }
-        }
-
         .projects-table-body {
             .project-row {
                 td {

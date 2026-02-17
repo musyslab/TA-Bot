@@ -15,12 +15,23 @@ class Projects(db.Model):
     Start = Column(Date)
     End = Column(Date)
     Language = Column(String)
-
     Submissions=relationship('Submissions') 
     StudentUnlocks=relationship('StudentUnlocks') 
     solutionpath=Column(String)
     AsnDescriptionPath = Column(String)
     AdditionalFilePath = Column(String)
+    PracticeProject = relationship('PracticeProjects', uselist=False, back_populates='Project', cascade="all, delete-orphan")
+
+class PracticeProjects(db.Model):
+    __tablename__ = "PracticeProjects"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    ProjectId = Column(Integer, ForeignKey('Projects.Id', ondelete='CASCADE'), unique=True, nullable=False)
+    Enabled = Column(Boolean, nullable=False, default=False)
+    Language = Column(String)
+    solutionpath = Column(String)
+    AsnDescriptionPath = Column(String)
+    AdditionalFilePath = Column(String)
+    Project = relationship('Projects', back_populates='PracticeProject')
 
 class Users(db.Model):
     __tablename__ = "Users"
@@ -43,6 +54,7 @@ class Submissions(db.Model):
     OutputFilepath = Column(String)
     CodeFilepath = Column(String)
     IsPassing = Column(Boolean)
+    IsPractice = Column(Boolean)
     Time = Column(Date)
     User = Column(Integer, ForeignKey('Users.Id'))
     Project = Column(Integer, ForeignKey('Projects.Id'))
@@ -97,6 +109,7 @@ class Testcases(db.Model):
     input = Column(String)
     Output = Column(String)
     Hidden = Column(Boolean, default=False)
+    Practice = Column(Boolean, default=False)
 
 class OHVisits(db.Model):
     __tablename__ = "OHVisits"
