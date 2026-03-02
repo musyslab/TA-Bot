@@ -37,6 +37,8 @@ interface UploadPageState {
     projects: Array<DropDownOption>
     student_id: number
     class_selected: boolean
+        projectPracticeEnabledById: Record<number, boolean>
+    submitToPractice: boolean
 }
 
 interface ProjectObject {
@@ -45,6 +47,7 @@ interface ProjectObject {
     Start: string
     End: string
     TotalSubmissions: number
+    PracticeProblemsEnabled?: boolean
 }
 
 interface AdminUploadPageProps {
@@ -131,6 +134,8 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             class_selected: false,
             files: [],
             mainJavaFileName: '',
+                    projectPracticeEnabledById: {},
+                    submitToPractice: false,
         }
 
         this.handleSubmit = this.handleSubmit.bind(this)
@@ -149,12 +154,16 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             files: [],
             mainJavaFileName: '',
             isUploading: false,
+            submitToPractice: false,
         })
     }
 
     handleProjectIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
         const value = parseInt(e.target.value, 10)
-        this.setState({ project_id: Number.isNaN(value) ? 0 : value })
+            this.setState({
+                    project_id: Number.isNaN(value) ? 0 : value,
+                    submitToPractice: false,
+                })
     }
 
     handleClassIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -173,6 +182,8 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             files: [],
             mainJavaFileName: '',
             isUploading: false,
+                    projectPracticeEnabledById: {},
+        submitToPractice: false,
         })
 
         axios
@@ -237,7 +248,14 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                     text: p.Name,
                     value: p.Id,
                 }))
-                this.setState({ projects: projectDropdown })
+                        const practiceMap: Record<number, boolean> = {}
+                        for (const p of projects) {
+                            practiceMap[p.Id] = !!p.PracticeProblemsEnabled
+                        }
+                        this.setState({
+                            projects: projectDropdown,
+                            projectPracticeEnabledById: practiceMap,
+                        })
             })
             .catch((err) => {
                 this.setState({
@@ -345,6 +363,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             formData.append('student_id', String(this.state.student_id))
             formData.append('project_id', String(this.state.project_id))
             formData.append('class_id', String(this.state.class_id))
+            formData.append('practice', this.state.submitToPractice ? '1' : '0')
 
             axios
                 .post(import.meta.env.VITE_API_URL + `/upload/`, formData, {
@@ -456,6 +475,28 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                     </option>
                                 ))}
                             </select>
+
+                                                        {projectChosen &&
+                                !!this.state.projectPracticeEnabledById[this.state.project_id] && (
+                                    <>
+                                        <div className="spacer" aria-hidden="true">
+                                            &nbsp;
+                                        </div>
+
+                                        <p className="section-label">Submit to</p>
+                                        <select
+                                            className="select practice-target-select"
+                                            value={this.state.submitToPractice ? 'practice' : 'main'}
+                                            onChange={(e) =>
+                                                this.setState({ submitToPractice: e.target.value === 'practice' })
+                                            }
+                                            disabled={this.state.isLoading}
+                                        >
+                                            <option value="main">Main Problem</option>
+                                            <option value="practice">Practice Problem</option>
+                                        </select>
+                                    </>
+                                )}
 
                             <div className="spacer" aria-hidden="true">
                                 &nbsp;

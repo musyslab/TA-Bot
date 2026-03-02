@@ -57,6 +57,15 @@ def project_dir(base_proj: str, ts: str) -> str:
     # teacher-files/<YYYYMMDD_HHMMSS>__<projectname>
     return os.path.join(teacher_root(), f"{ts}__{base_proj}")
 
+def practice_teacher_root() -> str:
+    return os.path.join(project_root(), "teacher-practice-files")
+
+def practice_project_dir(project_id: int) -> str:
+    return os.path.join(practice_teacher_root(), str(int(project_id)))
+
+def practice_version_dir(project_id: int, ts: str) -> str:
+    return os.path.join(practice_project_dir(project_id), ts)
+
 def is_ts_dir(name: str) -> bool:
     return bool(TS_DIR_RE.match(name or ""))
 
@@ -150,11 +159,14 @@ def list_solution_files(project_repo: ProjectRepository = Provide[Container.proj
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
     pid_str = (request.args.get("id", "") or "").strip()
+    practice_raw = (request.args.get("practice", "") or "").strip().lower()
+    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+
     if not pid_str.isdigit():
         return make_response([], HTTPStatus.OK)
     pid = int(pid_str)
 
-    p = project_repo.get_project_path(pid)
+    p = project_repo.get_project_path(pid, practice=practice)
     if not p:
         return make_response([], HTTPStatus.OK)
 
@@ -703,7 +715,10 @@ def list_source_files(project_repo: ProjectRepository = Provide[Container.projec
     if not pid:
         return make_response({'message': 'Missing project_id'}, HTTPStatus.BAD_REQUEST)
 
-    root = project_repo.get_project_path(pid)  # absolute path previously saved
+    practice_raw = (request.args.get("practice", "") or "").strip().lower()
+    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    root = project_repo.get_project_path(pid, practice=practice)  # absolute path previously saved
+
     if not root or not os.path.exists(root):
         return make_response({'message': 'Project path not found'}, HTTPStatus.NOT_FOUND)
 
@@ -735,7 +750,10 @@ def get_source_file(project_repo: ProjectRepository = Provide[Container.project_
     if not pid:
         return make_response({'message': 'Missing project_id'}, HTTPStatus.BAD_REQUEST)
 
-    root = project_repo.get_project_path(pid)
+    practice_raw = (request.args.get("practice", "") or "").strip().lower()
+    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    root = project_repo.get_project_path(pid, practice=practice)
+
     if not root or not os.path.exists(root):
         return make_response({'message': 'Project path not found'}, HTTPStatus.NOT_FOUND)
 
@@ -779,7 +797,12 @@ def get_project(project_repo: ProjectRepository = Provide[Container.project_repo
             'message': 'Access Denied'
         }
         return make_response(message, HTTPStatus.UNAUTHORIZED)
-    project_info=project_repo.get_project(request.args.get('id'))
+
+    pid = request.args.get('id')
+    practice_raw = (request.args.get('practice', '') or '').strip().lower()
+    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    project_info = project_repo.get_project(pid, practice=practice)
+
     return make_response(json.dumps(project_info), HTTPStatus.OK)
     
 @projects_api.route('/get_testcases', methods=['GET'])
@@ -889,9 +912,15 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     try:
         project = project_repo.get_selected_project(int(project_id))
         language = (getattr(project, "Language", "") or "")
-        solution_root = (getattr(project, "solutionpath", "") or "")
-        add_path = getattr(project, "AdditionalFilePath", "") if project else ""
+        # If this testcase is PRACTICE, use practice solution/desc/additional
+        if practice:
+            solution_root = project_repo.get_project_path(int(project_id), practice=True)
+            add_path = getattr(project_repo.get_practice_project(int(project_id)), "AdditionalFilePath", "") if project else ""
+        else:
+            solution_root = (getattr(project, "solutionpath", "") or "")
+            add_path = getattr(project, "AdditionalFilePath", "") if project else ""
         output = run_solution_for_input(solution_root, language, input_data, int(project_id), int(class_id_int), add_path)
+
     except Exception:
         # Fall back to the submitted output if recomputation fails
         pass
@@ -940,8 +969,11 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
 def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container.project_repo]):
     
     project_id = request.args.get('project_id')
-    assignmentdesc_contents = project_repo.get_project_desc_file(project_id)
-    assignmentdesc_path = project_repo.get_project_desc_path(project_id)
+    practice_raw = (request.args.get('practice', '') or '').strip().lower()
+    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    assignmentdesc_contents = project_repo.get_project_desc_file(project_id, practice=practice)
+    assignmentdesc_path = project_repo.get_project_desc_path(project_id, practice=practice)
+
     fname = os.path.basename(assignmentdesc_path) if assignmentdesc_path else 'assignment_description'
     ext = os.path.splitext(fname)[1].lower()
     if ext == '.pdf':
@@ -965,6 +997,97 @@ def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container
             'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type, X-Filename',
         },
     )
+
+@projects_api.route('/edit_practice_project_files', methods=['POST'])
+@jwt_required()
+@inject
+def edit_practice_project_files(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    """
+    Upload practice-problem solution files + assignment description (and optional additional files)
+    into a dedicated practice folder, and store paths on PracticeProjects (not Projects).
+    """
+    def ts_str() -> str:
+        return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def safe_name(s: str) -> str:
+        return secure_filename(s or "").replace(" ", "_")
+
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    pid_str = (request.form.get("project_id", "") or "").strip()
+    if not pid_str.isdigit():
+        return make_response({'message': 'Invalid or missing project_id'}, HTTPStatus.BAD_REQUEST)
+    pid = int(pid_str)
+
+    proj = project_repo.get_selected_project(pid)
+    if not proj:
+        return make_response({'message': 'Project not found'}, HTTPStatus.NOT_FOUND)
+
+    # Require both solution and description for practice files
+    solution_uploads = request.files.getlist('solutionFiles')
+    solution_uploads = [f for f in solution_uploads if f and f.filename]
+    if not solution_uploads:
+        return make_response({'message': 'No selected solution files'}, HTTPStatus.BAD_REQUEST)
+    if 'assignmentdesc' not in request.files or not request.files['assignmentdesc'].filename:
+        return make_response({'message': 'No assignment description file'}, HTTPStatus.BAD_REQUEST)
+
+    # Ensure PP row exists and is enabled
+    project_repo.set_practice_problems_enabled(pid, True)
+    pp = project_repo.get_practice_project(pid)
+    if not pp:
+        return make_response({'message': 'Could not create practice row'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    ts = ts_str()
+    base_dir = practice_version_dir(pid, ts)
+    os.makedirs(base_dir, exist_ok=True)
+
+    # Save solution file(s)
+    for up in solution_uploads:
+        orig = safe_name(up.filename)
+        ext = os.path.splitext(orig)[1].lower()
+        if ext not in ALLOWED_SOURCE_EXTS:
+            return make_response({'message': f'Unsupported file type: {ext}'}, HTTPStatus.BAD_REQUEST)
+        up.save(os.path.join(base_dir, orig))
+
+    # Save description
+    ad = request.files['assignmentdesc']
+    ad_name = safe_name(ad.filename or "assignment.pdf")
+    desc_path = os.path.join(base_dir, ad_name)
+    ad.save(desc_path)
+
+    # Save additional practice files (optional)
+    add_names = []
+    for add_up in request.files.getlist('additionalFiles'):
+        if add_up and add_up.filename:
+            orig_name = safe_name(add_up.filename)
+            add_up.save(os.path.join(base_dir, orig_name))
+            add_names.append(orig_name)
+
+    # Persist practice-only paths
+    pp.solutionpath = base_dir
+    pp.AsnDescriptionPath = desc_path
+    pp.AdditionalFilePath = json.dumps(add_names)
+    pp.Language = getattr(proj, "Language", "") or pp.Language
+    pp.Enabled = True
+    try:
+        from src.repositories.database import db
+        db.session.commit()
+    except Exception:
+        return make_response({'message': 'Failed to save practice paths'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    # Recompute outputs for PRACTICE testcases using practice solution
+    try:
+        recompute_expected_outputs(
+            project_repo,
+            int(pid),
+            solution_override_path=base_dir,
+            language_override=getattr(proj, "Language", ""),
+        )
+    except Exception:
+        pass
+
+    return jsonify({'ok': True})
 
 @projects_api.route('/ProjectGrading', methods=['POST'])
 @jwt_required()

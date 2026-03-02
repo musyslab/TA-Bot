@@ -93,7 +93,18 @@ class SubmissionRepository():
             student_output_file = f.read()
         return student_output_file
     
-    def create_submission(self, user_id: int, output: str, codepath: str, time: str, project_id: int, status: bool, errorcount: int, testcase_results: str):
+    def create_submission(
+        self,
+        user_id: int,
+        output: str,
+        codepath: str,
+        time: str,
+        project_id: int,
+        status: bool,
+        errorcount: int,
+        testcase_results,
+        is_practice: bool = False,
+    ):
         """Creates a new submission record in the database.
 
         Args:
@@ -115,6 +126,7 @@ class SubmissionRepository():
             User=user_id,
             Project=project_id,
             IsPassing=status,
+            IsPractice=bool(is_practice),
             TestCaseResults=str(testcase_results),
         )        
         db.session.add(submission)

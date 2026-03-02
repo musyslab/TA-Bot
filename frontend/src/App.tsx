@@ -68,7 +68,7 @@ class App extends Component {
 
                     <Route path="/admin/:class_id/project/:id/practice" element={
                         <ProtectedRoute>
-                            <AdminPracticeProblemsManage />
+                            <AdminProjectManage practiceMode />
                         </ProtectedRoute>
                     } />
 

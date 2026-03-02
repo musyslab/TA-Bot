@@ -15,6 +15,8 @@ import asyncio
 import json
 
 class ProjectRepository():
+    def get_practice_project(self, project_id: int) -> Optional[PracticeProjects]:
+        return PracticeProjects.query.filter(PracticeProjects.ProjectId == project_id).first()
 
     def get_current_project(self) -> Optional[Projects]:
         """[Identifies the current project based on the start and end date]
@@ -113,9 +115,9 @@ class ProjectRepository():
                 ProjectId=project_id,
                 Enabled=bool(enabled),
                 Language=project.Language,
-                solutionpath=project.solutionpath,
-                AsnDescriptionPath=project.AsnDescriptionPath,
-                AdditionalFilePath=getattr(project, "AdditionalFilePath", "") or "",
+                solutionpath=None,
+                AsnDescriptionPath=None,
+                AdditionalFilePath="[]",
             )
             db.session.add(pp)
         else:
@@ -126,19 +128,35 @@ class ProjectRepository():
         pp = PracticeProjects.query.filter(PracticeProjects.ProjectId == project_id).first()
         return bool(pp and getattr(pp, "Enabled", False))
         
-    def get_project(self, project_id:int) -> Projects:
+    def get_project(self, project_id:int, practice: bool = False) -> Projects:
         project_data = Projects.query.filter(Projects.Id == project_id).first()
+        pp = None
+        if practice:
+            pp = PracticeProjects.query.filter(PracticeProjects.ProjectId == project_id).first()
         project ={}
         now=project_data.Start
         start_string = now.strftime("%Y-%m-%dT%H:%M:%S")
         now = project_data.End
         end_string = now.strftime("%Y-%m-%dT%H:%M:%S")
-        project_solutionFile = project_data.solutionpath
-        #Strip just the file name from the path
-        project_solutionFile = project_solutionFile.split("/")[-1]
-        project_descriptionfile = project_data.AsnDescriptionPath
-        project_descriptionfile = project_descriptionfile.split("/")[-1]
-        add_field = getattr(project_data, "AdditionalFilePath", "") or ""
+
+        if practice:
+            # Practice view should not fall back to main assignment files
+            project_solutionFile = (pp.solutionpath if (pp and pp.solutionpath) else "")
+            project_solutionFile = project_solutionFile.split("/")[-1] if project_solutionFile else ""
+
+            project_descriptionfile = (pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else "")
+            project_descriptionfile = project_descriptionfile.split("/")[-1] if project_descriptionfile else ""
+
+            add_field = (getattr(pp, "AdditionalFilePath", "") if pp else "") or ""
+        else:
+            project_solutionFile = (project_data.solutionpath or "")
+            project_solutionFile = project_solutionFile.split("/")[-1] if project_solutionFile else ""
+
+            project_descriptionfile = (project_data.AsnDescriptionPath or "")
+            project_descriptionfile = project_descriptionfile.split("/")[-1] if project_descriptionfile else ""
+
+            add_field = (getattr(project_data, "AdditionalFilePath", "") or "")
+
         try:
             add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
         except Exception:
@@ -173,10 +191,6 @@ class ProjectRepository():
             db.session.add(pp)
         pp.Enabled = bool(practice_problems_enabled)
         pp.Language = language
-        pp.solutionpath = path
-        pp.AsnDescriptionPath = description_path
-        pp.AdditionalFilePath = additional_file_path
-
         db.session.commit()
         
     def get_testcases(self, project_id: int, practice: bool = False) -> Dict[int, list]:
@@ -210,18 +224,22 @@ class ProjectRepository():
     ):
         from flask import current_app
 
-        # Fetch project and determine teacher directory base
+        # Fetch project (main) and choose correct file roots (main vs practice)
         project = Projects.query.filter(Projects.Id == project_id).first()
+        pp = None
+        if bool(practice):
+            pp = PracticeProjects.query.filter(PracticeProjects.ProjectId == project_id).first()
+
         teacher_base = current_app.config["TEACHER_FILES_DIR"]
         # Ensure solutionpath points to the teacher project folder
-        project_base = project.solutionpath  
+        project_base = (pp.solutionpath if (practice and pp and pp.solutionpath) else project.solutionpath)
 
         # Run grading-script to compute default output if none provided
         grading_script = os.path.join(
             current_app.root_path, "..", "tabot-files", "grading-scripts", "grade.py"
         )
 
-        add_path = getattr(project, "AdditionalFilePath", "") or ""
+        add_path = (getattr(pp, "AdditionalFilePath", "") if (practice and pp) else getattr(project, "AdditionalFilePath", "")) or ""
         # Expand stored names to absolute paths under the teacher project folder for grade.py
         try:
             base_dir = project_base if os.path.isdir(project_base) else os.path.dirname(project_base)
@@ -247,7 +265,7 @@ class ProjectRepository():
                 "python",
                 grading_script,
                 "ADMIN",
-                project.Language,
+                (pp.Language if (practice and pp and pp.Language) else project.Language),
                 input_data,
                 project_base,
                 add_path,
@@ -364,17 +382,26 @@ class ProjectRepository():
         class_id = Classes.query.filter(Classes.Name==class_name).first().Id
         return class_id
 
-    def get_project_path(self, project_id):
+    def get_project_path(self, project_id, practice: bool = False):
         project = Projects.query.filter(Projects.Id==project_id).first()
+        if not project:
+            return ""
+        if practice:
+            pp = PracticeProjects.query.filter(PracticeProjects.ProjectId == int(project_id)).first()
+            return (pp.solutionpath if (pp and pp.solutionpath) else "")
         return project.solutionpath
 
-    def get_project_desc_path(self, project_id):
-        project = Projects.query.filter(Projects.Id==project_id).first()
+    def get_project_desc_path(self, project_id, practice: bool = False):
+        project = Projects.query.filter(Projects.Id == project_id).first()
+        if not project:
+            return ""
+        if practice:
+            pp = PracticeProjects.query.filter(PracticeProjects.ProjectId == int(project_id)).first()
+            return (pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else "")
         return project.AsnDescriptionPath
 
-    def get_project_desc_file(self, project_id):
-        project = Projects.query.filter(Projects.Id == project_id).first()
-        filepath = project.AsnDescriptionPath
+    def get_project_desc_file(self, project_id, practice: bool = False):
+        filepath = self.get_project_desc_path(project_id, practice=practice)
         with open(filepath, 'rb') as file:
             file_contents = file.read()
         return file_contents  # Return the contents of the PDF file

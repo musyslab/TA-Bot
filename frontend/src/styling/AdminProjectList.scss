@@ -169,20 +169,21 @@
         }
 
         .project-row.practice-sub {
-            background: #fbfbfb;
+            background: #e6e6e6;
 
             td {
-                font-size: 0.98rem;
-                color: #444444;
-                background: #fbfbfb;
+                font-size: 0.92rem;
+                color: #2f2f2f;
+                background: #e6e6e6;
+                padding: 0.45rem 0.8rem;
             }
 
             &:hover td {
-                background: #fbfbfb;
+                background: #dedede;
             }
 
             td:first-child {
-                border-left: 4px solid #d7d7d7;
+                border-left: 4px solid #9a9a9a;
             }
 
             .practice-subdir {
@@ -202,6 +203,17 @@
 
             .practice-muted {
                 color: #888888;
+            }
+
+            .practice-date {
+                font-size: 0.92rem;
+                color: #2f2f2f;
+            }
+
+            .project-review .button,
+            .project-edit .button {
+                font-size: 0.9rem;
+                padding: 0.55rem 0.75rem;
             }
         }
 

@@ -45,7 +45,12 @@ class Testcase {
     hidden: boolean
 }
 
-const AdminProjectManage = () => {
+type AdminProjectManageProps = {
+    practiceMode?: boolean
+}
+
+const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) => {
+
     const { id, class_id } = useParams()
     const navigate = useNavigate()
 
@@ -81,6 +86,7 @@ const AdminProjectManage = () => {
     const [submittingProject, setSubmittingProject] = useState<boolean>(false)
     const [submittingTestcase, setSubmittingTestcase] = useState<boolean>(false)
     const [submittingJson, setSubmittingJson] = useState<boolean>(false)
+    const [loadingProjectState, setLoadingProjectState] = useState<boolean>(true)
     const [modalDraft, setModalDraft] = useState<Testcase | null>(null)
     const [previewOpen, setPreviewOpen] = useState(false)
     const [previewTitle, setPreviewTitle] = useState('')
@@ -98,6 +104,12 @@ const AdminProjectManage = () => {
         setPracticeProblemsEnabled(next)
     }
 
+    useEffect(() => {
+        document.body.style.overflow = ''
+        return () => {
+            document.body.style.overflow = ''
+        }
+    }, [])
 
     // Lock page scroll whenever either modal is open
     useEffect(() => {
@@ -114,6 +126,12 @@ const AdminProjectManage = () => {
 
     const API = import.meta.env.VITE_API_URL
     const authHeader = { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
+    const isPractice = !!practiceMode
+
+    const pageTitleText =
+        isPractice
+            ? (edit ? 'Edit Practice Problem' : 'Create Practice Problem')
+            : (edit ? 'Edit Assignment' : 'Create Assignment')
 
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i
     const SOLUTION_ALLOWED_RE = /\.(py|java|c|h|rkt|scm)$/i
@@ -187,6 +205,7 @@ const AdminProjectManage = () => {
                     const url = new URL(`${API}/projects/get_source_file`)
                     url.searchParams.set('project_id', String(project_id))
                     url.searchParams.set('relpath', name)
+                    url.searchParams.set('practice', isPractice ? 'true' : 'false')
                     const res = await fetch(url, { headers: authHeader })
                     if (!res.ok) return
                     const txt = await res.text()
@@ -202,7 +221,8 @@ const AdminProjectManage = () => {
     async function loadServerSolutionFiles() {
         try {
             const res = await axios.get(
-                import.meta.env.VITE_API_URL + `/projects/list_solution_files?id=${project_id}`,
+                import.meta.env.VITE_API_URL + `/projects/list_solution_files?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`,
+
                 { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
             )
             const names = Array.isArray(res.data) ? res.data : []
@@ -220,7 +240,7 @@ const AdminProjectManage = () => {
             loadServerSolutionFiles()
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [edit, project_id])
+    }, [edit, project_id, isPractice])
 
     useEffect(() => {
         let cancelled = false
@@ -289,6 +309,7 @@ const AdminProjectManage = () => {
                     const url = new URL(`${API}/projects/get_source_file`)
                     url.searchParams.set('project_id', String(project_id))
                     url.searchParams.set('relpath', name)
+                    url.searchParams.set('practice', isPractice ? 'true' : 'false')
                     const res = await fetch(url, { headers: authHeader })
                     const text = res.ok ? await res.text() : '[Could not load file from server]'
                     return `// ===== ${name} =====\n${text}`
@@ -313,7 +334,8 @@ const AdminProjectManage = () => {
     })()
 
     async function fetchServerFileList(): Promise<string[]> {
-        const res = await fetch(`${API}/projects/list_source_files?project_id=${project_id}`, { headers: authHeader })
+        const res = await fetch(`${API}/projects/list_source_files?project_id=${project_id}&practice=${isPractice ? 'true' : 'false'}`, { headers: authHeader })
+
         if (!res.ok) return []
         const data = await res.json()
         const list = data.files.map((f: any) => f.relpath)
@@ -325,6 +347,7 @@ const AdminProjectManage = () => {
         const url = new URL(`${API}/projects/get_source_file`)
         url.searchParams.set('project_id', String(project_id))
         if (relpath) url.searchParams.set('relpath', relpath)
+        url.searchParams.set('practice', isPractice ? 'true' : 'false')
         const res = await fetch(url, { headers: authHeader })
         if (!res.ok) return
         const text = await res.text()
@@ -337,7 +360,7 @@ const AdminProjectManage = () => {
         if (edit && project_id > 0) {
             fetchServerFileList()
         }
-    }, [edit, project_id])
+    }, [edit, project_id, isPractice])
 
     const defaultStart = (() => {
         const d = new Date()
@@ -361,30 +384,33 @@ const AdminProjectManage = () => {
     const highlightDates: Date[] =
         ProjectStartDate && ProjectEndDate ? eachDayOfInterval({ start: ProjectStartDate, end: ProjectEndDate }) : []
 
-    const [projects, setProjects] = useState([]);
+    const [projects, setProjects] = useState([])
     useEffect(() => {
+        let cancelled = false
         const fetchProjects = async () => {
             try {
                 const response = await axios.get(
                     `${import.meta.env.VITE_API_URL}/projects/get_projects_by_class_id?id=${classId}`,
                     {
-                        headers: {
-                            Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
-                        }
+                        headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
                     }
-                );
+                )
                 const otherProjects = response.data.filter((pStr) => {
-                    const p = JSON.parse(pStr);
-                    return p.Id !== project_id;
-                });
-                setProjects(otherProjects);
+                    const p = JSON.parse(pStr)
+                    return p.Id !== project_id
+                })
+                if (!cancelled) setProjects(otherProjects)
             } catch (err) {
-                console.log(err);
+                console.log(err)
+                if (!cancelled) setProjects([])
             }
-        };
+        }
 
-        fetchProjects();
-    }, []);
+        if (classId > 0) fetchProjects()
+        return () => {
+            cancelled = true
+        }
+    }, [classId, project_id])
 
     const blockedDates = useMemo(() => {
         const dates = [];
@@ -454,91 +480,133 @@ const AdminProjectManage = () => {
     };
 
     useEffect(() => {
-        axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
-            })
-            .then(res => {
-                const data = res.data
-                const rows: Array<Testcase> = []
+        let cancelled = false
 
-                Object.entries(data).map(([key, value]) => {
-                    const testcase = new Testcase()
-                    const values = value as Array<string>
+        const resetForSwitch = () => {
+            setLoadingProjectState(true)
 
-                    testcase.id = parseInt(key)
-                    testcase.name = values[1]
-                    testcase.description = values[2]
-                    testcase.input = values[3]
-                    testcase.output = values[4]
-                    testcase.hidden = parseHidden((values as any)[5])
+            // Clear UI that frequently shows stale values during practice <-> main switches
+            setTestcases([])
+            setProjectName('')
+            setProjectLanguage('')
+            setServerProjectLanguageSnapshot('')
+            setSolutionFiles([])
+            setSolutionFileNames([])
+            setServerSolutionFileNames([])
+            setServerSolutionFileNamesSnapshot([])
+            setServerFiles(null)
+            setDesc(undefined)
+            setDescFileName('')
+            setServerDescFileName('')
+            setAdditionalFileNames([])
+            setRemovedAdditionalFiles([])
+            setSelectedAddFiles([])
+            setShowAdditionalFile(false)
+            setMainJavaFileName('')
+            setEdit(false)
+            setSubmitButton('Create new assignment')
+        }
 
-                    rows.push(testcase)
-                    return testcase
-                })
+        const load = async () => {
+            if (!project_id || project_id === 0) {
+                if (!cancelled) setLoadingProjectState(false)
+                return
+            }
 
-                const testcase = new Testcase()
-                testcase.id = -1
-                testcase.name = ''
-                testcase.description = ''
-                testcase.input = ''
-                testcase.output = ''
-                testcase.hidden = false
+            resetForSwitch()
 
-                rows.push(testcase)
-                setTestcases(rows)
-            })
-            .catch(err => {
-                console.log(err)
-            })
+            try {
+                const [tcRes, projRes] = await Promise.all([
+                    axios.get(
+                        `${import.meta.env.VITE_API_URL}/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`,
+                        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+                    ),
+                    axios.get(
+                        `${import.meta.env.VITE_API_URL}/projects/get_project_id?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`,
+                        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+                    ),
+                ])
 
-        if (!CreateNewState && project_id != 0) {
-            axios
-                .get(import.meta.env.VITE_API_URL + `/projects/get_project_id?id=${project_id}`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
-                })
-                .then(res => {
-                    const data = res.data
-                    if (!CreateNewState) {
-                        setProjectName(data[project_id][0])
-                        setProjectStartDate(new Date(data[project_id][1]))
-                        setProjectEndDate(new Date(data[project_id][2]))
-                        setProjectLanguage(data[project_id][3])
-                        setServerProjectLanguageSnapshot(data[project_id][3])
-                        const ppe = parseHidden(data[project_id][7])
-                        setPracticeProblemsEnabled(ppe)
-                        setServerPracticeProblemsEnabledSnapshot(ppe)
-                        setSolutionFileNames([])
-                        setSolutionFiles([])
-                        const serverDesc = (data[project_id][5] || '') as string
-                        setDescFileName(serverDesc)
-                        setServerDescFileName(serverDesc)
+                if (cancelled) return
 
-                        const rawAdd = data[project_id][6] ?? []
-                        let addList: string[] = []
-                        if (Array.isArray(rawAdd)) {
-                            addList = rawAdd as string[]
-                        } else if (typeof rawAdd === 'string') {
-                            try {
-                                const parsed = JSON.parse(rawAdd)
-                                addList = Array.isArray(parsed) ? parsed : (rawAdd ? [rawAdd] : [])
-                            } catch {
-                                addList = rawAdd ? [rawAdd] : []
-                            }
+                // Testcases
+                {
+                    const data = tcRes.data
+                    const rows: Array<Testcase> = []
+                    Object.entries(data).forEach(([key, value]) => {
+                        const testcase = new Testcase()
+                        const values = value as Array<string>
+                        testcase.id = parseInt(key)
+                        testcase.name = values[1]
+                        testcase.description = values[2]
+                        testcase.input = values[3]
+                        testcase.output = values[4]
+                        testcase.hidden = parseHidden((values as any)[5])
+                        rows.push(testcase)
+                    })
+                    const blank = new Testcase()
+                    blank.id = -1
+                    blank.name = ''
+                    blank.description = ''
+                    blank.input = ''
+                    blank.output = ''
+                    blank.hidden = false
+                    rows.push(blank)
+                    setTestcases(rows)
+                }
+
+                // Project info
+                {
+                    const data = projRes.data
+                    setProjectName(data[project_id][0])
+                    setProjectStartDate(new Date(data[project_id][1]))
+                    setProjectEndDate(new Date(data[project_id][2]))
+                    setProjectLanguage(data[project_id][3])
+                    setServerProjectLanguageSnapshot(data[project_id][3])
+                    const ppe = parseHidden(data[project_id][7])
+                    setPracticeProblemsEnabled(ppe)
+                    setServerPracticeProblemsEnabledSnapshot(ppe)
+
+                    const serverDesc = (data[project_id][5] || '') as string
+                    setDescFileName(serverDesc)
+                    setServerDescFileName(serverDesc)
+
+                    const rawAdd = data[project_id][6] ?? []
+                    let addList: string[] = []
+                    if (Array.isArray(rawAdd)) {
+                        addList = rawAdd as string[]
+                    } else if (typeof rawAdd === 'string') {
+                        try {
+                            const parsed = JSON.parse(rawAdd)
+                            addList = Array.isArray(parsed) ? parsed : (rawAdd ? [rawAdd] : [])
+                        } catch {
+                            addList = rawAdd ? [rawAdd] : []
                         }
-
-                        setAdditionalFileNames(addList.map(basename).filter(Boolean))
-                        setShowAdditionalFile(addList.length > 0)
-                        setEdit(true)
-                        setSubmitButton('Submit changes')
                     }
-                })
-                .catch(err => {
-                    console.log(err)
-                })
+                    setAdditionalFileNames(addList.map(basename).filter(Boolean))
+                    setShowAdditionalFile(addList.length > 0)
+
+                    setEdit(true)
+                    setSubmitButton('Submit changes')
+                }
+
+                // Ensure filesystem/solution lists match the newly loaded (project_id, practice) state
+                await fetchServerFileList()
+                await loadServerSolutionFiles()
+
+            } catch (err) {
+                console.log(err)
+            } finally {
+                if (!cancelled) setLoadingProjectState(false)
+            }
+        }
+
+        load()
+        return () => {
+            cancelled = true
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [project_id, isPractice])
 
     function handleNameChange(testcase_id: number, name: string) {
         setModalDraft(prev => {
@@ -596,7 +664,7 @@ const AdminProjectManage = () => {
 
     function reloadtests() {
         return axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}`, {
+            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
@@ -717,6 +785,7 @@ const AdminProjectManage = () => {
             formData.append('project_id', project_id.toString())
             formData.append('class_id', classId.toString())
             formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
+            formData.append('practice', isPractice ? 'true' : 'false')
 
             await axios.post(import.meta.env.VITE_API_URL + `/projects/json_add_testcases`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -898,6 +967,7 @@ const AdminProjectManage = () => {
         formData.append('output', tc.output.toString())
         formData.append('description', tc.description.toString())
         formData.append('hidden', hidden ? 'true' : 'false')
+        formData.append('practice', isPractice ? 'true' : 'false')
 
         try {
             setSubmittingTestcase(true)
@@ -1000,7 +1070,7 @@ const AdminProjectManage = () => {
 
     async function downloadAssignmentDescription() {
         try {
-            const url = `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${project_id}`
+            const url = `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${project_id}&practice=${isPractice ? 'true' : 'false'}`
             const res = await axios.get(url, {
                 responseType: 'blob',
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -1019,6 +1089,34 @@ const AdminProjectManage = () => {
         } catch (err) {
             console.log(err)
             window.alert('Could not download the assignment description.')
+        }
+    }
+
+    async function handlePracticeFilesSubmit() {
+        if (!isPractice) return
+        if (SolutionFiles.length === 0 || !AssignmentDesc) {
+            window.alert('Please upload practice solution file(s) and a practice assignment description.')
+            return
+        }
+        try {
+            setSubmittingProject(true)
+            const formData = new FormData()
+            formData.append('project_id', project_id.toString())
+            SolutionFiles.forEach(f => formData.append('solutionFiles', f))
+            formData.append('assignmentdesc', AssignmentDesc)
+            selectedAddFiles.forEach(f => formData.append('additionalFiles', f))
+
+            await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_practice_project_files`, formData, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+            })
+
+            window.alert('Practice files saved.')
+            window.location.reload()
+        } catch (e) {
+            console.log(e)
+            window.alert('Could not save practice files.')
+        } finally {
+            setSubmittingProject(false)
         }
     }
 
@@ -1075,6 +1173,7 @@ const AdminProjectManage = () => {
         formData.append('output', modalDraft.output.toString())
         formData.append('description', modalDraft.description.toString())
         formData.append('hidden', modalDraft.hidden ? 'true' : 'false')
+        formData.append('practice', isPractice ? 'true' : 'false')
 
         if (modalDraft.name === '' || modalDraft.input === '' || modalDraft.description === '') {
             window.alert('Please fill out all fields')
@@ -1098,7 +1197,7 @@ const AdminProjectManage = () => {
 
     function get_testcase_json() {
         axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}`, {
+            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
@@ -1209,8 +1308,9 @@ const AdminProjectManage = () => {
 
     const fsUniqueJavaNames = Array.from(new Set(directoryEntries.map(e => e.name).filter(isJavaFileName)))
     const fsShowMainTag = ProjectLanguage === 'java' && fsUniqueJavaNames.length > 1 && !!mainJavaFileName
-    const showFullScreenLoader = submittingProject || submittingTestcase || submittingJson
+    const showFullScreenLoader = loadingProjectState || submittingProject || submittingTestcase || submittingJson
     const loaderMessage =
+        (loadingProjectState && (isPractice ? 'Loading practice problem...' : 'Loading assignment...')) ||
         (submittingProject && (edit ? 'Saving assignment...' : 'Creating assignment...')) ||
         (submittingTestcase && 'Submitting test case...') ||
         (submittingJson && 'Uploading test cases...') ||
@@ -1235,14 +1335,15 @@ const AdminProjectManage = () => {
                 items={[
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${classId}/projects/` },
-                    { label: 'Project Manage' },
+                    { label: 'Project Manage', to: `/admin/${classId}/project/manage/${project_id}` },
+                    ...(isPractice ? [{ label: 'Practice Problem' as const }] : []),
                 ]}
             />
 
             <div className="main-grid">
                 <>
                     <div className={`admin-project-config-container${modalOpen ? ' blurred' : ''}`}>
-                        <div className="pageTitle">{edit ? 'Edit Assignment' : 'Create Assignment'}</div>
+                        <div className="pageTitle">{pageTitleText}</div>
 
                         <div className="tab-menu">
                             <button
@@ -1269,7 +1370,7 @@ const AdminProjectManage = () => {
                                     <form className="form-project-settings">
                                         <div className="segment-main">
                                             <div className="form-field input-field">
-                                                <label>Project Name</label>
+                                                <label>{isPractice ? 'Practice Problem Name' : 'Project Name'}</label>
                                                 <input
                                                     type="text"
                                                     value={ProjectName}
@@ -1283,6 +1384,7 @@ const AdminProjectManage = () => {
                                                     <DatePicker
                                                         selected={ProjectStartDate}
                                                         onChange={(date: Date | null) => setDate(date, true)}
+                                                        disabled={isPractice}
                                                         showTimeSelect
                                                         timeFormat="h:mm aa"
                                                         timeIntervals={15}
@@ -1310,6 +1412,7 @@ const AdminProjectManage = () => {
                                                     <DatePicker
                                                         selected={ProjectEndDate}
                                                         onChange={(date: Date | null) => setDate(date, false)}
+                                                        disabled={isPractice}
                                                         showTimeSelect
                                                         timeFormat="h:mm aa"
                                                         timeIntervals={15}
@@ -1339,7 +1442,7 @@ const AdminProjectManage = () => {
                                                 </span>
                                             )}
 
-                                            <div className="form-group language-group">
+                                            <div className={`form-group language-group${isPractice ? ' disabled' : ''}`}>
                                                 <label>Language</label>
                                                 <div className="detected-language">{languageLabel}</div>
                                             </div>
@@ -1657,35 +1760,41 @@ const AdminProjectManage = () => {
                                                 )}
                                             </div>
 
-                                            <div className="practice-problems-toggle">
-                                                <button
-                                                    type="button"
-                                                    className={`toggle-practice-problems ${practiceProblemsEnabled ? 'on' : 'off'}`}
-                                                    aria-pressed={practiceProblemsEnabled}
-                                                    onClick={togglePracticeProblemsEnabled}
-                                                >
-                                                    {practiceProblemsEnabled ? 'Practice problems: On' : 'Practice problems: Off'}
-                                                </button>
+                                            {!isPractice && (
+                                                <div className="practice-problems-toggle">
+                                                    <button
+                                                        type="button"
+                                                        className={`toggle-practice-problems ${practiceProblemsEnabled ? 'on' : 'off'}`}
+                                                        aria-pressed={practiceProblemsEnabled}
+                                                        onClick={togglePracticeProblemsEnabled}
+                                                    >
+                                                        {practiceProblemsEnabled ? 'Practice problem: On' : 'Practice problem: Off'}
+                                                    </button>
 
-                                                {practiceProblemsEnabled &&
-                                                    edit &&
-                                                    project_id > 0 &&
-                                                    practiceProblemsEnabled === serverPracticeProblemsEnabledSnapshot && (
-
-                                                        <button
-                                                            type="button"
-                                                            className="manage-practice-problems-link"
-                                                            onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice`)}
-                                                        >
-                                                            Manage practice problems
-                                                        </button>
-                                                    )}
-                                            </div>
+                                                    {practiceProblemsEnabled &&
+                                                        edit &&
+                                                        project_id > 0 &&
+                                                        practiceProblemsEnabled === serverPracticeProblemsEnabledSnapshot && (
+                                                            <button
+                                                                type="button"
+                                                                className="manage-practice-problems-link"
+                                                                onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice`)}
+                                                            >
+                                                                Manage practice problem
+                                                            </button>
+                                                        )}
+                                                </div>
+                                            )}
 
                                             <button
                                                 type="button"
                                                 className="submit-button"
-                                                onClick={edit ? handleEditSubmit : handleNewSubmit}
+                                                onClick={
+                                                    isPractice
+                                                        ? handlePracticeFilesSubmit
+                                                        : (edit ? handleEditSubmit : handleNewSubmit)
+                                                }
+
                                                 disabled={submittingProject}
                                             >
                                                 {submittingProject ? (

@@ -14,6 +14,7 @@ interface ProjectObject {
     Start: string;
     End: string;
     TotalSubmissions: number;
+    PracticeTotalSubmissions?: number;
     PracticeProblemsEnabled?: boolean;
 }
 
@@ -207,18 +208,20 @@ export default function AdminProjectList() {
                                                 <span className="practice-subdir-icon" aria-hidden="true">
                                                     ↳
                                                 </span>
-                                                Practice Problems: {project.Name}
+                                                Practice Problem: {project.Name}
                                             </span>
                                         </td>
 
                                         <td className="project-start">
-                                            <span className="practice-muted">{"\u00A0"}</span>
+                                            <span className="practice-date">{formatDate12h(project.Start)}</span>
                                         </td>
                                         <td className="project-end">
-                                            <span className="practice-muted">{"\u00A0"}</span>
+                                            <span className="practice-date">{formatDate12h(project.End)}</span>
                                         </td>
 
-                                        <td className="project-total-submissions">{"\u00A0"}</td>
+                                        <td className="project-total-submissions">
+                                            {project.PracticeTotalSubmissions ?? 0}
+                                        </td>
 
                                         <td className="project-review">
                                             <Link
