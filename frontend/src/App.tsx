@@ -18,7 +18,7 @@ import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
 import AdminProjectList from './pages/admin/AdminProjectList';
 import AdminProjectManage from './pages/admin/AdminProjectManage';
-import AdminPracticeProblemsManage from './pages/admin/AdminPracticeProblemsManage';
+import AdminPracticeSelect from './pages/admin/AdminPracticeSelect';
 import AdminStudentRoster from './pages/admin/AdminStudentRoster';
 import AdminUpload from './pages/admin/AdminUpload';
 import AdminViewStudentCode from './pages/admin/AdminViewStudentCode';
@@ -66,9 +66,14 @@ class App extends Component {
                         </ProtectedRoute>
                     } />
 
-                    <Route path="/admin/:class_id/project/:id/practice" element={
+                    <Route path="/admin/:class_id/project/:id/practice/:practice_problem_id" element={
                         <ProtectedRoute>
                             <AdminProjectManage practiceMode />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:id/practice/select" element={
+                        <ProtectedRoute>
+                            <AdminPracticeSelect />
                         </ProtectedRoute>
                     } />
 

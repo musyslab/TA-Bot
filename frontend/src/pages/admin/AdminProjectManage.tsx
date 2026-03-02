@@ -51,7 +51,7 @@ type AdminProjectManageProps = {
 
 const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) => {
 
-    const { id, class_id } = useParams()
+    const { id, class_id, practice_problem_id } = useParams()
     const navigate = useNavigate()
 
     const project_id = Number(id)
@@ -98,6 +98,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const [mainJavaFileName, setMainJavaFileName] = useState<string>('')
     const [practiceProblemsEnabled, setPracticeProblemsEnabled] = useState<boolean>(false)
     const [serverPracticeProblemsEnabledSnapshot, setServerPracticeProblemsEnabledSnapshot] = useState<boolean>(false)
+    const [practiceProblemNumber, setPracticeProblemNumber] = useState<number | null>(null)
 
     async function togglePracticeProblemsEnabled() {
         const next = !practiceProblemsEnabled
@@ -127,10 +128,21 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const API = import.meta.env.VITE_API_URL
     const authHeader = { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
     const isPractice = !!practiceMode
+    const practiceProblemId = isPractice && practice_problem_id ? Number(practice_problem_id) : null
+    const practiceProblemQuery =
+        isPractice && practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''
+
+    // Testcases must NOT be editable unless solution exists (main or practice)
+    const hasSolution =
+        SolutionFiles.length > 0 || serverSolutionFileNames.length > 0
 
     const pageTitleText =
         isPractice
-            ? (edit ? 'Edit Practice Problem' : 'Create Practice Problem')
+            ? (
+                edit
+                    ? `Edit Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
+                    : `Create Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
+            )
             : (edit ? 'Edit Assignment' : 'Create Assignment')
 
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i
@@ -221,7 +233,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     async function loadServerSolutionFiles() {
         try {
             const res = await axios.get(
-                import.meta.env.VITE_API_URL + `/projects/list_solution_files?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`,
+                import.meta.env.VITE_API_URL +
+                `/projects/list_solution_files?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`,
 
                 { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
             )
@@ -334,7 +347,11 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     })()
 
     async function fetchServerFileList(): Promise<string[]> {
-        const res = await fetch(`${API}/projects/list_source_files?project_id=${project_id}&practice=${isPractice ? 'true' : 'false'}`, { headers: authHeader })
+
+        const res = await fetch(
+            `${API}/projects/list_source_files?project_id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`,
+            { headers: authHeader }
+        )
 
         if (!res.ok) return []
         const data = await res.json()
@@ -347,7 +364,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         const url = new URL(`${API}/projects/get_source_file`)
         url.searchParams.set('project_id', String(project_id))
         if (relpath) url.searchParams.set('relpath', relpath)
+
         url.searchParams.set('practice', isPractice ? 'true' : 'false')
+        if (isPractice && practiceProblemId) url.searchParams.set('practice_problem_id', String(practiceProblemId))
+
         const res = await fetch(url, { headers: authHeader })
         if (!res.ok) return
         const text = await res.text()
@@ -518,11 +538,11 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             try {
                 const [tcRes, projRes] = await Promise.all([
                     axios.get(
-                        `${import.meta.env.VITE_API_URL}/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`,
+                        `${import.meta.env.VITE_API_URL}/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`,
                         { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
                     ),
                     axios.get(
-                        `${import.meta.env.VITE_API_URL}/projects/get_project_id?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`,
+                        `${import.meta.env.VITE_API_URL}/projects/get_project_id?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`,
                         { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
                     ),
                 ])
@@ -559,19 +579,23 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                 {
                     const data = projRes.data
                     setProjectName(data[project_id][0])
-                    setProjectStartDate(new Date(data[project_id][1]))
-                    setProjectEndDate(new Date(data[project_id][2]))
-                    setProjectLanguage(data[project_id][3])
-                    setServerProjectLanguageSnapshot(data[project_id][3])
-                    const ppe = parseHidden(data[project_id][7])
+                    setProjectStartDate(new Date(data[project_id][2]))
+                    setProjectEndDate(new Date(data[project_id][3]))
+                    setProjectLanguage(data[project_id][4])
+                    setServerProjectLanguageSnapshot(data[project_id][4])
+                    const ppe = parseHidden(data[project_id][8])
                     setPracticeProblemsEnabled(ppe)
                     setServerPracticeProblemsEnabledSnapshot(ppe)
 
-                    const serverDesc = (data[project_id][5] || '') as string
+                    const pnRaw = (data[project_id] as any)[9]
+                    const pn = typeof pnRaw === 'number' ? pnRaw : Number(pnRaw)
+                    setPracticeProblemNumber(isPractice && pn > 0 ? pn : null)
+
+                    const serverDesc = (data[project_id][6] || '') as string
                     setDescFileName(serverDesc)
                     setServerDescFileName(serverDesc)
 
-                    const rawAdd = data[project_id][6] ?? []
+                    const rawAdd = data[project_id][7] ?? []
                     let addList: string[] = []
                     if (Array.isArray(rawAdd)) {
                         addList = rawAdd as string[]
@@ -664,7 +688,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
     function reloadtests() {
         return axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`, {
+            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
@@ -780,12 +804,19 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     async function handleJsonSubmit() {
         try {
             setSubmittingJson(true)
+            if (!hasSolution) {
+                window.alert('Upload solution file(s) before uploading test cases.')
+                return
+            }
             const formData = new FormData()
             formData.append('file', JsonFile!)
             formData.append('project_id', project_id.toString())
             formData.append('class_id', classId.toString())
             formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
             formData.append('practice', isPractice ? 'true' : 'false')
+            if (isPractice && practiceProblemId) {
+                formData.append('practice_problem_id', String(practiceProblemId))
+            }
 
             await axios.post(import.meta.env.VITE_API_URL + `/projects/json_add_testcases`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -958,6 +989,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     }
 
     async function setHiddenFromRow(tc: Testcase, hidden: boolean) {
+        if (!hasSolution) {
+            window.alert('Upload solution file(s) before editing test cases.')
+            return
+        }
         const formData = new FormData()
         formData.append('id', tc.id.toString())
         formData.append('name', tc.name)
@@ -968,6 +1003,9 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         formData.append('description', tc.description.toString())
         formData.append('hidden', hidden ? 'true' : 'false')
         formData.append('practice', isPractice ? 'true' : 'false')
+        if (isPractice && practiceProblemId) {
+            formData.append('practice_problem_id', String(practiceProblemId))
+        }
 
         try {
             setSubmittingTestcase(true)
@@ -1070,7 +1108,11 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
     async function downloadAssignmentDescription() {
         try {
-            const url = `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${project_id}&practice=${isPractice ? 'true' : 'false'}`
+
+            const url =
+                `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${project_id}` +
+                `&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`
+
             const res = await axios.get(url, {
                 responseType: 'blob',
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -1094,10 +1136,48 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
     async function handlePracticeFilesSubmit() {
         if (!isPractice) return
+        if (!practiceProblemId) {
+            window.alert('Missing practice problem id.')
+            return
+        }
+        if (!ProjectName || !ProjectName.trim()) {
+            window.alert('Please enter a practice problem name.')
+            return
+        }
+
+        const hasAnyFileChange =
+            SolutionFiles.length > 0 || !!AssignmentDesc || selectedAddFiles.length > 0
+
+        // Rename-only: allow changing Practice Problem Name without re-uploading files
+        if (!hasAnyFileChange) {
+            try {
+                setSubmittingProject(true)
+                await axios.post(
+                    `${import.meta.env.VITE_API_URL}/projects/rename_practice_problem`,
+                    {
+                        project_id,
+                        practice_problem_id: practiceProblemId,
+                        name: ProjectName,
+                    },
+                    { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+                )
+                window.alert('Practice problem name saved.')
+                window.location.reload()
+            } catch (e) {
+                console.log(e)
+                window.alert('Could not save practice problem name.')
+            } finally {
+                setSubmittingProject(false)
+            }
+            return
+        }
+
+        // File change path: still require both solution + description for the practice upload endpoint
         if (SolutionFiles.length === 0 || !AssignmentDesc) {
             window.alert('Please upload practice solution file(s) and a practice assignment description.')
             return
         }
+
         try {
             setSubmittingProject(true)
             const formData = new FormData()
@@ -1105,6 +1185,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             SolutionFiles.forEach(f => formData.append('solutionFiles', f))
             formData.append('assignmentdesc', AssignmentDesc)
             selectedAddFiles.forEach(f => formData.append('additionalFiles', f))
+            formData.append('practice_problem_id', String(practiceProblemId))
+            formData.append('name', ProjectName)
 
             await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_practice_project_files`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -1164,6 +1246,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
     async function buttonhandleClick(testcase: number) {
         if (!modalDraft) return
+
+        if (!hasSolution) {
+            window.alert('Upload solution file(s) before creating or editing test cases.')
+            return
+        }
+
         const formData = new FormData()
         formData.append('id', modalDraft.id.toString())
         formData.append('name', modalDraft.name)
@@ -1174,6 +1262,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         formData.append('description', modalDraft.description.toString())
         formData.append('hidden', modalDraft.hidden ? 'true' : 'false')
         formData.append('practice', isPractice ? 'true' : 'false')
+
+        if (isPractice && practiceProblemId) {
+            formData.append('practice_problem_id', String(practiceProblemId))
+        }
 
         if (modalDraft.name === '' || modalDraft.input === '' || modalDraft.description === '') {
             window.alert('Please fill out all fields')
@@ -1336,7 +1428,15 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${classId}/projects/` },
                     { label: 'Project Manage', to: `/admin/${classId}/project/manage/${project_id}` },
-                    ...(isPractice ? [{ label: 'Practice Problem' as const }] : []),
+                    ...(isPractice
+                        ? [
+                            {
+                                label: 'Practice Select' as const,
+                                to: `/admin/${classId}/project/${project_id}/practice/select`,
+                            },
+                            { label: 'Practice Problem' as const },
+                        ]
+                        : []),
                 ]}
             />
 
@@ -1359,6 +1459,13 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                             <button
                                 className={`menu-item-testcases ${activeTab === 'testcases' ? 'active' : ''}`}
                                 onClick={() => setActiveTab('testcases')}
+                                disabled={!hasSolution}
+                                title={
+                                    !hasSolution
+                                        ? 'Upload solution file(s) first to manage test cases.'
+                                        : undefined
+                                }
+
                             >
                                 Test Cases
                             </button>
@@ -1778,9 +1885,9 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                             <button
                                                                 type="button"
                                                                 className="manage-practice-problems-link"
-                                                                onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice`)}
+                                                                onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice/select`)}
                                                             >
-                                                                Manage practice problem
+                                                                Manage practice problems
                                                             </button>
                                                         )}
                                                 </div>
@@ -1814,157 +1921,169 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                             {activeTab === 'testcases' && (
                                 <div className="pane-testcases">
                                     <div className="testcase-management-group">
-                                        <div className="form-testcases-overview">
-                                            <table className="testcases-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Name</th>
-                                                        <th>Input</th>
-                                                        <th>Output</th>
-                                                        <th>Description</th>
-                                                        <th>Actions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {testcases
-                                                        .filter(tc => tc.id !== -1)
-                                                        .map(tc => (
-                                                            <tr
-                                                                key={tc.id}
-                                                                className={tc.hidden ? 'hidden-testcase' : undefined}
-                                                                aria-label={tc.hidden ? 'Hidden test case' : undefined}
-                                                            >
-                                                                <td>{tc.name}</td>
-                                                                <td>
-                                                                    <pre className="testcase-input">{tc.input}</pre>
-                                                                </td>
-                                                                <td>
-                                                                    <pre className="testcase-output">{tc.output}</pre>
-                                                                </td>
-                                                                <td>{tc.description}</td>
-                                                                <td>
+                                        {!hasSolution ? (
+                                            <div style={{ padding: 16 }}>
+                                                Test cases are disabled until you upload solution file(s).
+                                                <div style={{ marginTop: 12 }}>
+                                                    Go to the Project Settings tab and upload the solution file(s),
+                                                    then return here.
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="form-testcases-overview">
+                                                    <table className="testcases-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Name</th>
+                                                                <th>Input</th>
+                                                                <th>Output</th>
+                                                                <th>Description</th>
+                                                                <th>Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {testcases
+                                                                .filter(tc => tc.id !== -1)
+                                                                .map(tc => (
+                                                                    <tr
+                                                                        key={tc.id}
+                                                                        className={tc.hidden ? 'hidden-testcase' : undefined}
+                                                                        aria-label={tc.hidden ? 'Hidden test case' : undefined}
+                                                                    >
+                                                                        <td>{tc.name}</td>
+                                                                        <td>
+                                                                            <pre className="testcase-input">{tc.input}</pre>
+                                                                        </td>
+                                                                        <td>
+                                                                            <pre className="testcase-output">{tc.output}</pre>
+                                                                        </td>
+                                                                        <td>{tc.description}</td>
+                                                                        <td>
+                                                                            <button
+                                                                                type="button"
+                                                                                className="testcase-edit-button"
+                                                                                onClick={() => handleOpenModal(tc.id)}
+                                                                            >
+                                                                                <FaEdit aria-hidden="true" /> Edit
+                                                                            </button>
+
+                                                                            <div className="testcase-hidden-toggle">
+                                                                                <span className="toggle-label">Hidden</span>
+                                                                                <label className="switch">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={!!tc.hidden}
+                                                                                        onChange={(e) => setHiddenFromRow(tc, e.currentTarget.checked)}
+                                                                                        aria-label="Toggle hidden test case"
+                                                                                    />
+                                                                                    <span className="slider" aria-hidden="true" />
+                                                                                </label>
+                                                                            </div>
+
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            <tr>
+                                                                <td colSpan={6} className="add-row-cell">
                                                                     <button
                                                                         type="button"
-                                                                        className="testcase-edit-button"
-                                                                        onClick={() => handleOpenModal(tc.id)}
+                                                                        className="add-testcase-button"
+                                                                        onClick={() => handleOpenModal(-1)}
                                                                     >
-                                                                        <FaEdit aria-hidden="true" /> Edit
+                                                                        <FaPlusCircle aria-hidden="true" /> Add Test Case
                                                                     </button>
-
-                                                                    <div className="testcase-hidden-toggle">
-                                                                        <span className="toggle-label">Hidden</span>
-                                                                        <label className="switch">
-                                                                            <input
-                                                                                type="checkbox"
-                                                                                checked={!!tc.hidden}
-                                                                                onChange={(e) => setHiddenFromRow(tc, e.currentTarget.checked)}
-                                                                                aria-label="Toggle hidden test case"
-                                                                            />
-                                                                            <span className="slider" aria-hidden="true" />
-                                                                        </label>
-                                                                    </div>
-
                                                                 </td>
                                                             </tr>
-                                                        ))}
-                                                    <tr>
-                                                        <td colSpan={6} className="add-row-cell">
-                                                            <button
-                                                                type="button"
-                                                                className="add-testcase-button"
-                                                                onClick={() => handleOpenModal(-1)}
-                                                            >
-                                                                <FaPlusCircle aria-hidden="true" /> Add Test Case
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
 
-                                        <div className="export-json-segment">
-                                            <button
-                                                type="button"
-                                                className="export-json-button"
-                                                onClick={get_testcase_json}
-                                            >
-                                                <FaDownload aria-hidden="true" /> {getJSON}
-                                            </button>
-                                        </div>
+                                                <div className="export-json-segment">
+                                                    <button
+                                                        type="button"
+                                                        className="export-json-button"
+                                                        onClick={get_testcase_json}
+                                                    >
+                                                        <FaDownload aria-hidden="true" /> {getJSON}
+                                                    </button>
+                                                </div>
 
-                                        <div className="or-separator">
-                                            <span>or</span>
-                                        </div>
+                                                <div className="or-separator">
+                                                    <span>or</span>
+                                                </div>
 
-                                        <div className="upload-testcases-segment">
-                                            <h1 className="upload-title">Upload Test Cases</h1>
-                                            <div
-                                                className="file-drop-area"
-                                                onDragOver={e => e.preventDefault()}
-                                                onDrop={e => {
-                                                    e.preventDefault()
-                                                    const files = e.dataTransfer.files
-                                                    if (files && files.length > 0) {
-                                                        handleDescFileChange({ target: { files } } as any)
-                                                    }
-                                                }}
-                                            >
-                                                {!jsonfilename ? (
-                                                    <>
-                                                        <input
-                                                            id="jsonFile"
-                                                            type="file"
-                                                            className="file-input"
-                                                            accept=".json,application/json"
-                                                            onChange={handleJsonFileChange}
-                                                        />
-                                                        <div className="file-drop-message">
-                                                            Drag &amp; drop your JSON file here or&nbsp;
-                                                            <span className="browse-text">browse</span>
-                                                        </div>
-                                                    </>
-                                                ) : (
-                                                    <div className="file-preview json-file-preview">
-                                                        <span className="file-icon-wrapper" aria-hidden="true">
-                                                            <FaRegFile className="file-outline-icon" aria-hidden="true" />
-                                                            {getFileIcon(jsonfilename)}
-                                                        </span>
-                                                        <span className="file-name">{jsonfilename}</span>
-                                                        <button
-                                                            type="button"
-                                                            className="exchange-icon"
-                                                            onClick={() => {
-                                                                setjsonfilename('')
-                                                                const jsonInput = document.getElementById('jsonFile') as HTMLInputElement | null
-                                                                if (jsonInput) jsonInput.value = ''
-                                                            }}
-                                                        >
-                                                            <FaExchangeAlt aria-hidden="true" />
-                                                        </button>
+                                                <div className="upload-testcases-segment">
+                                                    <h1 className="upload-title">Upload Test Cases</h1>
+                                                    <div
+                                                        className="file-drop-area"
+                                                        onDragOver={e => e.preventDefault()}
+                                                        onDrop={e => {
+                                                            e.preventDefault()
+                                                            const files = e.dataTransfer.files
+                                                            if (files && files.length > 0) {
+                                                                handleDescFileChange({ target: { files } } as any)
+                                                            }
+                                                        }}
+                                                    >
+                                                        {!jsonfilename ? (
+                                                            <>
+                                                                <input
+                                                                    id="jsonFile"
+                                                                    type="file"
+                                                                    className="file-input"
+                                                                    accept=".json,application/json"
+                                                                    onChange={handleJsonFileChange}
+                                                                />
+                                                                <div className="file-drop-message">
+                                                                    Drag &amp; drop your JSON file here or&nbsp;
+                                                                    <span className="browse-text">browse</span>
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            <div className="file-preview json-file-preview">
+                                                                <span className="file-icon-wrapper" aria-hidden="true">
+                                                                    <FaRegFile className="file-outline-icon" aria-hidden="true" />
+                                                                    {getFileIcon(jsonfilename)}
+                                                                </span>
+                                                                <span className="file-name">{jsonfilename}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    className="exchange-icon"
+                                                                    onClick={() => {
+                                                                        setjsonfilename('')
+                                                                        const jsonInput = document.getElementById('jsonFile') as HTMLInputElement | null
+                                                                        if (jsonInput) jsonInput.value = ''
+                                                                    }}
+                                                                >
+                                                                    <FaExchangeAlt aria-hidden="true" />
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                )}
-                                            </div>
-                                        </div>
+                                                </div>
 
-                                        <div className="json-button-group">
-                                            <button
-                                                type="button"
-                                                className="json-submit-button"
-                                                onClick={handleJsonSubmit}
-                                                disabled={submittingJson}
-                                            >
-                                                {submittingJson ? (
-                                                    <>
-                                                        <FaCircleNotch className="spin" aria-hidden="true" />
-                                                        &nbsp;Submitting...
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <FaUpload aria-hidden="true" /> {SubmitJSON}
-                                                    </>
-                                                )}
-                                            </button>
-                                        </div>
+                                                <div className="json-button-group">
+                                                    <button
+                                                        type="button"
+                                                        className="json-submit-button"
+                                                        onClick={handleJsonSubmit}
+                                                        disabled={submittingJson}
+                                                    >
+                                                        {submittingJson ? (
+                                                            <>
+                                                                <FaCircleNotch className="spin" aria-hidden="true" />
+                                                                &nbsp;Submitting...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <FaUpload aria-hidden="true" /> {SubmitJSON}
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             )}

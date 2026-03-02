@@ -151,6 +151,47 @@ def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Cont
     except Exception:
         return make_response({'ok': False}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
+@projects_api.route('/list_practice_problems', methods=['GET'])
+@jwt_required()
+@inject
+def list_practice_problems(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    pid = (request.args.get("project_id", "") or "").strip()
+    if not pid.isdigit():
+        return jsonify({'problems': []})
+    rows = project_repo.list_practice_problems(int(pid))
+    return jsonify({
+        'problems': [
+            {
+                'id': int(r.Id),
+                'number': int(getattr(r, "PracticeNumber", i + 1)),
+                'name': (getattr(r, "Name", "") or f"Practice Problem {int(getattr(r, 'PracticeNumber', i + 1))}"),
+                'enabled': bool(getattr(r, "Enabled", True)),
+            }
+            for i, r in enumerate(rows)
+        ]
+    })
+
+@projects_api.route('/create_practice_problem', methods=['POST'])
+@jwt_required()
+@inject
+def create_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    data = request.get_json(silent=True) or {}
+    try:
+        pid = int(str(data.get('project_id', 0)) or 0)
+    except ValueError:
+        pid = 0
+    name = str(data.get('name', '') or '').strip()
+    if pid <= 0:
+        return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
+    new_id = project_repo.create_practice_problem(pid, name=(name or "Practice Problem"))
+    if not new_id:
+        return make_response({'message': 'Could not create practice problem'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+    return jsonify({'ok': True, 'practice_problem_id': int(new_id)})
+
 @projects_api.route('/list_solution_files', methods=['GET'])
 @jwt_required()
 @inject
@@ -159,14 +200,14 @@ def list_solution_files(project_repo: ProjectRepository = Provide[Container.proj
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
     pid_str = (request.args.get("id", "") or "").strip()
-    practice_raw = (request.args.get("practice", "") or "").strip().lower()
-    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
+    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
 
     if not pid_str.isdigit():
         return make_response([], HTTPStatus.OK)
     pid = int(pid_str)
 
-    p = project_repo.get_project_path(pid, practice=practice)
+    p = project_repo.get_project_path(pid, practice_problem_id=ppid)
     if not p:
         return make_response([], HTTPStatus.OK)
 
@@ -647,8 +688,8 @@ except Exception as e:
     TABOT = None
     print(f"[projects] Warning: tabot import failed (will use subprocess path): {e}", flush=True)
 
-def recompute_expected_outputs(project_repo, project_id, *, solution_override_path: str = None, language_override: str = None):    
-    
+def recompute_expected_outputs(project_repo, project_id, *, solution_override_path: str = None, language_override: str = None, practice_problem_id: int | None = None):
+
     """
     For each testcase, run the (updated) solution and persist the new output.
     """
@@ -668,7 +709,7 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
         solution_root = getattr(proj_obj, "solutionpath", "")
         lang = getattr(proj_obj, "Language", "")
 
-    cases = project_repo.get_testcases(str(project_id))
+    cases = project_repo.get_testcases(int(project_id), practice_problem_id=practice_problem_id)
 
     # Determine class id (needed by repo call)
     class_id = getattr(proj_obj, "ClassId", 0) if proj_obj else 0
@@ -680,7 +721,11 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
             class_id = 0
 
     for tc_id, vals in cases.items():
-        add_path = getattr(proj_obj, "AdditionalFilePath", "") if proj_obj else ""
+        if practice_problem_id:
+            pp = project_repo.get_practice_problem(int(practice_problem_id))
+            add_path = getattr(pp, "AdditionalFilePath", "") if pp else ""
+        else:
+            add_path = getattr(proj_obj, "AdditionalFilePath", "") if proj_obj else ""
         try:
             name = vals[1] if len(vals) > 1 else ""
             desc = vals[2] if len(vals) > 2 else ""
@@ -698,6 +743,7 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
                 inp or "",
                 new_out,
                 int(class_id),
+                practice_problem_id=practice_problem_id,
             )
         except Exception:
             # continue on individual failures
@@ -715,12 +761,12 @@ def list_source_files(project_repo: ProjectRepository = Provide[Container.projec
     if not pid:
         return make_response({'message': 'Missing project_id'}, HTTPStatus.BAD_REQUEST)
 
-    practice_raw = (request.args.get("practice", "") or "").strip().lower()
-    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
-    root = project_repo.get_project_path(pid, practice=practice)  # absolute path previously saved
+    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
+    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+    root = project_repo.get_project_path(int(pid), practice_problem_id=ppid)
 
     if not root or not os.path.exists(root):
-        return make_response({'message': 'Project path not found'}, HTTPStatus.NOT_FOUND)
+        return jsonify({'files': []})
 
     files = []
     if os.path.isdir(root):
@@ -750,9 +796,9 @@ def get_source_file(project_repo: ProjectRepository = Provide[Container.project_
     if not pid:
         return make_response({'message': 'Missing project_id'}, HTTPStatus.BAD_REQUEST)
 
-    practice_raw = (request.args.get("practice", "") or "").strip().lower()
-    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
-    root = project_repo.get_project_path(pid, practice=practice)
+    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
+    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+    root = project_repo.get_project_path(int(pid), practice_problem_id=ppid)
 
     if not root or not os.path.exists(root):
         return make_response({'message': 'Project path not found'}, HTTPStatus.NOT_FOUND)
@@ -798,10 +844,15 @@ def get_project(project_repo: ProjectRepository = Provide[Container.project_repo
         }
         return make_response(message, HTTPStatus.UNAUTHORIZED)
 
-    pid = request.args.get('id')
-    practice_raw = (request.args.get('practice', '') or '').strip().lower()
-    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
-    project_info = project_repo.get_project(pid, practice=practice)
+    pid_raw = (request.args.get('id') or '').strip()
+    if not pid_raw.isdigit():
+        return make_response(json.dumps({}), HTTPStatus.OK)
+    pid = int(pid_raw)
+
+    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
+    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+
+    project_info = project_repo.get_project(pid, practice_problem_id=ppid)
 
     return make_response(json.dumps(project_info), HTTPStatus.OK)
     
@@ -816,9 +867,9 @@ def get_testcases(project_repo: ProjectRepository = Provide[Container.project_re
         return make_response(message, HTTPStatus.UNAUTHORIZED)
 
     project_id = request.args.get('id')
-    practice_raw = (request.args.get('practice', '') or '').strip().lower()
-    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
-    testcases = project_repo.get_testcases(project_id, practice=practice)
+    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
+    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+    testcases = project_repo.get_testcases(int(project_id), practice_problem_id=ppid)
 
     return make_response(json.dumps(testcases), HTTPStatus.OK)
 
@@ -837,6 +888,14 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
     project_id = request.form["project_id"]
     practice_raw = (request.form.get('practice', '') or '').strip().lower()
     practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    ppid_raw = (request.form.get('practice_problem_id', '') or '').strip()
+    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+
+    # Require a solution root for whichever scope we're writing testcases into (main or practice)
+    sol = project_repo.get_project_path(int(project_id), practice_problem_id=ppid)
+    if not sol:
+        msg = 'Practice problem has no solution files' if ppid else 'Assignment has no solution files'
+        return make_response({'message': msg}, HTTPStatus.BAD_REQUEST)
 
     try:
         proj = project_repo.get_selected_project(int(project_id))
@@ -862,7 +921,7 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
                 testcase["output"],
                 class_id,
                 bool(testcase.get("hidden", False)),
-                bool(testcase.get("practice", practice)),
+                practice_problem_id=ppid,
             )
 
     return make_response("Testcase Added", HTTPStatus.OK)
@@ -886,7 +945,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
     hidden_raw = request.form.get('hidden', '').strip()
-    practice_raw = request.form.get('practice', '').strip()
+    ppid_raw = request.form.get('practice_problem_id', '').strip()
     
     if id_val == '' or name == '' or input_data == '' or project_id == '' or description == '' or class_id == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
@@ -904,7 +963,15 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         return s in ("1", "true", "yes", "y", "on")
 
     hidden = parse_hidden(hidden_raw)
-    practice = parse_hidden(practice_raw)
+    practice_problem_id = int(ppid_raw) if (ppid_raw or "").isdigit() else None
+
+    # Do not allow testcase edits/creates unless solution files exist (main or practice)
+    sol = project_repo.get_project_path(int(project_id), practice_problem_id=practice_problem_id)
+    if not sol:
+        return make_response(
+            "Practice problem has no solution files" if practice_problem_id else "Assignment has no solution files",
+            HTTPStatus.BAD_REQUEST
+        )
 
     # Auto-recompute expected output when editing a testcase.
     # If the project's language is Python, run the saved solution with the new input
@@ -913,9 +980,10 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         project = project_repo.get_selected_project(int(project_id))
         language = (getattr(project, "Language", "") or "")
         # If this testcase is PRACTICE, use practice solution/desc/additional
-        if practice:
-            solution_root = project_repo.get_project_path(int(project_id), practice=True)
-            add_path = getattr(project_repo.get_practice_project(int(project_id)), "AdditionalFilePath", "") if project else ""
+        if practice_problem_id:
+            solution_root = project_repo.get_project_path(int(project_id), practice_problem_id=practice_problem_id)
+            pp = project_repo.get_practice_problem(int(practice_problem_id))
+            add_path = getattr(pp, "AdditionalFilePath", "") if pp else ""
         else:
             solution_root = (getattr(project, "solutionpath", "") or "")
             add_path = getattr(project, "AdditionalFilePath", "") if project else ""
@@ -925,7 +993,17 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         # Fall back to the submitted output if recomputation fails
         pass
 
-    project_repo.add_or_update_testcase(project_id, id_val, name, description, input_data, output, class_id_int, hidden, practice)
+    project_repo.add_or_update_testcase(
+        project_id,
+        id_val,
+        name,
+        description,
+        input_data,
+        output,
+        class_id_int,
+        hidden,
+        practice_problem_id=practice_problem_id,
+    )
 
     return make_response("Testcase Added", HTTPStatus.OK)
 
@@ -969,10 +1047,10 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
 def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container.project_repo]):
     
     project_id = request.args.get('project_id')
-    practice_raw = (request.args.get('practice', '') or '').strip().lower()
-    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
-    assignmentdesc_contents = project_repo.get_project_desc_file(project_id, practice=practice)
-    assignmentdesc_path = project_repo.get_project_desc_path(project_id, practice=practice)
+    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
+    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+    assignmentdesc_contents = project_repo.get_project_desc_file(int(project_id), practice_problem_id=ppid)
+    assignmentdesc_path = project_repo.get_project_desc_path(int(project_id), practice_problem_id=ppid)
 
     fname = os.path.basename(assignmentdesc_path) if assignmentdesc_path else 'assignment_description'
     ext = os.path.splitext(fname)[1].lower()
@@ -1016,9 +1094,11 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
     pid_str = (request.form.get("project_id", "") or "").strip()
-    if not pid_str.isdigit():
-        return make_response({'message': 'Invalid or missing project_id'}, HTTPStatus.BAD_REQUEST)
+    ppid_str = (request.form.get("practice_problem_id", "") or "").strip()
+    if not pid_str.isdigit() or not ppid_str.isdigit():
+        return make_response({'message': 'Invalid project_id or practice_problem_id'}, HTTPStatus.BAD_REQUEST)
     pid = int(pid_str)
+    ppid = int(ppid_str)
 
     proj = project_repo.get_selected_project(pid)
     if not proj:
@@ -1032,14 +1112,12 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
     if 'assignmentdesc' not in request.files or not request.files['assignmentdesc'].filename:
         return make_response({'message': 'No assignment description file'}, HTTPStatus.BAD_REQUEST)
 
-    # Ensure PP row exists and is enabled
-    project_repo.set_practice_problems_enabled(pid, True)
-    pp = project_repo.get_practice_project(pid)
+    pp = project_repo.get_practice_problem(ppid)
     if not pp:
-        return make_response({'message': 'Could not create practice row'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
 
     ts = ts_str()
-    base_dir = practice_version_dir(pid, ts)
+    base_dir = os.path.join(practice_project_dir(pid), str(ppid), ts)
     os.makedirs(base_dir, exist_ok=True)
 
     # Save solution file(s)
@@ -1076,18 +1154,53 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
     except Exception:
         return make_response({'message': 'Failed to save practice paths'}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    # Recompute outputs for PRACTICE testcases using practice solution
+    # Recompute outputs for this PRACTICE PROBLEM's testcases using this practice solution
     try:
         recompute_expected_outputs(
             project_repo,
             int(pid),
             solution_override_path=base_dir,
             language_override=getattr(proj, "Language", ""),
+            practice_problem_id=int(ppid),
         )
     except Exception:
         pass
 
     return jsonify({'ok': True})
+
+@projects_api.route('/rename_practice_problem', methods=['POST'])
+@jwt_required()
+@inject
+def rename_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    data = request.get_json(silent=True) or {}
+    try:
+        pid = int(str(data.get('project_id', 0)) or 0)
+    except ValueError:
+        pid = 0
+    try:
+        ppid = int(str(data.get('practice_problem_id', 0)) or 0)
+    except ValueError:
+        ppid = 0
+    name = str(data.get('name', '') or '').strip()
+
+    if pid <= 0 or ppid <= 0 or not name:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+
+    pp = project_repo.get_practice_problem(ppid)
+    if not pp or int(getattr(pp, "ProjectId", 0) or 0) != int(pid):
+        return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+
+    pp.Name = name
+    try:
+        from src.repositories.database import db
+        db.session.commit()
+    except Exception:
+        return make_response({'message': 'Failed to rename practice problem'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    return jsonify({'ok': True, 'name': name})
 
 @projects_api.route('/ProjectGrading', methods=['POST'])
 @jwt_required()

@@ -115,21 +115,26 @@ CREATE TABLE `Projects` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `PracticeProjects`
+-- Table structure for table `PracticeProblems`
 --
 
-DROP TABLE IF EXISTS `PracticeProjects`;
-CREATE TABLE `PracticeProjects` (
+DROP TABLE IF EXISTS `PracticeProblems`;
+CREATE TABLE `PracticeProblems` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `ProjectId` int NOT NULL,
-  `Enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `PracticeNumber` int NOT NULL DEFAULT 1,
+  `Enabled` tinyint(1) NOT NULL DEFAULT 1,
+  `Name` varchar(255) DEFAULT NULL,
   `Language` varchar(45) DEFAULT NULL,
   `solutionpath` varchar(1000) DEFAULT NULL,
   `AsnDescriptionPath` varchar(1000) DEFAULT NULL,
   `AdditionalFilePath` varchar(200) DEFAULT NULL,
+  `CreatedAt` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`Id`),
-  UNIQUE KEY `ProjectId_UNIQUE` (`ProjectId`),
-  CONSTRAINT `fk_PracticeProjects_Project` FOREIGN KEY (`ProjectId`)
+  KEY `idx_PracticeProblems_ProjectId` (`ProjectId`),
+  KEY `idx_PracticeProblems_Project_Number` (`ProjectId`, `PracticeNumber`),
+  UNIQUE KEY `uq_PracticeProblems_Project_Number` (`ProjectId`, `PracticeNumber`),
+  CONSTRAINT `fk_PracticeProblems_Project` FOREIGN KEY (`ProjectId`)
     REFERENCES `Projects` (`Id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -249,6 +254,7 @@ CREATE TABLE `Submissions` (
   `CodeFilepath` varchar(256) NOT NULL,
   `IsPassing` tinyint(1) NOT NULL,
   `IsPractice` tinyint(1) NOT NULL,
+  `PracticeProblemId` int DEFAULT NULL,
   `TestCaseResults` text,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `idSubmissions_UNIQUE` (`Id`),
@@ -256,6 +262,7 @@ CREATE TABLE `Submissions` (
   KEY `projectmap_idx` (`Project`),
   CONSTRAINT `iduser` FOREIGN KEY (`User`) REFERENCES `Users` (`Id`),
   CONSTRAINT `proect` FOREIGN KEY (`Project`) REFERENCES `Projects` (`Id`)
+  ,CONSTRAINT `sub_pp_fk` FOREIGN KEY (`PracticeProblemId`) REFERENCES `PracticeProblems` (`Id`) ON DELETE SET NULL
 ) ENGINE=InnoDB AUTO_INCREMENT=2507 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -269,6 +276,7 @@ DROP TABLE IF EXISTS `Testcases`;
 CREATE TABLE `Testcases` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `ProjectId` int DEFAULT NULL,
+  `PracticeProblemId` int DEFAULT NULL,
   `Name` text,
   `Description` text,
   `input` text,
@@ -278,7 +286,9 @@ CREATE TABLE `Testcases` (
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Id_UNIQUE` (`Id`),
   KEY `tc_fk_idx` (`ProjectId`),
+  KEY `tc_pp_fk_idx` (`PracticeProblemId`),
   CONSTRAINT `tc_fk` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`)
+  ,CONSTRAINT `tc_pp_fk` FOREIGN KEY (`PracticeProblemId`) REFERENCES `PracticeProblems` (`Id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=192 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

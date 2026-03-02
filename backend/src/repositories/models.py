@@ -20,18 +20,20 @@ class Projects(db.Model):
     solutionpath=Column(String)
     AsnDescriptionPath = Column(String)
     AdditionalFilePath = Column(String)
-    PracticeProject = relationship('PracticeProjects', uselist=False, back_populates='Project', cascade="all, delete-orphan")
+    PracticeProblems = relationship('PracticeProblems', back_populates='Project', cascade="all, delete-orphan")
 
-class PracticeProjects(db.Model):
-    __tablename__ = "PracticeProjects"
+class PracticeProblems(db.Model):
+    __tablename__ = "PracticeProblems"
     Id = Column(Integer, primary_key=True, autoincrement=True)
-    ProjectId = Column(Integer, ForeignKey('Projects.Id', ondelete='CASCADE'), unique=True, nullable=False)
-    Enabled = Column(Boolean, nullable=False, default=False)
+    ProjectId = Column(Integer, ForeignKey('Projects.Id', ondelete='CASCADE'), nullable=False)
+    PracticeNumber = Column(Integer, nullable=False, default=1)
+    Enabled = Column(Boolean, nullable=False, default=True)
+    Name = Column(String)
     Language = Column(String)
     solutionpath = Column(String)
     AsnDescriptionPath = Column(String)
     AdditionalFilePath = Column(String)
-    Project = relationship('Projects', back_populates='PracticeProject')
+    Project = relationship('Projects', back_populates='PracticeProblems')
 
 class Users(db.Model):
     __tablename__ = "Users"
@@ -55,6 +57,7 @@ class Submissions(db.Model):
     CodeFilepath = Column(String)
     IsPassing = Column(Boolean, nullable=False, default=False)
     IsPractice = Column(Boolean, nullable=False, default=False)
+    PracticeProblemId = Column(Integer, ForeignKey('PracticeProblems.Id'), nullable=True)
     Time = Column(Date)
     User = Column(Integer, ForeignKey('Users.Id'))
     Project = Column(Integer, ForeignKey('Projects.Id'))
@@ -104,6 +107,7 @@ class Testcases(db.Model):
     __tablename__ = "Testcases"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     ProjectId = Column(Integer, ForeignKey('Projects.Id'))
+    PracticeProblemId = Column(Integer, ForeignKey('PracticeProblems.Id'), nullable=True)
     Name = Column(String)
     Description = Column(String)
     input = Column(String)
