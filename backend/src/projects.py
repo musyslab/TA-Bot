@@ -1,6 +1,7 @@
 import ast
 from collections import defaultdict
 from io import BytesIO
+from src.repositories.database import db
 import json
 import os
 import re
@@ -38,6 +39,7 @@ import itertools
 import importlib.util
 from werkzeug.utils import secure_filename
 from urllib.parse import quote
+from sqlalchemy import func
 
 projects_api = Blueprint('projects_api', __name__)
 
@@ -118,12 +120,27 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
     new_projects = []
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
+
+        # Total PRACTICE submissions for this project (all practice problems combined)
+        practice_total = 0
+        try:
+            if hasattr(Submissions, "IsPractice"):
+                practice_total = (
+                    db.session.query(func.count(Submissions.Id))
+                    .filter(Submissions.Project == proj.Id, Submissions.IsPractice == True)
+                    .scalar()
+                    or 0
+                )
+        except Exception:
+            practice_total = 0
+
         new_projects.append(json.dumps({
             "Id": proj.Id,
             "Name": proj.Name,
             "Start": proj.Start.strftime("%x %X"),
             "End": proj.End.strftime("%x %X"),
-            "TotalSubmissions": thisdic[proj.Id],
+            "TotalSubmissions": int(thisdic.get(proj.Id, 0) or 0),
+            "PracticeTotalSubmissions": int(practice_total),
             "PracticeProblemsEnabled": project_repo.get_practice_problems_enabled(proj.Id),
         }))
     return jsonify(new_projects)
@@ -172,6 +189,40 @@ def list_practice_problems(project_repo: ProjectRepository = Provide[Container.p
             for i, r in enumerate(rows)
         ]
     })
+
+@projects_api.route('/list_practice_problems_student', methods=['GET'])
+@jwt_required()
+@inject
+def list_practice_problems_student(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    """
+    Student-safe practice problem list.
+    Returns only enabled practice problems, and only if practice problems are enabled for the project.
+    """
+    pid = (request.args.get("project_id", "") or "").strip()
+    if not pid.isdigit():
+        return jsonify({'problems': []})
+    project_id = int(pid)
+
+    try:
+        if not bool(project_repo.get_practice_problems_enabled(project_id)):
+            return jsonify({'problems': []})
+    except Exception:
+        return jsonify({'problems': []})
+
+    rows = project_repo.list_practice_problems(project_id)
+    out = []
+    for i, r in enumerate(rows or []):
+        enabled = bool(getattr(r, "Enabled", True))
+        if not enabled:
+            continue
+        out.append({
+            'id': int(r.Id),
+            'number': int(getattr(r, "PracticeNumber", i + 1)),
+            'name': (getattr(r, "Name", "") or f"Practice Problem {int(getattr(r, 'PracticeNumber', i + 1))}"),
+            'enabled': True,
+        })
+
+    return jsonify({'problems': out})
 
 @projects_api.route('/create_practice_problem', methods=['POST'])
 @jwt_required()
@@ -1031,15 +1082,78 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
     new_projects = []
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
+
+        # Total PRACTICE submissions for this project (all practice problems combined)
+        practice_total = 0
+        try:
+            if hasattr(Submissions, "IsPractice"):
+                practice_total = (
+                    db.session.query(func.count(Submissions.Id))
+                    .filter(Submissions.Project == proj.Id, Submissions.IsPractice == True)
+                    .scalar()
+                    or 0
+                )
+        except Exception:
+            practice_total = 0
+
         new_projects.append(json.dumps({
             "Id": proj.Id,
             "Name": proj.Name,
             "Start": proj.Start.strftime("%x %X"),
             "End": proj.End.strftime("%x %X"),
-            "TotalSubmissions": thisdic[proj.Id],
+            "TotalSubmissions": int(thisdic.get(proj.Id, 0) or 0),
+            "PracticeTotalSubmissions": int(practice_total),
             "PracticeProblemsEnabled": project_repo.get_practice_problems_enabled(proj.Id),
         }))
     return jsonify(new_projects)
+
+@projects_api.route('/practice_submission_counts', methods=['GET'])
+@jwt_required()
+@inject
+def practice_submission_counts():
+    """
+    Returns practice submission counts per practice_problem_id (and total) for a project.
+    Response:
+      { "total": <int>, "by_problem": { "<ppid>": <count>, ... } }
+    """
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    pid_raw = (request.args.get('project_id', '') or '').strip()
+    if not pid_raw.isdigit():
+        return jsonify({'total': 0, 'by_problem': {}})
+    pid = int(pid_raw)
+
+    if not hasattr(Submissions, "IsPractice"):
+        return jsonify({'total': 0, 'by_problem': {}})
+
+    total = 0
+    by_problem = {}
+    try:
+        total = (
+            db.session.query(func.count(Submissions.Id))
+            .filter(Submissions.Project == pid, Submissions.IsPractice == True)
+            .scalar()
+            or 0
+        )
+
+        # If your Submissions model tracks which practice problem was submitted:
+        if hasattr(Submissions, "PracticeProblemId"):
+            rows = (
+                db.session.query(Submissions.PracticeProblemId, func.count(Submissions.Id))
+                .filter(Submissions.Project == pid, Submissions.IsPractice == True)
+                .group_by(Submissions.PracticeProblemId)
+                .all()
+            )
+            for ppid, cnt in rows:
+                if ppid is None:
+                    continue
+                by_problem[str(int(ppid))] = int(cnt or 0)
+    except Exception:
+        total = 0
+        by_problem = {}
+
+    return jsonify({'total': int(total), 'by_problem': by_problem})
 
 @projects_api.route('/getAssignmentDescription', methods=['GET'])
 @jwt_required()
@@ -1218,13 +1332,27 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
     practice_raw = (input_json or {}).get('practice', False)
     practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
+    ppid_raw = (input_json or {}).get('practice_problem_id', None)
+    try:
+        practice_problem_id = int(ppid_raw) if ppid_raw is not None else None
+    except (TypeError, ValueError):
+        practice_problem_id = None
+
     if practice and hasattr(Submissions, "IsPractice"):
-        sub = (
+
+        q = (
             Submissions.query
-            .filter(Submissions.Project == project_id, Submissions.User == user_id, Submissions.IsPractice == True)
-            .order_by(Submissions.Time.desc())
-            .first()
+            .filter(
+                Submissions.Project == project_id,
+                Submissions.User == user_id,
+                Submissions.IsPractice == True
+            )
         )
+        # If grading a specific practice problem, restrict to that practice_problem_id.
+        if practice_problem_id is not None and hasattr(Submissions, "PracticeProblemId"):
+            q = q.filter(Submissions.PracticeProblemId == practice_problem_id)
+        sub = q.order_by(Submissions.Time.desc()).first()
+
         submissions = {user_id: sub} if sub else {}
     else:
         submissions = submission_repo.get_most_recent_submission_by_project(project_id, [user_id])

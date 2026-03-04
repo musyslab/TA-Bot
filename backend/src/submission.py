@@ -261,6 +261,13 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
     projectid = input_json['project_id']
     practice_raw = (input_json or {}).get('practice', False)
     practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+    
+    ppid_raw = (input_json or {}).get('practice_problem_id', None)
+    try:
+        practice_problem_id = int(ppid_raw) if ppid_raw is not None else None
+    except (TypeError, ValueError):
+        practice_problem_id = None
+    
     class_name = project_repo.get_className_by_projectId(projectid)
     class_id = project_repo.get_class_id_by_name(class_name)
     users = user_repo.get_all_users_by_cid(class_id)
@@ -272,12 +279,20 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
     if practice and hasattr(Submissions, "IsPractice"):
         bucket = {}
         submission_counter_dict = {uid: 0 for uid in userids}
-        subs = (
+        
+        q = (
             Submissions.query
-            .filter(Submissions.Project == projectid, Submissions.User.in_(userids), Submissions.IsPractice == True)
-            .order_by(Submissions.User.asc(), Submissions.Time.desc())
-            .all()
+            .filter(
+                Submissions.Project == projectid,
+                Submissions.User.in_(userids),
+                Submissions.IsPractice == True,
+            )
         )
+        # If the UI requested a specific practice problem, scope to it.
+        if practice_problem_id is not None and hasattr(Submissions, "PracticeProblemId"):
+            q = q.filter(Submissions.PracticeProblemId == practice_problem_id)
+        subs = q.order_by(Submissions.User.asc(), Submissions.Time.desc()).all()
+
         for s in subs:
             uid = int(getattr(s, "User", 0) or 0)
             if uid in submission_counter_dict:
@@ -506,23 +521,38 @@ def get_accepted_oh_for_class(submission_repo: SubmissionRepository = Provide[Co
 def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
     class_id = int(request.args.get("class_id"))
     submission_details = []
-    project = project_repo.get_current_project_by_class(class_id)
-    if project is None:
-        # no active project → return all "None"/zero defaults
-        return make_response(
-            ["None", "0", "None", "", ""],
-            HTTPStatus.OK
-        )
-    projectId = project.Id
+
+    # Use the current-project ORM object directly (avoids brittle indexing/parsing)
+    proj = project_repo.get_current_project_by_class(class_id)
+    if proj is None:
+        # no active project → keep array shape consistent for frontend
+        # [remaining_oh_time, days_passed, next_submission_str, project_name, end_time, project_id]
+        return make_response(["None", "0", "None", "", "", "-1"], HTTPStatus.OK)
+
+    projectId = int(getattr(proj, "Id", 0) or 0)
     submission_details.append(str(submission_repo.get_remaining_OH_Time(current_user.Id, projectId)))
-    project = project_repo.get_project(projectId)
-    start_time = project.get(projectId)[1]
-    start_date = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%S")
+
+    # Compute days since start from proj.Start (datetime or ISO string)
+    start_val = getattr(proj, "Start", None)
     current_time = datetime.now()
-    #get days passed
-    days_passed = (current_time - start_date).days
+    start_date = None
+    try:
+        if isinstance(start_val, datetime):
+            start_date = start_val
+        elif isinstance(start_val, str) and start_val.strip():
+            # Handle "YYYY-MM-DDTHH:MM:SS" (optionally with microseconds)
+            s = start_val.strip()
+            if "." in s:
+                s = s.split(".", 1)[0]
+            start_date = datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        start_date = None
+
+    days_passed = (current_time - start_date).days if start_date else 0
     submission_details.append(str(days_passed))
+
     time_until_next_submission = submission_repo.check_timeout(current_user.Id, projectId)[1]
+
     if time_until_next_submission != "None":
         hours = time_until_next_submission.seconds // 3600
         minutes = (time_until_next_submission.seconds % 3600) // 60
@@ -531,10 +561,19 @@ def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Contai
         submission_details.append(time_until_next_submission_str)
     else:
         submission_details.append("None")
-    submission_details.append(project.get(projectId)[0])
-    end_time_str = project.get(projectId)[2]
-    submission_details.append(end_time_str)
+
+    # Project name + due date
+    submission_details.append(str(getattr(proj, "Name", "") or ""))
+
+    end_val = getattr(proj, "End", None)
+    if isinstance(end_val, datetime):
+        end_str = end_val.isoformat(timespec="seconds")
+    else:
+        end_str = str(end_val or "")
+    submission_details.append(end_str)
+
     submission_details.append(str(projectId))
+
     return make_response(submission_details, HTTPStatus.OK)
 
 @submission_api.route('/get_oh_visits_by_projectId', methods=['POST'])

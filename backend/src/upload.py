@@ -84,6 +84,9 @@ def file_upload(
     class_id = request.form['class_id']
     practice_raw = (request.form.get("practice", "") or "").strip().lower()
     is_practice = practice_raw in ("1", "true", "yes", "y", "on")
+    ppid_raw = (request.form.get("practice_problem_id", "") or "").strip()
+    practice_problem_id = int(ppid_raw) if ppid_raw.isdigit() else None
+
     username = current_user.Username
     user_id = current_user.Id
     if "student_id" in request.form:
@@ -100,7 +103,14 @@ def file_upload(
     pp = None
     if is_practice and project is not None:
         try:
-            pp = project_repo.get_practice_project(int(project.Id))
+            if practice_problem_id:
+                pp = project_repo.get_practice_problem(int(practice_problem_id))
+                # Safety: ensure this practice problem belongs to the selected project
+                if not pp or int(getattr(pp, "ProjectId", 0) or 0) != int(project.Id):
+                    pp = None
+            if pp is None:
+                # Back-compat: if client did not send a practice_problem_id
+                pp = project_repo.get_practice_project(int(project.Id))
             if not (pp and bool(getattr(pp, "Enabled", False))):
                 pp = None
         except Exception:
@@ -192,7 +202,13 @@ def file_upload(
         path = submission_dir
 
         # Step 2: Run grade.py
-        testcase_info_json = project_repo.testcases_to_json(project.Id)
+        if is_practice and not practice_problem_id:
+            return make_response({'message': 'Missing practice_problem_id for practice submission'}, HTTPStatus.BAD_REQUEST)
+
+        testcase_info_json = project_repo.testcases_to_json(
+            project.Id,
+            practice_problem_id=(practice_problem_id if is_practice else None),
+        )
 
         grading_script = "/tabot-files/grading-scripts/grade.py"
         project_id_arg = str(project.Id)
@@ -283,6 +299,7 @@ def file_upload(
             errorcount=0,
             testcase_results=TestCaseResults,
             is_practice=is_practice,
+            practice_problem_id=(practice_problem_id if is_practice else None),
         )
 
         submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)

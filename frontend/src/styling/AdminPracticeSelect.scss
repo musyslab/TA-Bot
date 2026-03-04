@@ -1,0 +1,154 @@
+/* AdminPracticeSelect.scss */
+
+.aps__panel {
+    width: 95%;
+    margin: 14px auto 0;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.aps__panel--loading,
+.aps__panel--disabled {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.aps__loadingText {
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+.aps__notice {
+    font-size: 16px;
+    line-height: 1.35;
+    opacity: 0.9;
+}
+
+.aps__actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.aps__actions--bottom {
+    margin-top: 16px;
+    justify-content: center;
+}
+
+.aps__empty {
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+.aps__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+}
+
+.aps__card {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 16px;
+    padding: 14px 14px 12px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    cursor: pointer;
+    user-select: none;
+    transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.aps__card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(0, 0, 0, 0.18);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.07);
+}
+
+.aps__card:focus,
+.aps__card:focus-visible {
+    outline: none;
+    border-color: rgba(37, 99, 235, 0.55);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+
+.aps__cardTitle {
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.aps__cardName {
+    margin-top: 6px;
+    font-size: 14px;
+    opacity: 0.82;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.aps__cardStatus {
+    margin-top: 8px;
+    font-size: 14px;
+    opacity: 0.85;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.aps__pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 12px;
+    line-height: 1;
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.aps__pill--on {
+    background: rgba(16, 185, 129, 0.14);
+    border-color: rgba(16, 185, 129, 0.35);
+}
+
+.aps__pill--off {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.aps__addButton {
+    width: min(520px, 100%);
+    padding: 12px 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    font-weight: 800;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.aps__addButton:hover:enabled {
+    transform: translateY(-1px);
+    border-color: rgba(0, 0, 0, 0.18);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.07);
+}
+
+.aps__addButton:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.aps__addButton:focus,
+.aps__addButton:focus-visible {
+    outline: none;
+    border-color: rgba(37, 99, 235, 0.55);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}

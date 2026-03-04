@@ -358,7 +358,7 @@ class ProjectRepository():
         db.session.delete(testcase)
         db.session.commit()
 
-    def testcases_to_json(self, project_id: int) -> str:
+    def testcases_to_json(self, project_id: int, practice_problem_id: Optional[int] = None) -> str:
         testcase_holder: Dict[int, list] = {}
         proj = Projects.query.filter(Projects.Id == project_id).first()
         add_field = getattr(proj, "AdditionalFilePath", "") if proj else ""
@@ -385,16 +385,21 @@ class ProjectRepository():
         except Exception:
             pass
 
-        tests = Testcases.query.filter(Testcases.ProjectId == project_id).all()
+        q = Testcases.query.filter(Testcases.ProjectId == project_id)
+        if practice_problem_id:
+            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        else:
+            q = q.filter(Testcases.PracticeProblemId.is_(None))
+        tests = q.all()
+
         for test in tests:
             testcase_holder[test.Id] = [
                 test.Name,
                 test.Description,
                 test.input,
                 test.Output,
-                add_list,
                 bool(getattr(test, "Hidden", False)),
-                bool(getattr(test, "Practice", False)),
+                add_list,
             ]
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)

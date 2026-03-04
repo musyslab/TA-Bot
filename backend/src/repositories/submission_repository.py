@@ -31,7 +31,19 @@ class SubmissionRepository():
         Returns:
             Submissions: The latest submission object made by the user for the given project.
         """
-        submission = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User == user_id)).order_by(desc("Time")).first()
+
+        # MAIN submissions only (exclude practice submissions that share the same Project id)
+        submission = (
+            Submissions.query
+            .filter(and_(
+                Submissions.Project == project_id,
+                Submissions.User == user_id,
+                Submissions.IsPractice == False
+            ))
+            .order_by(desc("Time"))
+            .first()
+        )
+
         return submission
 
     def get_submission_by_submission_id(self, submission_id: int) -> Submissions:
@@ -104,6 +116,7 @@ class SubmissionRepository():
         errorcount: int,
         testcase_results,
         is_practice: bool = False,
+        practice_problem_id: int = None,
     ):
         """Creates a new submission record in the database.
 
@@ -127,6 +140,7 @@ class SubmissionRepository():
             Project=project_id,
             IsPassing=status,
             IsPractice=bool(is_practice),
+            PracticeProblemId=(int(practice_problem_id) if (is_practice and practice_problem_id is not None) else None),
             TestCaseResults=str(testcase_results),
         )        
         db.session.add(submission)
@@ -144,7 +158,12 @@ class SubmissionRepository():
         thisdic={}
         project_ids = Projects.query.with_entities(Projects.Id).all()
         for proj in project_ids:
-            count = Submissions.query.with_entities(Submissions.User).filter(Submissions.Project == proj[0]).distinct().count()
+            count = (
+                Submissions.query.with_entities(Submissions.User)
+                .filter(Submissions.Project == proj[0], Submissions.IsPractice == False)
+                .distinct()
+                .count()
+            )
             thisdic[proj[0]]=count
         return thisdic
 
@@ -159,7 +178,18 @@ class SubmissionRepository():
         Returns:
             Dict[int, Submissions]: A dictionary where the keys are user IDs and the values are the most recent submission for each user.
         """
-        holder = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User.in_(user_ids))).order_by(desc(Submissions.Time)).all()
+
+        holder = (
+            Submissions.query
+            .filter(and_(
+                Submissions.Project == project_id,
+                Submissions.User.in_(user_ids),
+                Submissions.IsPractice == False
+            ))
+            .order_by(desc(Submissions.Time))
+            .all()
+        )
+
         bucket={}
         for obj in holder:
             if obj.User in bucket:
@@ -194,7 +224,17 @@ class SubmissionRepository():
         return (current_day == "Wednesday" and unlocked_info != None)
         
     def submission_counter(self, project_id: int, user_ids: List[int]) -> bool:
-        submissions = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User.in_(user_ids))).all()
+
+        submissions = (
+            Submissions.query
+            .filter(and_(
+                Submissions.Project == project_id,
+                Submissions.User.in_(user_ids),
+                Submissions.IsPractice == False
+            ))
+            .all()
+        )
+
         submission_counter_dict={}
         for sub in submissions:
             if sub.User in submission_counter_dict:

@@ -25,7 +25,19 @@ const AdminStudentRoster = () => {
     const practiceParam = (new URLSearchParams(search).get('practice') || '').toLowerCase()
     const isPractice = ['1', 'true', 'yes', 'y', 'on'].includes(practiceParam)
 
-    return <StudentListInternal project_id={project_id} class_id={class_id} isPractice={isPractice} />
+    const ppidParam = (new URLSearchParams(search).get('practice_problem_id') || '').trim()
+    const parsedPpid = parseInt(ppidParam, 10)
+    const practice_problem_id =
+        isPractice && !Number.isNaN(parsedPpid) && parsedPpid > 0 ? parsedPpid : undefined
+
+    return (
+        <StudentListInternal
+            project_id={project_id}
+            class_id={class_id}
+            isPractice={isPractice}
+            practice_problem_id={practice_problem_id}
+        />
+    )
 }
 
 export default AdminStudentRoster
@@ -34,6 +46,7 @@ interface StudentListProps {
     project_id: number
     class_id: string
     isPractice: boolean
+    practice_problem_id?: number
 }
 
 class Row {
@@ -216,7 +229,12 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
     componentDidMount() {
         const submissionsRequest = axios.post(
             import.meta.env.VITE_API_URL + `/submissions/recentsubproject`,
-            { project_id: this.props.project_id, practice: this.props.isPractice },
+            {
+                project_id: this.props.project_id,
+                practice: this.props.isPractice,
+                // When viewing practice submissions, scope to the specific practice problem if provided.
+                practice_problem_id: this.props.practice_problem_id ?? null,
+            },
             {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -486,7 +504,12 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         axios
             .post(
                 import.meta.env.VITE_API_URL + `/projects/ProjectGrading`,
-                { userID: UserId, ProjectId: this.props.project_id, practice: this.props.isPractice },
+                {
+                    userID: UserId,
+                    ProjectId: this.props.project_id,
+                    practice: this.props.isPractice,
+                    practice_problem_id: this.props.practice_problem_id ?? null,
+                },
                 {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,

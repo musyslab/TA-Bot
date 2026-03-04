@@ -11,6 +11,7 @@ import StudentOutputDiff from './pages/student/StudentOutputDiff';
 import StudentClassSelection from './pages/student/StudentClassSelection';
 import StudentOfficeHours from './pages/student/StudentOfficeHours';
 import StudentPastSubmissions from "./pages/student/StudentPastSubmissions";
+import StudentPracticeSelect from './pages/student/StudentPracticeSelect';
 
 import AdminClassSelection from './pages/admin/AdminClassSelection';
 import AdminGrading from './pages/admin/AdminGrading';
@@ -60,7 +61,7 @@ class App extends Component {
                             <AdminStudentRoster />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/manage/:id" element={
+                    <Route path="/admin/:class_id/project/:id/manage" element={
                         <ProtectedRoute>
                             <AdminProjectManage />
                         </ProtectedRoute>
@@ -109,6 +110,16 @@ class App extends Component {
                         </ProtectedRoute>
                     } />
                     <Route path="/student/:class_id/upload" element={
+                        <ProtectedRoute>
+                            <StudentUpload />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/:class_id/practice" element={
+                        <ProtectedRoute>
+                            <StudentPracticeSelect />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/:class_id/practice/:practice_problem_id/upload" element={
                         <ProtectedRoute>
                             <StudentUpload />
                         </ProtectedRoute>

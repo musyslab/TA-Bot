@@ -24,6 +24,10 @@ export default function AdminProjectList() {
 
     const [projects, setProjects] = useState<ProjectObject[]>([]);
 
+    type PracticeProblemRow = { id: number; number: number; name: string; enabled: boolean; submissions?: number };
+    const [practiceByProjectId, setPracticeByProjectId] = useState<Record<number, PracticeProblemRow[]>>({});
+
+
     const formatDate12h = (value: string): string => {
         const d = new Date(value);
         if (Number.isNaN(d.getTime())) return value;
@@ -71,6 +75,7 @@ export default function AdminProjectList() {
     useEffect(() => {
         if (!classId) {
             setProjects([]);
+            setPracticeByProjectId({});
             return;
         }
 
@@ -86,7 +91,65 @@ export default function AdminProjectList() {
                 const parsed: ProjectObject[] = (res.data as any[]).map(
                     (str: any) => JSON.parse(str) as ProjectObject
                 );
-                if (isMounted) setProjects(parsed);
+
+                if (!isMounted) return;
+                setProjects(parsed);
+
+                // If practice is enabled, pull the actual practice-problem list (can be multiple)
+                const authHeader = {
+                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
+                };
+                const enabled = parsed.filter((p) => !!p.PracticeProblemsEnabled);
+                if (enabled.length === 0) {
+                    setPracticeByProjectId({});
+                    return;
+                }
+
+                Promise.all(
+                    enabled.map((p) =>
+                        axios
+                            .get(
+                                `${import.meta.env.VITE_API_URL}/projects/list_practice_problems?project_id=${p.Id}`,
+                                { headers: authHeader }
+                            )
+                            .then(async (r) => {
+                                const problems = Array.isArray(r.data?.problems) ? r.data.problems : [];
+                                const rows: PracticeProblemRow[] = problems.map((pp: any, idx: number) => ({
+                                    id: Number(pp?.id),
+                                    number: Number(pp?.number ?? idx + 1),
+                                    name: String(pp?.name ?? `Practice Problem ${idx + 1}`),
+                                    enabled: !!pp?.enabled,
+                                    submissions: 0,
+                                }));
+
+                                // Pull per-practice-problem submission counts for this project
+                                try {
+                                    const countsRes = await axios.get(
+                                        `${import.meta.env.VITE_API_URL}/projects/practice_submission_counts?project_id=${p.Id}`,
+                                        { headers: authHeader }
+                                    );
+                                    const by = countsRes.data?.by_problem || {};
+                                    rows.forEach((row) => {
+                                        const k = String(row.id);
+                                        row.submissions = Number(by[k] ?? 0);
+                                    });
+                                } catch {
+                                    // leave submissions as 0
+                                }
+
+                                return [p.Id, rows] as const;
+                            })
+                            .catch(() => [p.Id, []] as const)
+                    )
+                ).then((pairs) => {
+                    if (!isMounted) return;
+                    const next: Record<number, PracticeProblemRow[]> = {};
+                    pairs.forEach(([pid, rows]) => {
+                        next[pid] = rows;
+                    });
+                    setPracticeByProjectId(next);
+                });
+
             })
             .catch((err) => console.log(err));
 
@@ -183,7 +246,7 @@ export default function AdminProjectList() {
                                     </td>
 
                                     <td className="project-edit">
-                                        <Link className="button button-edit" to={`/admin/${classId}/project/manage/${project.Id}`}>
+                                        <Link className="button button-edit" to={`/admin/${classId}/project/${project.Id}/manage/`}>
                                             <FaEdit aria-hidden="true" />
                                             <span className="button-text">Edit</span>
                                         </Link>
@@ -201,49 +264,51 @@ export default function AdminProjectList() {
                     </td> */}
                                 </tr>
 
-                                {practiceOn && (
-                                    <tr className="project-row practice-sub">
-                                        <td className="project-name">
-                                            <span className="practice-subdir">
-                                                <span className="practice-subdir-icon" aria-hidden="true">
-                                                    ↳
+                                {practiceOn &&
+                                    (practiceByProjectId[project.Id] ?? []).map((pp) => (
+                                        <tr className="project-row practice-sub" key={`pp-${project.Id}-${pp.id}`}>
+                                            <td className="project-name">
+                                                <span className="practice-subdir">
+                                                    <span className="practice-subdir-icon" aria-hidden="true">
+                                                        ↳
+                                                    </span>
+                                                    {pp.name}
                                                 </span>
-                                                Practice Problem: {project.Name}
-                                            </span>
-                                        </td>
+                                            </td>
 
-                                        <td className="project-start">
-                                            <span className="practice-date">{formatDate12h(project.Start)}</span>
-                                        </td>
-                                        <td className="project-end">
-                                            <span className="practice-date">{formatDate12h(project.End)}</span>
-                                        </td>
+                                            <td className="project-start">
+                                                <span className="practice-date">{formatDate12h(project.Start)}</span>
+                                            </td>
+                                            <td className="project-end">
+                                                <span className="practice-date">{formatDate12h(project.End)}</span>
+                                            </td>
 
-                                        <td className="project-total-submissions">
-                                            {project.PracticeTotalSubmissions ?? 0}
-                                        </td>
+                                            <td className="project-total-submissions">
+                                                {pp.submissions ?? project.PracticeTotalSubmissions ?? 0}
+                                            </td>
 
-                                        <td className="project-review">
-                                            <Link
-                                                className="button button-review"
-                                                to={`/admin/${classId}/project/${project.Id}?practice=1`}
-                                            >
-                                                <FaEye aria-hidden="true" />
-                                                <span className="button-text">Review</span>
-                                            </Link>
-                                        </td>
+                                            <td className="project-review">
+                                                <Link
+                                                    className="button button-review"
+                                                    to={`/admin/${classId}/project/${project.Id}?practice=1&practice_problem_id=${pp.id}`}
+                                                >
+                                                    <FaEye aria-hidden="true" />
+                                                    <span className="button-text">Review</span>
+                                                </Link>
+                                            </td>
 
-                                        <td className="project-edit">
-                                            <Link
-                                                className="button button-edit"
-                                                to={`/admin/${classId}/project/${project.Id}/practice`}
-                                            >
-                                                <FaEdit aria-hidden="true" />
-                                                <span className="button-text">Edit</span>
-                                            </Link>
-                                        </td>
-                                    </tr>
-                                )}
+                                            <td className="project-edit">
+                                                <Link
+                                                    className="button button-edit"
+                                                    to={`/admin/${classId}/project/${project.Id}/practice/${pp.id}`}
+                                                >
+                                                    <FaEdit aria-hidden="true" />
+                                                    <span className="button-text">Edit</span>
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    ))}
+
                             </Fragment>
 
                         );
@@ -251,7 +316,7 @@ export default function AdminProjectList() {
                 </tbody>
             </table>
 
-            <Link className="button button-create-assignment" to={`/admin/${classId}/project/manage/0`}>
+            <Link className="button button-create-assignment" to={`/admin/${classId}/project/0/manage/`}>
                 <FaPlusCircle aria-hidden="true" />
                 <span className="button-text">Create new assignment</span>
             </Link>

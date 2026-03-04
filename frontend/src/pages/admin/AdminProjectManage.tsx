@@ -891,7 +891,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             const newId = res.data
 
             window.alert('Your project has been created! Next, open the "Test Cases" tab to add test cases.')
-            window.location.href = `/admin/${classId}/project/manage/${newId}`
+            window.location.href = `/admin/${classId}/project/${newId}/manage/`
         } catch (error) {
             console.log(error)
         }
@@ -958,7 +958,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             })
 
             window.alert('Project information saved. Next, go to the "Test Cases" tab to create test cases.')
-            window.location.href = `/admin/${classId}/project/manage/${project_id}`
+            window.location.href = `/admin/${classId}/project/${project_id}/manage/`
         } catch (error) {
             console.log(error)
         }
@@ -1427,7 +1427,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                 items={[
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${classId}/projects/` },
-                    { label: 'Project Manage', to: `/admin/${classId}/project/manage/${project_id}` },
+                    { label: 'Project Manage', to: `/admin/${classId}/project/${project_id}/manage/` },
                     ...(isPractice
                         ? [
                             {
@@ -1875,7 +1875,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                         aria-pressed={practiceProblemsEnabled}
                                                         onClick={togglePracticeProblemsEnabled}
                                                     >
-                                                        {practiceProblemsEnabled ? 'Practice problem: On' : 'Practice problem: Off'}
+                                                        {practiceProblemsEnabled ? 'Practice problems: On' : 'Practice problems: Off'}
                                                     </button>
 
                                                     {practiceProblemsEnabled &&
