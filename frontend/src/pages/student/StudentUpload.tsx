@@ -25,6 +25,7 @@ import {
   FaGift,
   FaExternalLinkAlt,
   FaFlask,
+  FaCheckCircle,
 } from 'react-icons/fa'
 
 type PracticeProblemLite = {
@@ -84,30 +85,27 @@ const StudentUpload = () => {
   const [project_name, setProject_name] = useState<string>('')
   const [dueDate, setDueDate] = useState<string>('')
 
+  const [passedAllTests, setPassedAllTests] = useState<boolean>(false)
+  const [checkedPassedAll, setCheckedPassedAll] = useState<boolean>(false)
+
   const [practiceProblemLabel, setPracticeProblemLabel] = useState<string>('')
 
   // Practice-bonus mechanism (UI only for now)
   // In the future this should come from an API (ex: /practice/progress?class_id=...)
-  const [practiceBonusEarned, setPracticeBonusEarned] = useState<number>(0) // how many bonus charges earned via practice
   const [practiceSolvedCount, setPracticeSolvedCount] = useState<number>(0) // solved practice problems
-  const PRACTICE_SOLVES_PER_BONUS = 3
-  const PRACTICE_BONUS_CAP = 5 // cap earned bonus charges via practice (UI rule)
+  const [practiceTotalCount, setPracticeTotalCount] = useState<number>(0) // total enabled practice problems for this project
 
   const practiceProgress = useMemo(() => {
-    const cap = PRACTICE_SOLVES_PER_BONUS * PRACTICE_BONUS_CAP
     const solved = Math.max(0, practiceSolvedCount)
-    const clampedSolved = Math.min(solved, cap)
-    const earned = Math.min(
-      Math.floor(clampedSolved / PRACTICE_SOLVES_PER_BONUS),
-      PRACTICE_BONUS_CAP
-    )
-    const towardNext = clampedSolved % PRACTICE_SOLVES_PER_BONUS
-    const pct = cap === 0 ? 0 : Math.round((clampedSolved / cap) * 100)
-    return { cap, solved: clampedSolved, earned, towardNext, pct }
-  }, [practiceSolvedCount])
+    const total = Math.max(0, practiceTotalCount)
+    const clampedSolved = total > 0 ? Math.min(solved, total) : solved
+    const earned = clampedSolved // 1 solved practice problem => 1 bonus FastPass
+    const pct = total === 0 ? 0 : Math.round((clampedSolved / total) * 100)
+    return { total, solved: clampedSolved, earned, pct }
+  }, [practiceSolvedCount, practiceTotalCount])
 
   // you can submit if you are in office hours OR you have base energy OR you used a FastPass charge
-  const canSubmit = inOfficeHours || baseCharge > 0 || RewardState
+  const canSubmit = isPractice || inOfficeHours || baseCharge > 0 || RewardState
 
   // Allowed upload file extensions (frontend gate)
   const ALLOWED_EXTS = ['.py', '.java', '.c', '.rkt']
@@ -182,6 +180,67 @@ const StudentUpload = () => {
   }, [project_name])
 
   useEffect(() => {
+    // Reset if there's no active project
+    if (!project_id || project_id <= 0) {
+      setPassedAllTests(false)
+      setCheckedPassedAll(true)
+      return
+    }
+    if (project_id === -1) {
+      setPassedAllTests(false)
+      setCheckedPassedAll(true)
+      return
+    }
+
+    setCheckedPassedAll(false)
+
+    const qs =
+      isPractice && practiceProblemId
+        ? `&practice=1&practice_problem_id=${practiceProblemId}`
+        : ''
+
+    axios
+      .get(
+        `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?class_id=${cid}&id=${project_id}${qs}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+      )
+      .then((res) => {
+        let payload: any = res?.data
+        if (typeof payload === 'string') {
+          try {
+            payload = JSON.parse(payload)
+          } catch {
+            payload = {}
+          }
+        }
+
+        const results = Array.isArray(payload?.results) ? payload.results : []
+        const allPassed =
+          results.length > 0 &&
+          results.every((r: any) => {
+            const v = r?.passed ?? r?.ok ?? r?.State
+            return v === true
+          })
+
+        setPassedAllTests(allPassed)
+        setCheckedPassedAll(true)
+      })
+      .catch(() => {
+        setPassedAllTests(false)
+        setCheckedPassedAll(true)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project_id, isPractice, practiceProblemId])
+
+  useEffect(() => {
+    if (passedAllTests) {
+      setFiles([])
+      setIsErrorMessageHidden(true)
+      setError_Message('')
+    }
+  }, [passedAllTests])
+
+  useEffect(() => {
     if (!isPractice || !practiceProblemId || !project_id || project_id <= 0) {
       setPracticeProblemLabel('')
       return
@@ -209,6 +268,32 @@ const StudentUpload = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPractice, practiceProblemId, project_id])
 
+  useEffect(() => {
+    if (!project_id || project_id <= 0) {
+      setPracticeTotalCount(0)
+      setPracticeSolvedCount(0)
+      return
+    }
+
+    axios
+      .get(
+        `${import.meta.env.VITE_API_URL}/projects/list_practice_problems_student?project_id=${project_id}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+      )
+      .then((res) => {
+        const probs = (res?.data?.problems ?? []) as (PracticeProblemLite & { solved?: boolean; rewarded?: boolean })[]
+        const arr = Array.isArray(probs) ? probs : []
+        setPracticeTotalCount(arr.length)
+        // progress bar tracks awarded bonuses (fallback to solved if needed)
+        setPracticeSolvedCount(arr.filter((p) => Boolean(p?.rewarded ?? p?.solved)).length)
+      })
+      .catch(() => {
+        setPracticeTotalCount(0)
+        setPracticeSolvedCount(0)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project_id])
+
   function checkOfficeHours() {
     axios
       .get(`${import.meta.env.VITE_API_URL}/submissions/getAcceptedOHForClass?class_id=${class_id}`, {
@@ -234,6 +319,13 @@ const StudentUpload = () => {
   }, [])
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    if (passedAllTests) {
+      setFiles([])
+      setError_Message('')
+      setIsErrorMessageHidden(true)
+      return
+    }
+
     const selected = event.target.files ? Array.from(event.target.files) : []
     const valid = selected.filter((f) => isAllowedFileName(f.name))
 
@@ -352,6 +444,10 @@ const StudentUpload = () => {
   function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault()
 
+    if (passedAllTests) {
+      return
+    }
+
     // Block submits when there are no usable charges
     if (!canSubmit) {
       alert(
@@ -411,8 +507,12 @@ const StudentUpload = () => {
           | string
           | undefined
 
+        const qs =
+          isPractice && practiceProblemId ? `?practice=1&practice_problem_id=${practiceProblemId}` : ''
+
+
         if (sid !== undefined && class_id !== undefined) {
-          window.location.href = `/student/${class_id}/code/${sid}`
+          window.location.href = `/student/${class_id}/code/${sid}${qs}`
         } else if (class_id !== undefined) {
           window.location.href = `/student/${class_id}/code`
         } else {
@@ -427,6 +527,10 @@ const StudentUpload = () => {
   }
 
   function consumeRewardCharge() {
+
+    if (passedAllTests) {
+      return
+    }
 
     if (isPractice) {
       // Practice submissions are free; don't allow reserving a FastPass here.
@@ -498,6 +602,10 @@ const StudentUpload = () => {
     }
   }, [dueDate])
 
+  const resultsQs =
+    isPractice && practiceProblemId ? `?practice=1&practice_problem_id=${practiceProblemId}` : ''
+  const resultsHref = `/student/${class_id}/code/${project_id}${resultsQs}`
+
   return (
     <div className="student-upload-page">
       <LoadingAnimation show={isLoading} message="Uploading..." />
@@ -549,8 +657,8 @@ const StudentUpload = () => {
                 )}
               </>
             ) : (
-              <div className="panel-header__titleRow">
-                <h1 className="panel-title">No Active Project</h1>
+              <div className="panel-header__titleCol">
+                <h1 className="panel-title panel-title--project">No Active Project</h1>
               </div>
             )}
           </header>
@@ -574,6 +682,7 @@ const StudentUpload = () => {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault()
+                  if (passedAllTests) return
                   const dropped = Array.from(e.dataTransfer.files || [])
                   const valid = dropped.filter((f) => isAllowedFileName(f.name))
 
@@ -594,13 +703,26 @@ const StudentUpload = () => {
                   setFiles(valid)
                 }}
               >
-                {!files.length ? (
+                {passedAllTests ? (
+                  <div className="complete-message" role="status" aria-live="polite">
+                    <FaCheckCircle className="complete-icon" aria-hidden="true" />
+                    <h2 className="complete-title">All tests passed!</h2>
+                    <p className="complete-text">
+                      You&apos;re finished{isPractice ? ' with this practice problem' : ' with this assignment'}.
+                      Further submissions are disabled.
+                    </p>
+                    <Link to={resultsHref} className="complete-link">
+                      View your latest results <FaExternalLinkAlt aria-hidden="true" />
+                    </Link>
+                  </div>
+                ) : !files.length ? (
                   <>
                     <input
                       type="file"
                       className="file-input"
                       accept=".py,.java,.c,.rkt"
                       multiple
+                      disabled={passedAllTests}
                       onChange={handleFileChange}
                     />
 
@@ -659,7 +781,7 @@ const StudentUpload = () => {
             <div className="actions">
               <button
                 type="submit"
-                disabled={!is_allowed_to_submit || !canSubmit}
+                disabled={!is_allowed_to_submit || !canSubmit || passedAllTests}
                 className={`primary ${!is_allowed_to_submit || !canSubmit ? 'disabled' : ''} ${RewardState ? 'reward' : ''
                   }`}
               >
@@ -669,7 +791,7 @@ const StudentUpload = () => {
               <button
                 type="button"
                 onClick={consumeRewardCharge}
-                disabled={isPractice || RewardCharge <= 0}
+                disabled={isPractice || RewardCharge <= 0 || passedAllTests}
                 className="secondary"
                 title="Use one FastPass charge to submit immediately"
               >
@@ -775,17 +897,25 @@ const StudentUpload = () => {
         {/* RIGHT: Energy + explanations panel */}
         <aside className="panel panel-status" aria-label="Energy and FastPass status">
           <div className="status-cards">
-            {!isPractice && (
-              <div className="status-card">
-                <div className="status-card__top">
-                  <div className="status-card__label">
-                    <FaBolt aria-hidden="true" /> Energy
-                  </div>
-                  <div className="status-card__value">
-                    <span className="big">{baseCharge}</span>
-                    <span className="muted"> / 3</span>
-                  </div>
+            <div className="status-card">
+              <div className="status-card__top">
+                <div className="status-card__label">
+                  <FaBolt aria-hidden="true" /> Energy
                 </div>
+                <div className="status-card__value">
+                  {isPractice ? (
+                    <span className="big unlimited-pill" title="Practice submissions do not consume Energy">
+                      Unlimited
+                    </span>
+                  ) : (
+                    <>
+                      <span className="big">{baseCharge}</span>
+                      <span className="muted"> / 3</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              {!isPractice && (
                 <div className="dots-row" aria-label="Energy charge dots">
                   {[1, 2, 3].map((level) => (
                     <div
@@ -795,37 +925,45 @@ const StudentUpload = () => {
                     />
                   ))}
                 </div>
+              )}
 
-                {displayClock && (
-                  <div className="timer-block" aria-live="polite">
-                    <div className="timer-title">Recharge countdown</div>
-                    <Countdown
-                      date={
-                        new Date(
-                          new Date().getTime() +
-                          HoursUntilRecharge * 3600000 +
-                          MinutesUntilRecharge * 60000 +
-                          SecondsUntilRecharge * 1000
-                        )
-                      }
-                      intervalDelay={1000}
-                      precision={2}
-                      renderer={({ hours, minutes, seconds, completed }) => (
-                        <div className={`timer-value ${completed ? 'completed' : ''}`}>
-                          {completed ? (
-                            <span>Full recharge ready</span>
-                          ) : (
-                            <span>
-                              {hours}h {minutes}m {seconds}s
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    />
-                    <div className="timer-subtle">When it hits zero, your energy refills to 3 all at once.</div>
-                  </div>
-                )}
+              {isPractice && (
+                <div className="explain">
+                  <p>Practice submissions do not consume Energy. Submit as many times as you like.</p>
+                </div>
+              )}
 
+              {!isPractice && displayClock && (
+                <div className="timer-block" aria-live="polite">
+                  <div className="timer-title">Recharge countdown</div>
+                  <Countdown
+                    date={
+                      new Date(
+                        new Date().getTime() +
+                        HoursUntilRecharge * 3600000 +
+                        MinutesUntilRecharge * 60000 +
+                        SecondsUntilRecharge * 1000
+                      )
+                    }
+                    intervalDelay={1000}
+                    precision={2}
+                    renderer={({ hours, minutes, seconds, completed }) => (
+                      <div className={`timer-value ${completed ? 'completed' : ''}`}>
+                        {completed ? (
+                          <span>Full recharge ready</span>
+                        ) : (
+                          <span>
+                            {hours}h {minutes}m {seconds}s
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  />
+                  <div className="timer-subtle">When it hits zero, your energy refills to 3 all at once.</div>
+                </div>
+              )}
+
+              {!isPractice && (
                 <ul className="rules rules--compact">
                   <li>
                     <b>Energy</b> is consumed on submit unless you are in office hours.
@@ -834,8 +972,8 @@ const StudentUpload = () => {
                     When the recharge timer finishes, Energy refills to <b>3</b> all at once.
                   </li>
                 </ul>
-              </div>
-            )}
+              )}
+            </div>
 
             <div className="status-card">
               <div className="status-card__top">
@@ -871,7 +1009,7 @@ const StudentUpload = () => {
                 </div>
                 <div className="status-card__value">
                   <span className="big">{practiceProgress.earned}</span>
-                  <span className="muted"> / {PRACTICE_BONUS_CAP}</span>
+                  <span className="muted"> / {practiceProgress.total}</span>
                 </div>
               </div>
 
@@ -880,28 +1018,17 @@ const StudentUpload = () => {
                   <div className="progress-bar__fill" style={{ width: `${practiceProgress.pct}%` }} />
                 </div>
                 <div className="progress-subtle">
-                  Solve {PRACTICE_SOLVES_PER_BONUS} practice problems to earn 1 bonus FastPass (cap {PRACTICE_BONUS_CAP}).
+                  Each practice problem you solve earns 1 bonus FastPass Charge.
                 </div>
               </div>
 
               <div className="practice-row">
                 <div className="practice-metrics">
-                  <div className="metric">
-                    <div className="metric__label">Solved</div>
-                    <div className="metric__value">{practiceProgress.solved}</div>
+                  <div className="practice-link">
+                    <Link to={practiceHref} className="linklike">
+                      Practice Problems <FaExternalLinkAlt aria-hidden="true" />
+                    </Link>
                   </div>
-                  <div className="metric">
-                    <div className="metric__label">Toward next</div>
-                    <div className="metric__value">
-                      {practiceProgress.towardNext}/{PRACTICE_SOLVES_PER_BONUS}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="practice-link">
-                  <Link to={practiceHref} className="linklike">
-                    Practice Problems <FaExternalLinkAlt aria-hidden="true" />
-                  </Link>
                 </div>
               </div>
             </div>

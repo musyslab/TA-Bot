@@ -15,6 +15,40 @@ import asyncio
 import json
 
 class ProjectRepository():
+
+    def json_list_field(self, raw: str) -> list[str]:
+        try:
+            s = (raw or "").strip()
+            if not s:
+                return []
+            vals = json.loads(s) if s.startswith("[") else [s]
+            return [v for v in (vals or []) if v]
+        except Exception:
+            return []
+
+    def basename_or_empty(self, p: str) -> str:
+        return os.path.basename(p) if p else ""
+
+    def expand_additional_paths(self, add_path: str, project_base: str) -> str:
+        """
+        grade.py expects JSON list of absolute paths.
+        DB may store basenames or JSON list of basenames.
+        """
+        try:
+            base_dir = project_base if os.path.isdir(project_base) else os.path.dirname(project_base)
+            lst = self.json_list_field(add_path)
+            abs_list = []
+            for p in (lst or []):
+                if not p:
+                    continue
+                if os.path.isabs(p):
+                    abs_list.append(p)
+                else:
+                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
+            return json.dumps(abs_list)
+        except Exception:
+            return add_path or ""
+
     def list_practice_problems(self, project_id: int):
         return (
             PracticeProblems.query
@@ -171,28 +205,16 @@ class ProjectRepository():
         end_string = now.strftime("%Y-%m-%dT%H:%M:%S")
 
         if practice_problem_id:
-            # Practice view should not fall back to main assignment files
-            project_solutionFile = (pp.solutionpath if (pp and pp.solutionpath) else "")
-            project_solutionFile = project_solutionFile.split("/")[-1] if project_solutionFile else ""
-
-            project_descriptionfile = (pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else "")
-            project_descriptionfile = project_descriptionfile.split("/")[-1] if project_descriptionfile else ""
-
+            project_solutionFile = self.basename_or_empty(pp.solutionpath if (pp and pp.solutionpath) else "")
+            project_descriptionfile = self.basename_or_empty(pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else "")
             add_field = (getattr(pp, "AdditionalFilePath", "") if pp else "") or ""
         else:
-            project_solutionFile = (project_data.solutionpath or "")
-            project_solutionFile = project_solutionFile.split("/")[-1] if project_solutionFile else ""
-
-            project_descriptionfile = (project_data.AsnDescriptionPath or "")
-            project_descriptionfile = project_descriptionfile.split("/")[-1] if project_descriptionfile else ""
-
+            project_solutionFile = self.basename_or_empty(getattr(project_data, "solutionpath", "") or "")
+            project_descriptionfile = self.basename_or_empty(getattr(project_data, "AsnDescriptionPath", "") or "")
             add_field = (getattr(project_data, "AdditionalFilePath", "") or "")
 
-        try:
-            add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
-        except Exception:
-            add_list = []
-        project_additionalfiles = [os.path.basename(p) for p in add_list if p]
+        project_additionalfiles = [os.path.basename(p) for p in self.json_list_field(add_field)]
+
         display_name = project_data.Name
         practice_num = 0
 
@@ -267,8 +289,6 @@ class ProjectRepository():
         if practice_problem_id:
             pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
 
-        teacher_base = current_app.config["TEACHER_FILES_DIR"]
-
         # Ensure practice testcases NEVER fall back to main solution files
         if practice_problem_id:
             if not pp or not getattr(pp, "solutionpath", None):
@@ -285,25 +305,8 @@ class ProjectRepository():
         )
 
         add_path = (getattr(pp, "AdditionalFilePath", "") if pp else getattr(project, "AdditionalFilePath", "")) or ""
-        # Expand stored names to absolute paths under the teacher project folder for grade.py
-        try:
-            base_dir = project_base if os.path.isdir(project_base) else os.path.dirname(project_base)
-            raw = (add_path or "").strip()
-            if raw.startswith("[") or raw.startswith("{"):
-                lst = json.loads(raw)
-            else:
-                lst = [raw] if raw else []
-            abs_list = []
-            for p in (lst or []):
-                if not p:
-                    continue
-                if os.path.isabs(p):
-                    abs_list.append(p)
-                else:
-                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
-            add_path = json.dumps(abs_list)
-        except Exception:
-            pass
+        add_path = self.expand_additional_paths(add_path, project_base)
+
         #   grade.py ADMIN <language> <input_text> <solution_path> [additional_files_json]
         result = subprocess.run(
             [
@@ -362,26 +365,15 @@ class ProjectRepository():
         testcase_holder: Dict[int, list] = {}
         proj = Projects.query.filter(Projects.Id == project_id).first()
         add_field = getattr(proj, "AdditionalFilePath", "") if proj else ""
-        try:
-            add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
-        except Exception:
-            add_list = []
+        add_list = self.json_list_field(add_field)
 
         # Expand stored names to absolute paths under the teacher solution folder.
+        base_dir = ""
+        if proj and getattr(proj, "solutionpath", ""):
+            sp = getattr(proj, "solutionpath", "")
+            base_dir = sp if os.path.isdir(sp) else os.path.dirname(sp)
         try:
-            base_dir = ""
-            if proj and getattr(proj, "solutionpath", ""):
-                sp = getattr(proj, "solutionpath", "")
-                base_dir = sp if os.path.isdir(sp) else os.path.dirname(sp)
-            abs_list = []
-            for p in (add_list or []):
-                if not p:
-                    continue
-                if os.path.isabs(p):
-                    abs_list.append(p)
-                else:
-                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
-            add_list = abs_list
+            add_list = json.loads(self.expand_additional_paths(json.dumps(add_list), base_dir))
         except Exception:
             pass
 
@@ -404,15 +396,6 @@ class ProjectRepository():
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)
         return json_object
-
-    def wipe_submissions(self, project_id:int):
-        submissions = Submissions.query.filter(Submissions.Project == project_id).all()
-        for student in student_progress:
-            db.session.delete(student)
-        db.session.commit()
-        for submission in submissions:
-            db.session.delete(submission)
-        db.session.commit()
     
     def get_className_by_projectId(self, project_id):
         try:
@@ -454,6 +437,8 @@ class ProjectRepository():
 
     def get_project_desc_file(self, project_id, practice_problem_id: Optional[int] = None):
         filepath = self.get_project_desc_path(project_id, practice_problem_id=practice_problem_id)
+        if not filepath:
+            return b""
         with open(filepath, 'rb') as file:
             file_contents = file.read()
         return file_contents  # Return the contents of the PDF file

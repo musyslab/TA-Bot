@@ -1,15 +1,21 @@
-import React, { useEffect, useState } from "react"
+// StudentPracticeSelect.tsx
+import React, { useEffect, useMemo, useState } from "react"
 import axios from "axios"
 import { Helmet } from "react-helmet"
 import { Link, useParams } from "react-router-dom"
 import MenuComponent from "../components/MenuComponent"
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
+import "../../styling/StudentPracticeSelect.scss"
+
+import { FaCheckCircle, FaGift, FaLock, FaFlask, FaExternalLinkAlt } from "react-icons/fa"
 
 type PracticeProblem = {
   id: number
   number: number
   name: string
   enabled: boolean
+  solved?: boolean
+  rewarded?: boolean
 }
 
 const StudentPracticeSelect: React.FC = () => {
@@ -21,7 +27,7 @@ const StudentPracticeSelect: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string>("")
 
-  // Load current project info (so we know which project's practice problems to list)
+  // Load current project info
   useEffect(() => {
     const cid = Number(class_id)
 
@@ -51,7 +57,7 @@ const StudentPracticeSelect: React.FC = () => {
       })
   }, [class_id])
 
-  // Load practice problems for the current project
+  // Load practice problems
   useEffect(() => {
     if (!projectId || projectId <= 0) {
       setPracticeProblems([])
@@ -78,6 +84,50 @@ const StudentPracticeSelect: React.FC = () => {
       })
   }, [projectId])
 
+  const enabledProblems = useMemo(
+    () => practiceProblems.filter((p) => p && p.enabled),
+    [practiceProblems]
+  )
+
+  const progress = useMemo(() => {
+    const total = enabledProblems.length
+    const awarded = enabledProblems.filter((p) => Boolean(p.rewarded)).length
+    const solved = enabledProblems.filter((p) => Boolean(p.solved)).length
+    const pct = total === 0 ? 0 : Math.round((awarded / total) * 100)
+    return { total, awarded, solved, pct }
+  }, [enabledProblems])
+
+  const titleText = useMemo(() => {
+    const base = "Practice Problems"
+    if (!projectName) return base
+    return `${base} for ${projectName.replace(/_/g, " ")}`
+  }, [projectName])
+
+  const getStatusChip = (p: PracticeProblem) => {
+    if (p.rewarded) {
+      return (
+        <span className="status-chip status-chip--awarded" title="Bonus FastPass charge awarded for this problem">
+          <FaGift aria-hidden="true" />
+          Awarded
+        </span>
+      )
+    }
+    if (p.solved) {
+      return (
+        <span className="status-chip status-chip--solved" title="Solved, but bonus not awarded yet">
+          <FaCheckCircle aria-hidden="true" />
+          Solved
+        </span>
+      )
+    }
+    return (
+      <span className="status-chip status-chip--unsolved" title="Not solved yet">
+        <FaLock aria-hidden="true" />
+        Not solved
+      </span>
+    )
+  }
+
   return (
     <div className="student-practice-select-page">
       <Helmet>
@@ -101,34 +151,99 @@ const StudentPracticeSelect: React.FC = () => {
         ]}
       />
 
-      <h1>Practice Problems{projectName ? ` for ${projectName.replace(/_/g, " ")}` : ""}</h1>
+      {/* Match Class Selection heading style from Directory.scss */}
+      <div className="pageTitle">{titleText}</div>
 
-      {loading && <div>Loading...</div>}
+      <div className="practice-content">
+        {loading && (
+          <div className="state state--loading">
+            <div className="spinner" aria-hidden="true" />
+            <div>Loading practice problems...</div>
+          </div>
+        )}
 
-      {!loading && error && <div>{error}</div>}
+        {!loading && error && <div className="state state--error">{error}</div>}
 
-      {!loading && !error && projectId <= 0 && (
-        <div>No active project. Practice problems are unavailable.</div>
-      )}
+        {!loading && !error && projectId <= 0 && (
+          <div className="state state--empty">
+            No active project. Practice problems are unavailable.
+          </div>
+        )}
 
-      {!loading && !error && projectId > 0 && practiceProblems.filter((p) => p && p.enabled).length === 0 && (
-        <div>No practice problems are available for this project.</div>
-      )}
+        {!loading && !error && projectId > 0 && enabledProblems.length === 0 && (
+          <div className="state state--empty">No practice problems are available for this project.</div>
+        )}
 
-      {!loading && !error && practiceProblems.length > 0 && (
-        <ul>
-          {practiceProblems
-            .filter((p) => p && p.enabled)
-            .map((p) => (
-              <li key={p.id}>
-                <Link to={`/student/${class_id}/practice/${p.id}/upload`}>
-                  {p.number ? `Practice ${p.number}` : "Practice"}:{" "}
-                  {p.name || `Practice Problem ${p.number || ""}`}
-                </Link>
-              </li>
-            ))}
-        </ul>
-      )}
+        {!loading && !error && projectId > 0 && enabledProblems.length > 0 && (
+          <>
+            <section className="progress-card" aria-label="Practice bonus progress">
+              <div className="progress-card__top">
+                <div className="progress-card__label">
+                  <FaFlask aria-hidden="true" /> Practice bonus progress
+                </div>
+
+                <div className="progress-card__value">
+                  <span className="big">{progress.awarded}</span>
+                  <span className="muted"> / {progress.total}</span>
+                </div>
+              </div>
+
+              <div className="progress">
+                <div
+                  className="progress-bar"
+                  role="progressbar"
+                  aria-valuenow={progress.pct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div className="progress-bar__fill" style={{ width: `${progress.pct}%` }} />
+                </div>
+
+                <div className="progress-subtle">
+                  Bonus FastPass charges awarded: <b>{progress.awarded}</b>. Solved: <b>{progress.solved}</b>.
+                  Each solved practice problem should award 1 bonus FastPass charge.
+                </div>
+              </div>
+            </section>
+
+            <ul className="practice-list" aria-label="Practice problems list">
+              {enabledProblems
+                .slice()
+                .sort((a, b) => (a.number ?? 0) - (b.number ?? 0))
+                .map((p) => {
+                  const labelLeft = p.number ? `Practice ${p.number}` : "Practice"
+                  const labelRight = p.name || `Practice Problem ${p.number || ""}`
+
+                  return (
+                    <li key={p.id} className="practice-item">
+                      <Link to={`/student/${class_id}/practice/${p.id}/upload`} className="practice-card">
+                        <div className="practice-card__left">
+                          <div className="practice-title">
+                            <span className="practice-kicker">{labelLeft}</span>
+                            <span className="practice-name">{labelRight}</span>
+                          </div>
+
+                          <div className="practice-meta">
+                            {getStatusChip(p)}
+                            {!p.rewarded && p.solved && (
+                              <span className="hint-chip" title="If you just solved it, refresh in a moment">
+                                Bonus pending
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="practice-card__right" aria-hidden="true" title="Go to upload">
+                          <FaExternalLinkAlt />
+                        </div>
+                      </Link>
+                    </li>
+                  )
+                })}
+            </ul>
+          </>
+        )}
+      </div>
     </div>
   )
 }

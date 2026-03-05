@@ -302,6 +302,19 @@ def file_upload(
             practice_problem_id=(practice_problem_id if is_practice else None),
         )
 
+        # Practice bonus: passing a practice problem grants +1 FastPass once per problem.
+        try:
+            if is_practice and status and practice_problem_id and pp is not None:
+                submission_repo.award_practice_bonus(
+                    user_id=int(user_id),
+                    class_id=int(class_id),
+                    project_id=int(project.Id),
+                    practice_problem_id=int(practice_problem_id),
+                    submission_id=int(submissionId),
+                )
+        except Exception:
+            pass
+
         # Admin uploads and practice submissions should not consume charges.
         if current_user.Role != ADMIN_ROLE and not is_practice:
             submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)

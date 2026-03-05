@@ -1,0 +1,299 @@
+/* StudentPracticeSelect.scss */
+
+.student-practice-select-page {
+    width: 100%;
+  }
+  
+  /* Keep all main content aligned to the DirectoryBreadcrumbs width (95%) */
+  .practice-content {
+    width: 95%;
+    margin: 14px auto 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  /* States */
+  .state {
+    width: 100%;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    background: #ffffff;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    padding: 14px 14px;
+    font-weight: 800;
+    color: #111827;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  
+    &.state--loading {
+      background: #f9fafb;
+    }
+  
+    &.state--error {
+      border-color: #fecaca;
+      background: #fff1f2;
+      color: #991b1b;
+    }
+  
+    &.state--empty {
+      background: #f9fafb;
+      color: #374151;
+    }
+  }
+  
+  .spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid #e5e7eb;
+    border-top-color: #111827;
+    animation: spin 0.8s linear infinite;
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  
+  /* Progress card mirrors the "Project Upload" progress UI */
+  .progress-card {
+    width: 100%;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    background: #ffffff;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    padding: 12px 12px;
+  }
+  
+  .progress-card__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  
+  .progress-card__label {
+    font-size: 14px;
+    font-weight: 900;
+    color: #111827;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .progress-card__value {
+    font-weight: 900;
+    color: #111827;
+  
+    .big {
+      font-size: 26px;
+    }
+  
+    .muted {
+      font-size: 14px;
+      color: #6b7280;
+      font-weight: 800;
+    }
+  }
+  
+  /* Progress (copied style from StudentUpload) */
+  .progress {
+    margin-top: 10px;
+  }
+  
+  .progress-bar {
+    width: 100%;
+    height: 10px;
+    border-radius: 9999px;
+    background: #e5e7eb;
+    border: 1px solid #d1d5db;
+    overflow: hidden;
+  }
+  
+  .progress-bar__fill {
+    height: 100%;
+    background: #22c55e;
+    border-right: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  
+  .progress-subtle {
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #6b7280;
+  }
+  
+  /* List */
+  .practice-list {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .practice-item {
+    width: 100%;
+  }
+  
+  /* Card */
+  .practice-card {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  
+    padding: 14px 14px;
+    border-radius: 16px;
+    border: 2px solid #e5e7eb;
+    background: #ffffff;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    text-decoration: none;
+    color: inherit;
+  
+    transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+      border-color: #d1d5db;
+    }
+  
+    &:focus-visible {
+      outline: 2px solid #111;
+      outline-offset: 2px;
+    }
+  }
+  
+  .practice-card__left {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .practice-title {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  
+  .practice-kicker {
+    font-size: 12px;
+    font-weight: 900;
+    color: #374151;
+    letter-spacing: 0.2px;
+  }
+  
+  .practice-name {
+    font-size: 18px;
+    font-weight: 900;
+    color: #111827;
+  
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  
+  .practice-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  
+  /* Status chips */
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 9999px;
+    border: 1px solid #d1d5db;
+    background: #ffffff;
+    font-weight: 900;
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+  
+    svg {
+      font-size: 14px;
+    }
+  }
+  
+  .status-chip--awarded {
+    border-color: #c4b5fd;
+    background: #f5f3ff;
+    color: #4c1d95;
+  }
+  
+  .status-chip--solved {
+    border-color: #86efac;
+    background: #ecfdf5;
+    color: #065f46;
+  }
+  
+  .status-chip--unsolved {
+    border-color: #e5e7eb;
+    background: #f9fafb;
+    color: #374151;
+  }
+  
+  .hint-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 9999px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    font-weight: 900;
+    font-size: 12px;
+    line-height: 1;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+  
+  /* Right side icon */
+  .practice-card__right {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    border-radius: 9999px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #111827;
+  }
+  
+  /* Two-per-row like Classes.scss on wide screens */
+  @media (min-width: 1150px) {
+    .practice-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+  }
+  
+  @media (max-width: 720px) {
+    .practice-card {
+      padding: 12px 12px;
+    }
+  
+    .practice-name {
+      font-size: 16px;
+    }
+  
+    .progress-card__value .big {
+      font-size: 22px;
+    }
+  }

@@ -172,6 +172,20 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         this.downloadProjectGrades = this.downloadProjectGrades.bind(this)
     }
 
+    private formatDate12h(value: string): string {
+        if (!value || value === 'N/A') return 'N/A'
+        const d = new Date(value)
+        if (Number.isNaN(d.getTime())) return value
+        return new Intl.DateTimeFormat('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+        }).format(d)
+    }
+
     async downloadProjectGrades(rows: Row[]) {
         try {
             const url = `${import.meta.env.VITE_API_URL}/submissions/exportprojectgrades?project_id=${this.props.project_id}`
@@ -968,7 +982,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                         <td className="lecture-number-cell">{row.lecture_number}</td>
                                                         <td className="lab-number-cell">{row.lab_number}</td>
                                                         <td className="submissions-cell">{row.numberOfSubmissions}</td>
-                                                        <td className="date-cell">{row.date}</td>
+                                                        <td className="date-cell">{this.formatDate12h(row.date)}</td>
                                                         <td className={row.isPassing ? 'status-cell status passed' : 'status-cell status failed'}>
                                                             {row.isPassing ? 'PASSED' : 'FAILED'}
                                                         </td>

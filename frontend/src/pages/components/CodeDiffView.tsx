@@ -195,6 +195,8 @@ function renderSegs(segs: Seg[], cls: 'add-ch' | 'del-ch') {
 type DiffViewProps = {
     submissionId: number
     classId: number
+    isPractice?: boolean
+    practiceProblemId?: number | null
 
     // Optional: enable grading-like behaviors (AdminGrading uses these)
     codeSectionTitle?: string
@@ -240,6 +242,8 @@ export default function DiffView(props: DiffViewProps) {
         onActiveTestcaseChange,
         disableCopy = false,
         revealHiddenOutput = false,
+        isPractice = false,
+        practiceProblemId = null,
     } = props
 
     const internalCodeContainerRef = useRef<HTMLDivElement | null>(null)
@@ -288,6 +292,8 @@ export default function DiffView(props: DiffViewProps) {
                 action,
                 started_state: startedState,
                 switched_to: switchedTo,
+                practice: isPractice,
+                practice_problem_id: practiceProblemId,
             },
             { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
         )
@@ -305,9 +311,13 @@ export default function DiffView(props: DiffViewProps) {
         }
 
         axios
-            .get(`${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?id=${submissionId}&class_id=${classId}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
-            })
+            .get(
+                `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?id=${submissionId}&class_id=${classId}` +
+                `&practice=${isPractice ? 1 : 0}` +
+                (practiceProblemId != null ? `&practice_problem_id=${practiceProblemId}` : ``),
+                {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                })
             .then((res) => {
                 const maybe = safeJsonParse(res.data)
                 setPayload((maybe && typeof maybe === 'object' ? maybe : { results: [] }) as AnyPayload)
@@ -340,7 +350,9 @@ export default function DiffView(props: DiffViewProps) {
 
         axios
             .get(
-                `${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${submissionId}&class_id=${classId}&format=json`,
+                `${import.meta.env.VITE_API_URL}/submissions/codefinder?id=${submissionId}&class_id=${classId}&format=json` +
+                `&practice=${isPractice ? 1 : 0}` +
+                (practiceProblemId != null ? `&practice_problem_id=${practiceProblemId}` : ``),
                 { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
             )
             .then((res) => {

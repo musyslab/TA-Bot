@@ -267,10 +267,9 @@
         transform 120ms ease;
     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
     width: 80%;
-    margin-top: 15px;
     display: flex;
     justify-content: center;
-    margin: 15px auto 0;
+    margin: 15px auto 24px;
 
     &:hover {
         background: #ebd6f3; // brighter hover purple

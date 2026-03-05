@@ -74,7 +74,7 @@ class MenuComponent extends Component<MenuComponentProps> {
 
                             <a className="menu__item" href="/student/PastSubmissions">
                                 <FaClipboardList className="menu__icon" aria-hidden="true" />
-                                <span className="menu__text">Submissions</span>
+                                <span className="menu__text">Past Submissions</span>
                             </a>
                         </>
                     )}

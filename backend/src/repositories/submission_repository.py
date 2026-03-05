@@ -4,8 +4,27 @@ import os
 from src.repositories.database import db
 from .models import StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users, SubmissionManualErrors
 from sqlalchemy import desc, and_
+from sqlalchemy.exc import IntegrityError
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
+
+class PracticeBonusAwards(db.Model):
+    """
+    Idempotent record of practice-problem bonus awards.
+    One award per (UserId, PracticeProblemId).
+    """
+    __tablename__ = "PracticeBonusAwards"
+    Id = db.Column(db.Integer, primary_key=True)
+    UserId = db.Column(db.Integer, nullable=False, index=True)
+    ClassId = db.Column(db.Integer, nullable=False)
+    ProjectId = db.Column(db.Integer, nullable=False)
+    PracticeProblemId = db.Column(db.Integer, nullable=False, index=True)
+    AwardedAt = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    SubmissionId = db.Column(db.Integer, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("UserId", "PracticeProblemId", name="uq_practice_bonus_user_pp"),
+    )
 
 class SubmissionRepository():
 
@@ -211,7 +230,9 @@ class SubmissionRepository():
             int: The ID of the project associated with the submission.
         """
         submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-        return submission.Project
+        if submission is None:
+            return -1
+        return int(getattr(submission, "Project", -1) or -1)
 
     def submission_view_verification(self, user_id, submission_id) -> bool:
         submission = Submissions.query.filter(and_(Submissions.Id==submission_id,Submissions.User==user_id)).first()
@@ -734,12 +755,86 @@ class SubmissionRepository():
         charge.RedeemedTime = dt_string
         db.session.commit()
         return "ok"
+
     def add_reward_charge(self, user_id, class_id, rewardAmount):
         charge = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
         charge.RewardCharge += rewardAmount
         if charge.RewardCharge > 5:
             charge.RewardCharge = 5
         db.session.commit()
+
+    def award_practice_bonus(
+        self,
+        user_id: int,
+        class_id: int,
+        project_id: int,
+        practice_problem_id: int,
+        submission_id: int | None = None,
+    ) -> bool:
+        """
+        Award +1 FastPass (RewardCharge) once per practice problem when the student passes.
+        Returns True only if a new award was created and applied.
+        """
+        if not practice_problem_id:
+            return False
+
+        # Ensure table exists without requiring a migration step.
+        try:
+            PracticeBonusAwards.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            return False
+
+        try:
+            exists = (
+                PracticeBonusAwards.query
+                .filter(PracticeBonusAwards.UserId == int(user_id))
+                .filter(PracticeBonusAwards.PracticeProblemId == int(practice_problem_id))
+                .first()
+            )
+            if exists:
+                return False
+
+            row = PracticeBonusAwards(
+                UserId=int(user_id),
+                ClassId=int(class_id),
+                ProjectId=int(project_id),
+                PracticeProblemId=int(practice_problem_id),
+                AwardedAt=datetime.utcnow(),
+                SubmissionId=(int(submission_id) if submission_id is not None else None),
+            )
+            db.session.add(row)
+
+            # Ensure a SubmissionCharges row exists for this user/class
+            charge = (
+                SubmissionCharges.query
+                .filter(and_(
+                    SubmissionCharges.UserId == int(user_id),
+                    SubmissionCharges.ClassId == int(class_id),
+                ))
+                .first()
+            )
+            if charge is None:
+                charge = SubmissionCharges(
+                    UserId=int(user_id),
+                    ClassId=int(class_id),
+                    BaseCharge=3,
+                    RewardCharge=0,
+                )
+                db.session.add(charge)
+                db.session.flush()
+
+            # Apply +1 FastPass (cap at 5 to match existing behavior)
+            charge.RewardCharge = min(5, int(charge.RewardCharge or 0) + 1)
+
+            db.session.commit()
+            return True
+        except IntegrityError:
+            db.session.rollback()
+            return False
+        except Exception:
+            db.session.rollback()
+            return False
+
     def consume_reward_charge(self, user_id, class_id, project):
         dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
         try:

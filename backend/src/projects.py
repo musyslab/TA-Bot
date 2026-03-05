@@ -12,14 +12,12 @@ from typing import List
 import zipfile
 import stat
 import sys
-
 import requests
-
 from subprocess import Popen
 from src.repositories.class_repository import ClassRepository
 from src.repositories.user_repository import UserRepository
-from src.repositories.submission_repository import SubmissionRepository
-from src.repositories.models import Submissions
+from src.repositories.submission_repository import SubmissionRepository, PracticeBonusAwards
+from src.repositories.models import Submissions, Projects, PracticeProblems, Classes
 from flask import Blueprint, Response, send_file, current_app
 from flask import make_response
 from http import HTTPStatus
@@ -45,6 +43,52 @@ projects_api = Blueprint('projects_api', __name__)
 
 ALLOWED_SOURCE_EXTS = {'.py', '.c', '.java', '.rkt'}
 TS_DIR_RE = re.compile(r"^\d{8}_\d{6}$")
+
+def parse_int(v, default: int = 0) -> int:
+    try:
+        return int(str(v).strip())
+    except Exception:
+        return default
+
+def parse_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    s = str(v or "").strip().lower()
+    return s in ("1", "true", "yes", "y", "on")
+
+def opt_int(raw) -> int | None:
+    s = str(raw or "").strip()
+    return int(s) if s.isdigit() else None
+
+def json_list_field(raw: str) -> list[str]:
+    """
+    Accepts:
+      - '["a","b"]'
+      - 'a'
+      - '' / None
+    Returns list[str] of basenames.
+    """
+    try:
+        s = (raw or "").strip()
+        if not s:
+            return []
+        vals = json.loads(s) if s.startswith("[") else [s]
+        return [os.path.basename(v) for v in (vals or []) if v]
+    except Exception:
+        return []
+
+def count_practice_unique_users(project_id: int) -> int:
+    try:
+        if hasattr(Submissions, "IsPractice"):
+            return int(
+                db.session.query(func.count(func.distinct(Submissions.User)))
+                .filter(Submissions.Project == int(project_id), Submissions.IsPractice == True)
+                .scalar()
+                or 0
+            )
+    except Exception:
+        pass
+    return 0
 
 def project_root() -> str:
     return "/tabot-files/project-files"
@@ -121,18 +165,7 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
 
-        # Total PRACTICE submissions for this project (all practice problems combined)
-        practice_total = 0
-        try:
-            if hasattr(Submissions, "IsPractice"):
-                practice_total = (
-                    db.session.query(func.count(Submissions.Id))
-                    .filter(Submissions.Project == proj.Id, Submissions.IsPractice == True)
-                    .scalar()
-                    or 0
-                )
-        except Exception:
-            practice_total = 0
+        practice_total = count_practice_unique_users(int(proj.Id))
 
         new_projects.append(json.dumps({
             "Id": proj.Id,
@@ -153,11 +186,8 @@ def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Cont
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
     data = request.get_json(silent=True) or {}
-    try:
-        pid = int(str(data.get('project_id', 0)) or 0)
-    except ValueError:
-        pid = 0
-    enabled = bool(data.get('enabled', False))
+    pid = parse_int(data.get("project_id", 0), 0)
+    enabled = parse_bool(data.get("enabled", False))
 
     if pid <= 0:
         return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
@@ -174,8 +204,8 @@ def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Cont
 def list_practice_problems(project_repo: ProjectRepository = Provide[Container.project_repo]):
     if current_user.Role != ADMIN_ROLE:
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
-    pid = (request.args.get("project_id", "") or "").strip()
-    if not pid.isdigit():
+    pid = parse_int(request.args.get("project_id", ""), 0)
+    if pid <= 0:
         return jsonify({'problems': []})
     rows = project_repo.list_practice_problems(int(pid))
     return jsonify({
@@ -198,10 +228,9 @@ def list_practice_problems_student(project_repo: ProjectRepository = Provide[Con
     Student-safe practice problem list.
     Returns only enabled practice problems, and only if practice problems are enabled for the project.
     """
-    pid = (request.args.get("project_id", "") or "").strip()
-    if not pid.isdigit():
+    project_id = parse_int(request.args.get("project_id", ""), 0)
+    if project_id <= 0:
         return jsonify({'problems': []})
-    project_id = int(pid)
 
     try:
         if not bool(project_repo.get_practice_problems_enabled(project_id)):
@@ -210,6 +239,44 @@ def list_practice_problems_student(project_repo: ProjectRepository = Provide[Con
         return jsonify({'problems': []})
 
     rows = project_repo.list_practice_problems(project_id)
+
+    # solved: student has at least one passing submission for that practice problem
+    solved_ids = set()
+    try:
+        if hasattr(Submissions, "IsPractice") and hasattr(Submissions, "PracticeProblemId"):
+            solved_rows = (
+                db.session.query(Submissions.PracticeProblemId)
+                .filter(
+                    Submissions.Project == project_id,
+                    Submissions.User == current_user.Id,
+                    Submissions.IsPractice == True,
+                    Submissions.IsPassing == True,
+                    Submissions.PracticeProblemId.isnot(None),
+                )
+                .distinct()
+                .all()
+            )
+            solved_ids = {int(r[0]) for r in (solved_rows or []) if r and r[0] is not None}
+    except Exception:
+        solved_ids = set()
+
+    # rewarded: bonus charge already granted for that practice problem
+    rewarded_ids = set()
+    try:
+        PracticeBonusAwards.__table__.create(db.engine, checkfirst=True)
+        rewarded_rows = (
+            db.session.query(PracticeBonusAwards.PracticeProblemId)
+            .filter(
+                PracticeBonusAwards.UserId == int(current_user.Id),
+                PracticeBonusAwards.ProjectId == int(project_id),
+            )
+            .distinct()
+            .all()
+        )
+        rewarded_ids = {int(r[0]) for r in (rewarded_rows or []) if r and r[0] is not None}
+    except Exception:
+        rewarded_ids = set()
+
     out = []
     for i, r in enumerate(rows or []):
         enabled = bool(getattr(r, "Enabled", True))
@@ -220,6 +287,8 @@ def list_practice_problems_student(project_repo: ProjectRepository = Provide[Con
             'number': int(getattr(r, "PracticeNumber", i + 1)),
             'name': (getattr(r, "Name", "") or f"Practice Problem {int(getattr(r, 'PracticeNumber', i + 1))}"),
             'enabled': True,
+            'solved': (int(r.Id) in solved_ids),
+            'rewarded': (int(r.Id) in rewarded_ids),
         })
 
     return jsonify({'problems': out})
@@ -231,10 +300,9 @@ def create_practice_problem(project_repo: ProjectRepository = Provide[Container.
     if current_user.Role != ADMIN_ROLE:
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
     data = request.get_json(silent=True) or {}
-    try:
-        pid = int(str(data.get('project_id', 0)) or 0)
-    except ValueError:
-        pid = 0
+
+    pid = parse_int(data.get("project_id", 0), 0)
+
     name = str(data.get('name', '') or '').strip()
     if pid <= 0:
         return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
@@ -250,13 +318,11 @@ def list_solution_files(project_repo: ProjectRepository = Provide[Container.proj
     if current_user.Role != ADMIN_ROLE:
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
-    pid_str = (request.args.get("id", "") or "").strip()
-    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
-    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+    pid = parse_int(request.args.get("id", ""), 0)
+    ppid = opt_int(request.args.get("practice_problem_id", ""))
 
-    if not pid_str.isdigit():
+    if pid <= 0:
         return make_response([], HTTPStatus.OK)
-    pid = int(pid_str)
 
     p = project_repo.get_project_path(pid, practice_problem_id=ppid)
     if not p:
@@ -368,6 +434,149 @@ def get_projects_by_user(project_repo: ProjectRepository = Provide[Container.pro
             student_submissions[project.Name]=[sub.Id, 0, sub.Time.strftime("%x %X"), class_name, str(project.ClassId)]
     return jsonify(student_submissions)
 
+@projects_api.route('/past-submissions', methods=['GET'])
+@jwt_required()
+def past_submissions():
+    """
+    Student past submissions grouped by project.
+    Returns:
+      [
+        {
+          projectId, projectName, classId, className, start, end,
+          main: {submissionId,time,passed} | null,
+          practices: [{practiceProblemId,number,name,submissionId,time,passed}, ...]
+        }, ...
+      ]
+    """
+    uid = int(getattr(current_user, "Id", 0) or 0)
+    if uid <= 0:
+        return jsonify([])
+
+    # Projects where this student has ANY submissions (main or practice)
+    proj_ids = [
+        int(r[0])
+        for r in (
+            db.session.query(Submissions.Project)
+            .filter(Submissions.User == uid)
+            .distinct()
+            .all()
+        )
+        if r and r[0] is not None
+    ]
+    if not proj_ids:
+        return jsonify([])
+
+    projects = (
+        Projects.query
+        .filter(Projects.Id.in_(proj_ids))
+        .order_by(Projects.Start.asc(), Projects.Id.asc())
+        .all()
+    )
+
+    class_ids = {int(getattr(p, "ClassId", 0) or 0) for p in (projects or [])}
+    class_ids.discard(0)
+    class_name_by_id = {}
+    if class_ids:
+        for c in Classes.query.filter(Classes.Id.in_(list(class_ids))).all():
+            class_name_by_id[int(getattr(c, "Id", 0) or 0)] = str(getattr(c, "Name", "") or "")
+
+    def iso(val):
+        if val is None:
+            return ""
+        try:
+            return val.isoformat()
+        except Exception:
+            return str(val)
+
+    # Most recent MAIN submission per project
+    main_by_project = {}
+    main_rows = (
+        Submissions.query
+        .filter(
+            Submissions.User == uid,
+            Submissions.Project.in_(proj_ids),
+            Submissions.IsPractice == False,
+        )
+        .order_by(Submissions.Project.asc(), Submissions.Time.desc())
+        .all()
+    )
+    for s in (main_rows or []):
+        pid = int(getattr(s, "Project", 0) or 0)
+        if pid and pid not in main_by_project:
+            main_by_project[pid] = s
+
+    # Most recent PRACTICE submission per (project, practice_problem_id)
+    latest_practice = {}
+    pp_ids = set()
+    practice_rows = (
+        Submissions.query
+        .filter(
+            Submissions.User == uid,
+            Submissions.Project.in_(proj_ids),
+            Submissions.IsPractice == True,
+        )
+        .filter(Submissions.PracticeProblemId.isnot(None))
+        .order_by(Submissions.Project.asc(), Submissions.PracticeProblemId.asc(), Submissions.Time.desc())
+        .all()
+    )
+    for s in (practice_rows or []):
+        pid = int(getattr(s, "Project", 0) or 0)
+        ppid = getattr(s, "PracticeProblemId", None)
+        if not pid or ppid is None:
+            continue
+        ppid_int = int(ppid)
+        key = (pid, ppid_int)
+        if key not in latest_practice:
+            latest_practice[key] = s
+            pp_ids.add(ppid_int)
+
+    pp_map = {}
+    if pp_ids:
+        for pp in PracticeProblems.query.filter(PracticeProblems.Id.in_(list(pp_ids))).all():
+            pp_map[int(getattr(pp, "Id", 0) or 0)] = pp
+
+    practices_by_project = defaultdict(list)
+    for (pid, ppid), s in latest_practice.items():
+        pp = pp_map.get(ppid)
+        number = int(getattr(pp, "PracticeNumber", 0) or 0) if pp else 0
+        name = str(getattr(pp, "Name", "") or "") if pp else ""
+        if not name:
+            name = f"Practice Problem {number}" if number else "Practice Problem"
+        practices_by_project[pid].append({
+            "practiceProblemId": int(ppid),
+            "number": int(number),
+            "name": name,
+            "submissionId": int(getattr(s, "Id", 0) or 0),
+            "time": iso(getattr(s, "Time", "")),
+            "passed": bool(getattr(s, "IsPassing", False)),
+        })
+    for pid in practices_by_project:
+        practices_by_project[pid].sort(
+            key=lambda x: (int(x.get("number", 0) or 0), int(x.get("practiceProblemId", 0) or 0))
+        )
+
+    out = []
+    for p in (projects or []):
+        pid = int(getattr(p, "Id", 0) or 0)
+        cid = int(getattr(p, "ClassId", 0) or 0)
+        main_s = main_by_project.get(pid)
+        out.append({
+            "projectId": pid,
+            "projectName": str(getattr(p, "Name", "") or ""),
+            "classId": str(cid),
+            "className": class_name_by_id.get(cid, ""),
+            "start": iso(getattr(p, "Start", "")),
+            "end": iso(getattr(p, "End", "")),
+            "main": None if not main_s else {
+                "submissionId": int(getattr(main_s, "Id", 0) or 0),
+                "time": iso(getattr(main_s, "Time", "")),
+                "passed": bool(getattr(main_s, "IsPassing", False)),
+            },
+            "practices": practices_by_project.get(pid, []),
+        })
+
+    return jsonify(out)
+
 @projects_api.route('/create_project', methods=['POST'])
 @jwt_required()
 @inject
@@ -397,8 +606,7 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     end_date = request.form.get('end_date', '')
     language = request.form.get('language', '')
     class_id = request.form.get('class_id', '')
-    practice_raw = (request.form.get('practice_problems_enabled', '') or '').strip().lower()
-    practice_enabled = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    practice_enabled = parse_bool(request.form.get("practice_problems_enabled", ""))
 
     if name == '' or start_date == '' or end_date == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
@@ -463,8 +671,7 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     start_date = request.form.get('start_date', '')
     end_date = request.form.get('end_date', '')
     language = request.form.get('language', '')
-    practice_raw = (request.form.get('practice_problems_enabled', '') or '').strip().lower()
-    practice_enabled = practice_raw in ('1', 'true', 'yes', 'y', 'on')
+    practice_enabled = parse_bool(request.form.get("practice_problems_enabled", ""))
 
     if name == '' or start_date == '' or end_date == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
@@ -808,12 +1015,11 @@ def list_source_files(project_repo: ProjectRepository = Provide[Container.projec
     if current_user.Role != ADMIN_ROLE:
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
-    pid = request.args.get('project_id', '')
-    if not pid:
+    pid = parse_int(request.args.get("project_id", ""), 0)
+    if pid <= 0:
         return make_response({'message': 'Missing project_id'}, HTTPStatus.BAD_REQUEST)
 
-    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
-    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+    ppid = opt_int(request.args.get("practice_problem_id", ""))
     root = project_repo.get_project_path(int(pid), practice_problem_id=ppid)
 
     if not root or not os.path.exists(root):
@@ -842,9 +1048,9 @@ def get_source_file(project_repo: ProjectRepository = Provide[Container.project_
     if current_user.Role != ADMIN_ROLE:
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
-    pid = request.args.get('project_id', '')
+    pid = parse_int(request.args.get("project_id", ""), 0)
     relpath = request.args.get('relpath', '')
-    if not pid:
+    if pid <= 0:
         return make_response({'message': 'Missing project_id'}, HTTPStatus.BAD_REQUEST)
 
     ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
@@ -899,10 +1105,7 @@ def get_project(project_repo: ProjectRepository = Provide[Container.project_repo
     if not pid_raw.isdigit():
         return make_response(json.dumps({}), HTTPStatus.OK)
     pid = int(pid_raw)
-
-    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
-    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
-
+    ppid = opt_int(request.args.get("practice_problem_id", ""))
     project_info = project_repo.get_project(pid, practice_problem_id=ppid)
 
     return make_response(json.dumps(project_info), HTTPStatus.OK)
@@ -917,11 +1120,10 @@ def get_testcases(project_repo: ProjectRepository = Provide[Container.project_re
         }
         return make_response(message, HTTPStatus.UNAUTHORIZED)
 
-    project_id = request.args.get('id')
-    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
-    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+    project_id = parse_int(request.args.get("id", ""), 0)
+    ppid = opt_int(request.args.get("practice_problem_id", ""))
     testcases = project_repo.get_testcases(int(project_id), practice_problem_id=ppid)
-
+ 
     return make_response(json.dumps(testcases), HTTPStatus.OK)
 
 
@@ -937,10 +1139,7 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
 
     file = request.files['file']
     project_id = request.form["project_id"]
-    practice_raw = (request.form.get('practice', '') or '').strip().lower()
-    practice = practice_raw in ('1', 'true', 'yes', 'y', 'on')
-    ppid_raw = (request.form.get('practice_problem_id', '') or '').strip()
-    ppid = int(ppid_raw) if ppid_raw.isdigit() else None
+    ppid = opt_int(request.form.get("practice_problem_id", ""))
 
     # Require a solution root for whichever scope we're writing testcases into (main or practice)
     sol = project_repo.get_project_path(int(project_id), practice_problem_id=ppid)
@@ -995,7 +1194,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     project_id = request.form.get('project_id', '').strip()
     description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
-    hidden_raw = request.form.get('hidden', '').strip()
+
     ppid_raw = request.form.get('practice_problem_id', '').strip()
     
     if id_val == '' or name == '' or input_data == '' or project_id == '' or description == '' or class_id == '':
@@ -1009,11 +1208,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     except ValueError:
         return make_response("Invalid numeric id", HTTPStatus.BAD_REQUEST)
 
-    def parse_hidden(v: str) -> bool:
-        s = (v or "").strip().lower()
-        return s in ("1", "true", "yes", "y", "on")
-
-    hidden = parse_hidden(hidden_raw)
+    hidden = parse_bool(request.form.get("hidden", ""))
     practice_problem_id = int(ppid_raw) if (ppid_raw or "").isdigit() else None
 
     # Do not allow testcase edits/creates unless solution files exist (main or practice)
@@ -1083,18 +1278,7 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
 
-        # Total PRACTICE submissions for this project (all practice problems combined)
-        practice_total = 0
-        try:
-            if hasattr(Submissions, "IsPractice"):
-                practice_total = (
-                    db.session.query(func.count(Submissions.Id))
-                    .filter(Submissions.Project == proj.Id, Submissions.IsPractice == True)
-                    .scalar()
-                    or 0
-                )
-        except Exception:
-            practice_total = 0
+        practice_total = count_practice_unique_users(int(proj.Id))
 
         new_projects.append(json.dumps({
             "Id": proj.Id,
@@ -1109,7 +1293,6 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
 
 @projects_api.route('/practice_submission_counts', methods=['GET'])
 @jwt_required()
-@inject
 def practice_submission_counts():
     """
     Returns practice submission counts per practice_problem_id (and total) for a project.
@@ -1119,10 +1302,10 @@ def practice_submission_counts():
     if current_user.Role != ADMIN_ROLE:
         return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
 
-    pid_raw = (request.args.get('project_id', '') or '').strip()
-    if not pid_raw.isdigit():
+    pid = parse_int(request.args.get("project_id", ""), 0)
+    if pid <= 0:
         return jsonify({'total': 0, 'by_problem': {}})
-    pid = int(pid_raw)
+    pid = int(pid)
 
     if not hasattr(Submissions, "IsPractice"):
         return jsonify({'total': 0, 'by_problem': {}})
@@ -1130,17 +1313,16 @@ def practice_submission_counts():
     total = 0
     by_problem = {}
     try:
-        total = (
-            db.session.query(func.count(Submissions.Id))
-            .filter(Submissions.Project == pid, Submissions.IsPractice == True)
-            .scalar()
-            or 0
-        )
+        total = count_practice_unique_users(int(pid))
 
         # If your Submissions model tracks which practice problem was submitted:
         if hasattr(Submissions, "PracticeProblemId"):
             rows = (
-                db.session.query(Submissions.PracticeProblemId, func.count(Submissions.Id))
+                db.session.query(
+                    Submissions.PracticeProblemId,
+                    func.count(func.distinct(Submissions.User))
+                )
+
                 .filter(Submissions.Project == pid, Submissions.IsPractice == True)
                 .group_by(Submissions.PracticeProblemId)
                 .all()

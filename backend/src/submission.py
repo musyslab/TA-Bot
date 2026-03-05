@@ -60,15 +60,157 @@ ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
 submission_api = Blueprint('submission_api', __name__)
 
-def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
-    # New grader writes JSON directly (testcases.json). If so, pass it through.
+def parse_int(v, default: int = -1) -> int:
     try:
-        if str(file_path or "").lower().endswith(".json"):
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                obj = json.load(f) or {}
-            return json.dumps(obj, sort_keys=True, indent=4)
+        return int(str(v).strip())
     except Exception:
-        # Fall back to TAP parsing below for legacy outputs
+        return default
+
+def parse_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    s = str(v or "").strip().lower()
+    return s in ("1", "true", "yes", "y", "on")
+
+def opt_int(raw) -> int | None:
+    s = str(raw or "").strip()
+    return int(s) if s.isdigit() else None
+
+def practice_params_from_args() -> tuple[bool, int | None]:
+    want_practice = parse_bool(request.args.get("practice", ""))
+    ppid = opt_int(request.args.get("practice_problem_id", ""))
+    return want_practice, ppid
+
+def latest_practice_submission(project_id: int, user_id: int, practice_problem_id: int | None):
+    try:
+        q = (
+            Submissions.query
+            .filter(
+                Submissions.Project == int(project_id),
+                Submissions.User == int(user_id),
+                Submissions.IsPractice == True,
+            )
+        )
+        if practice_problem_id is not None and hasattr(Submissions, "PracticeProblemId"):
+            q = q.filter(Submissions.PracticeProblemId == int(practice_problem_id))
+        return q.order_by(Submissions.Time.desc()).first()
+    except Exception:
+        return None
+
+def resolve_submission_for_current_user(
+    submission_repo: SubmissionRepository,
+    project_repo: ProjectRepository,
+    submission_id: int,
+    class_id: int,
+    want_practice: bool,
+    ppid: int | None,
+):
+    """
+    Resolves:
+      - real submission id -> that submission
+      - otherwise treats submission_id as project id and returns latest (main/practice) for current_user
+      - if submission_id is EMPTY, resolves current project by class_id and returns latest main submission
+    Returns: (submission | None, project_id:int, practice_problem_id_for_hidden_flags:int|None)
+    """
+    project_id = -1
+    sub = None
+    practice_problem_id = None
+
+    if submission_id != EMPTY and submission_id != -1:
+        sub = submission_repo.get_submission_by_submission_id(int(submission_id))
+        if sub is None:
+            project_id = int(submission_id)
+            if want_practice:
+                sub = latest_practice_submission(project_id, int(current_user.Id), ppid)
+            else:
+                sub = submission_repo.get_submission_by_user_and_projectid(int(current_user.Id), int(project_id))
+        if sub is None:
+            return None, int(project_id), None
+        project_id = int(getattr(sub, "Project", -1) or -1)
+    else:
+        proj = project_repo.get_current_project_by_class(int(class_id))
+        if proj is None:
+            return None, -1, None
+        project_id = int(getattr(proj, "Id", -1) or -1)
+        sub = submission_repo.get_submission_by_user_and_projectid(int(current_user.Id), int(project_id))
+        if sub is None:
+            return None, int(project_id), None
+
+    try:
+        if bool(getattr(sub, "IsPractice", False)) and getattr(sub, "PracticeProblemId", None) is not None:
+            practice_problem_id = int(getattr(sub, "PracticeProblemId"))
+    except Exception:
+        practice_problem_id = None
+
+    return sub, int(project_id), practice_problem_id
+
+def apply_hidden_flags_to_results(output_json: str, project_id: int, practice_problem_id: int | None) -> str:
+    try:
+        obj = json.loads(output_json) if isinstance(output_json, str) else (output_json or {})
+        results = obj.get("results", None) if isinstance(obj, dict) else None
+        if not isinstance(results, list) or int(project_id) <= 0:
+            return output_json
+
+        q = Testcases.query.filter(Testcases.ProjectId == int(project_id))
+        if practice_problem_id is not None:
+            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        else:
+            q = q.filter(Testcases.PracticeProblemId.is_(None))
+        tcs = q.all()
+        hidden_by_name = {
+            (str(getattr(tc, "Name", "") or "").strip().lower()): bool(getattr(tc, "Hidden", False))
+            for tc in (tcs or [])
+        }
+
+        for r in results:
+            if not isinstance(r, dict):
+                continue
+            name = None
+            if isinstance(r.get("name"), str):
+                name = r.get("name")
+            elif isinstance(r.get("test"), dict) and isinstance(r["test"].get("name"), str):
+                name = r["test"]["name"]
+
+            key = (str(name or "").strip().lower())
+            is_hidden = hidden_by_name.get(key, False)
+            r["hidden"] = is_hidden
+            if isinstance(r.get("test"), dict):
+                r["test"]["hidden"] = is_hidden
+
+        return json.dumps(obj, sort_keys=True, indent=4)
+    except Exception:
+        return output_json
+
+def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
+    # New grader may write JSON directly. Accept either:
+    #  1) a JSON file path
+    #  2) a non-.json file whose CONTENTS are JSON
+    #  3) (rare) a raw JSON string mistakenly passed as "file_path"
+    try:
+        s = str(file_path or "").strip()
+        if not s:
+            return json.dumps({"results": []}, sort_keys=True, indent=4)
+
+        # Raw JSON string fallback
+        if (s.startswith("{") or s.startswith("[")) and "\n" in s:
+            try:
+                obj = json.loads(s) or {}
+                return json.dumps(obj, sort_keys=True, indent=4)
+            except Exception:
+                pass
+
+        # If it's a real file, try parsing its contents as JSON first (regardless of extension).
+        if os.path.exists(s) and os.path.isfile(s):
+            try:
+                with open(s, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read() or ""
+                raw_strip = raw.strip()
+                if raw_strip.startswith("{") or raw_strip.startswith("["):
+                    obj = json.loads(raw_strip) or {}
+                    return json.dumps(obj, sort_keys=True, indent=4)
+            except Exception:
+                pass
+    except Exception:
         pass
 
     parser = Parser()
@@ -130,49 +272,28 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
 @jwt_required()
 @inject
 def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo:  ProjectRepository = Provide[Container.project_repo]):
-    class_id = int(request.args.get("class_id"))
-    submission_id = int(request.args.get("id"))
-    projectid = -1
-    submission = None
-    if submission_id != -1:
-        projectid = submission_repo.get_project_by_submission_id(submission_id)
-        submission = submission_repo.get_submission_by_submission_id(submission_id)
-    else:
-        projectid = project_repo.get_current_project_by_class(class_id).Id
-        submission = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid)
-        current_level=submission_repo.get_current_level(submission.Id,current_user.Id)
+    class_id = parse_int(request.args.get("class_id", "-1"), -1)
+    submission_id = parse_int(request.args.get("id", "-1"), -1)
+    want_practice, ppid_qs = practice_params_from_args()
+
+    submission, projectid, practice_problem_id = resolve_submission_for_current_user(
+        submission_repo,
+        project_repo,
+        submission_id,
+        class_id,
+        want_practice,
+        ppid_qs,
+    )
+    if submission is None:
+        return make_response(json.dumps({"results": []}), HTTPStatus.OK)
+
+    if current_user.Role != ADMIN_ROLE:
+        real_sub_id = int(getattr(submission, "Id", -1) or -1)
+        if real_sub_id <= 0 or not submission_repo.submission_view_verification(int(current_user.Id), real_sub_id):
+            return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+   
     output = convert_tap_to_json(submission.OutputFilepath, current_user.Role, 0, False)
-    # Attach hidden flags from DB Testcases table (source of truth)
-    try:
-        obj = json.loads(output) if isinstance(output, str) else (output or {})
-        results = obj.get("results", None) if isinstance(obj, dict) else None
-        if isinstance(results, list) and int(projectid) != -1:
-            tcs = Testcases.query.filter(Testcases.ProjectId == int(projectid)).all()
-            hidden_by_name = {
-                (str(getattr(tc, "Name", "") or "").strip().lower()): bool(getattr(tc, "Hidden", False))
-                for tc in (tcs or [])
-            }
-
-            for r in results:
-                if not isinstance(r, dict):
-                    continue
-                name = None
-                if isinstance(r.get("name"), str):
-                    name = r.get("name")
-                elif isinstance(r.get("test"), dict) and isinstance(r["test"].get("name"), str):
-                    name = r["test"]["name"]
-
-                key = (str(name or "").strip().lower())
-                is_hidden = hidden_by_name.get(key, False)
-
-                # New grader/UI reads r.hidden; legacy reads r.test.hidden
-                r["hidden"] = is_hidden
-                if isinstance(r.get("test"), dict):
-                    r["test"]["hidden"] = is_hidden
-
-            output = json.dumps(obj, sort_keys=True, indent=4)
-    except Exception:
-        pass
+    output = apply_hidden_flags_to_results(output, int(projectid), practice_problem_id)
 
     return make_response(output, HTTPStatus.OK)
 
@@ -180,19 +301,39 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
 @jwt_required()
 @inject
 def codefinder(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    submissionid = int(request.args.get("id"))
-    class_id = int(request.args.get("class_id"))
+    submissionid = parse_int(request.args.get("id", "-1"), -1)
+    class_id = parse_int(request.args.get("class_id", "-1"), -1)
     fmt = (request.args.get("format", "") or "").strip().lower()
     want_json = fmt in ("json", "view", "preview")
+
+    want_practice, ppid = practice_params_from_args()
+
     code_output = ""
-    if submissionid != EMPTY and (current_user.Role == ADMIN_ROLE or submission_repo.submission_view_verification(current_user.Id,submissionid)):
-        code_output = submission_repo.get_code_path_by_submission_id(submissionid)
+    if submissionid != EMPTY:
+        sub = submission_repo.get_submission_by_submission_id(submissionid)
+        if sub is not None and (current_user.Role == ADMIN_ROLE or submission_repo.submission_view_verification(current_user.Id, submissionid)):
+            code_output = submission_repo.get_code_path_by_submission_id(submissionid)
+        else:
+            resolved, _, _ = resolve_submission_for_current_user(
+                submission_repo,
+                project_repo,
+                int(submissionid),
+                int(class_id),
+                bool(want_practice),
+                ppid,
+            )
+            code_output = getattr(resolved, "CodeFilepath", "") if resolved else ""
     else:
         projectid = project_repo.get_current_project_by_class(class_id).Id
         code_output = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid).CodeFilepath
     # JSON preview mode (used by CodePage) so the UI can render readable source
     if want_json:
         files_payload = []
+        if not code_output:
+            resp = make_response(json.dumps({"files": []}), HTTPStatus.OK)
+            resp.headers["Content-Type"] = "application/json; charset=utf-8"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
         if not os.path.isdir(code_output):
             with open(code_output, 'r', encoding='utf-8', errors='replace') as f:
                 files_payload.append({"name": os.path.basename(code_output), "content": f.read()})
