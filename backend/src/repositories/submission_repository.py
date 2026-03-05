@@ -662,6 +662,14 @@ class SubmissionRepository():
             db.session.add(charge)
             db.session.commit()
 
+        # Practice submissions are always free (do not consume base or reward charges).
+        try:
+            sub = Submissions.query.filter(Submissions.Id == submission_id).first()
+            if sub is not None and bool(getattr(sub, "IsPractice", False)):
+                return "ok"
+        except Exception:
+            pass
+
         submission_charge = None
 
         # Determine if a user is in an active office hour session; if so, do not charge the student.

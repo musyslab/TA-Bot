@@ -302,7 +302,9 @@ def file_upload(
             practice_problem_id=(practice_problem_id if is_practice else None),
         )
 
-        submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
+        # Admin uploads and practice submissions should not consume charges.
+        if current_user.Role != ADMIN_ROLE and not is_practice:
+            submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
 
         message = {
             'message': 'Success',

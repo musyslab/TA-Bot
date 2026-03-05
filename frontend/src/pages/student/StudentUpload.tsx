@@ -427,6 +427,12 @@ const StudentUpload = () => {
   }
 
   function consumeRewardCharge() {
+
+    if (isPractice) {
+      // Practice submissions are free; don't allow reserving a FastPass here.
+      return
+    }
+
     if (RewardCharge === 0) {
       alert("You don't have any reward charges to use")
       return
@@ -663,7 +669,7 @@ const StudentUpload = () => {
               <button
                 type="button"
                 onClick={consumeRewardCharge}
-                disabled={RewardCharge <= 0}
+                disabled={isPractice || RewardCharge <= 0}
                 className="secondary"
                 title="Use one FastPass charge to submit immediately"
               >
@@ -828,33 +834,6 @@ const StudentUpload = () => {
                     When the recharge timer finishes, Energy refills to <b>3</b> all at once.
                   </li>
                 </ul>
-              </div>
-            )}
-
-            {!isPractice && (
-              <div className="status-card">
-                <div className="status-card__top">
-                  <div className="status-card__label">
-                    <FaGift aria-hidden="true" /> FastPass charges
-                  </div>
-                  <div className="status-card__value">
-                    <span className="big">{RewardCharge}</span>
-                  </div>
-                </div>
-
-                <div className="dots-row" aria-label="FastPass charge dots">
-                  {[1, 2, 3, 4, 5].map((level) => (
-                    <div key={level} className={`dot purple ${RewardCharge >= level ? 'filled' : ''}`} />
-                  ))}
-                </div>
-
-                <div className="explain">
-                  <p>
-                    FastPass lets you submit even when Energy is 0. Tap <b>Use FastPass</b> on the left to spend
-                    one.
-                  </p>
-                  <p>You can earn FastPass by attending office hours, and by solving practice problems.</p>
-                </div>
               </div>
             )}
 
