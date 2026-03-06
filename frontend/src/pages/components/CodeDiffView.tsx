@@ -26,6 +26,8 @@ function ensurePrismLangsLoaded() {
 }
 
 type DiffMode = 'short' | 'long'
+type DiffLayout = 'stacked' | 'side-by-side'
+type UiLogAction = 'Diff Finder' | 'Diff Mode' | 'Diff Layout'
 
 type NewJsonResult = {
     name: string
@@ -76,7 +78,27 @@ type CodeFile = {
 
 type Seg = { text: string; changed: boolean }
 
+type DiffCellKind = 'add' | 'del' | 'ctx' | 'meta' | 'add-header' | 'del-header' | 'empty'
+
+type SideBySideRow = {
+    key: string
+    leftText: string
+    rightText: string
+    leftKind: DiffCellKind
+    rightKind: DiffCellKind
+    leftSegs?: Seg[]
+    rightSegs?: Seg[]
+}
+
 const MAX_CHANGE_RATIO_FOR_INTRA = 0.7
+
+function diffModeStateLabel(mode: DiffMode) {
+    return mode === 'short' ? 'Short' : 'Long'
+}
+
+function diffLayoutStateLabel(layout: DiffLayout) {
+    return layout === 'side-by-side' ? 'Side by Side' : 'Vertical'
+}
 
 function normalizeNewlines(text: string) {
     return (text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
@@ -249,6 +271,11 @@ export default function DiffView(props: DiffViewProps) {
     const internalCodeContainerRef = useRef<HTMLDivElement | null>(null)
     const effectiveCodeContainerRef = codeContainerRef ?? internalCodeContainerRef
 
+    const sideBySideLeftRef = useRef<HTMLDivElement | null>(null)
+    const sideBySideRightRef = useRef<HTMLDivElement | null>(null)
+    const sideBySideBarRef = useRef<HTMLDivElement | null>(null)
+    const syncingSideScrollRef = useRef(false)
+
     const copyBlockHandlers = disableCopy
         ? {
             onCopy: (e: React.ClipboardEvent) => e.preventDefault(),
@@ -270,6 +297,8 @@ export default function DiffView(props: DiffViewProps) {
 
     const [selectedDiffId, setSelectedDiffId] = useState<string | null>(null)
     const [diffMode, setDiffMode] = useState<DiffMode>('short')
+    const [diffLayout, setDiffLayout] = useState<DiffLayout>('stacked')
+    const [sideBySideBarInnerWidth, setSideBySideBarInnerWidth] = useState<number>(0)
 
     // Intra-line highlight toggle
     const initialIntraRef = useRef<boolean>(Math.random() < 0.5)
@@ -279,10 +308,12 @@ export default function DiffView(props: DiffViewProps) {
     const initLogKeyRef = useRef<string | null>(null)
 
     const logUiClick = (
-        action: 'Diff Finder' | 'Diff Mode',
+        action: UiLogAction,
         startedState?: boolean,
-        switchedTo?: boolean
+        previousStateLabel?: string,
+        nextStateLabel?: string
     ) => {
+        const shouldLogStarted = action === 'Diff Finder'
         if (submissionId < 0 || classId < 0) return
         axios.post(
             `${import.meta.env.VITE_API_URL}/submissions/log_ui`,
@@ -290,13 +321,59 @@ export default function DiffView(props: DiffViewProps) {
                 id: submissionId,
                 class_id: classId,
                 action,
-                started_state: startedState,
-                switched_to: switchedTo,
+                started_state: shouldLogStarted ? startedState : undefined,
+                previous_state_label: previousStateLabel,
+                next_state_label: nextStateLabel,
                 practice: isPractice,
                 practice_problem_id: practiceProblemId,
             },
             { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
         )
+    }
+
+    const syncSideBySideScroll = (source: 'left' | 'right' | 'bar') => {
+        if (syncingSideScrollRef.current) return
+
+        const left = sideBySideLeftRef.current
+        const right = sideBySideRightRef.current
+        const bar = sideBySideBarRef.current
+
+        if (!left || !right || !bar) return
+
+        syncingSideScrollRef.current = true
+
+        if (source === 'bar') {
+            const nextScrollLeft = bar.scrollLeft
+            left.scrollLeft = nextScrollLeft
+            right.scrollLeft = nextScrollLeft
+        } else if (source === 'left') {
+            // Keep the shared scrollbar visually aligned to the most recently moved pane,
+            // but do not move the other pane.
+            bar.scrollLeft = left.scrollLeft
+        } else {
+            // Keep the shared scrollbar visually aligned to the most recently moved pane,
+            // but do not move the other pane.
+            bar.scrollLeft = right.scrollLeft
+        }
+
+        requestAnimationFrame(() => {
+            syncingSideScrollRef.current = false
+        })
+    }
+
+    const updateSharedSideScrollMetrics = () => {
+        const left = sideBySideLeftRef.current
+        const right = sideBySideRightRef.current
+        const bar = sideBySideBarRef.current
+
+        if (!left || !right || !bar) return
+
+        const maxPaneScrollWidth = Math.max(left.scrollWidth, right.scrollWidth)
+        const paneClientWidth = Math.max(left.clientWidth, right.clientWidth)
+        const barClientWidth = bar.clientWidth
+        const nextWidth = Math.max(barClientWidth, maxPaneScrollWidth - paneClientWidth + barClientWidth)
+
+        setSideBySideBarInnerWidth(nextWidth)
     }
 
     useEffect(() => {
@@ -336,8 +413,24 @@ export default function DiffView(props: DiffViewProps) {
         const key = `${submissionId}:${classId}`
         if (initLogKeyRef.current === key) return
         initLogKeyRef.current = key
-        logUiClick('Diff Mode', diffMode === 'long', diffMode === 'long')
-        logUiClick('Diff Finder', initialIntraRef.current, initialIntraRef.current)
+        logUiClick(
+            'Diff Mode',
+            diffMode === 'long',
+            diffModeStateLabel(diffMode),
+            diffModeStateLabel(diffMode)
+        )
+        logUiClick(
+            'Diff Layout',
+            diffLayout === 'side-by-side',
+            diffLayoutStateLabel(diffLayout),
+            diffLayoutStateLabel(diffLayout)
+        )
+        logUiClick(
+            'Diff Finder',
+            initialIntraRef.current,
+            initialIntraRef.current ? 'On' : 'Off',
+            initialIntraRef.current ? 'On' : 'Off'
+        )
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [submissionId, classId])
 
@@ -489,6 +582,12 @@ export default function DiffView(props: DiffViewProps) {
         })
     }, [selectedFile, onActiveTestcaseChange])
 
+    const showLayoutToggle = useMemo(() => {
+        if (!selectedFile || selectedFile.passed) return false
+        if (selectedFile.hidden && !revealHiddenOutput) return false
+        return true
+    }, [selectedFile, revealHiddenOutput])
+
     const showDiffModeToggle = useMemo(() => {
         if (!selectedFile || selectedFile.passed) return false
         if (selectedFile.hidden && !revealHiddenOutput) return false
@@ -510,6 +609,14 @@ export default function DiffView(props: DiffViewProps) {
         if (selectedFile.shortDiffSameAsLong) return selectedFile.longDiff ?? ''
         return diffMode === 'short' ? (selectedFile.shortDiff ?? '') : (selectedFile.longDiff ?? '')
     }, [selectedFile, diffMode, revealHiddenOutput])
+
+    useEffect(() => {
+        if (diffLayout !== 'side-by-side') return
+
+        if (sideBySideLeftRef.current) sideBySideLeftRef.current.scrollLeft = 0
+        if (sideBySideRightRef.current) sideBySideRightRef.current.scrollLeft = 0
+        if (sideBySideBarRef.current) sideBySideBarRef.current.scrollLeft = 0
+    }, [diffLayout, selectedDiffId, diffMode])
 
     const hasIntraInSelected = useMemo(() => {
         if (!selectedFile || selectedFile.passed) return false
@@ -536,6 +643,169 @@ export default function DiffView(props: DiffViewProps) {
         return false
     }, [selectedFile, selectedDiffText, revealHiddenOutput])
 
+    const sideBySideRows = useMemo<SideBySideRow[]>(() => {
+        const txt = selectedDiffText || ''
+        if (!txt.trim()) return []
+
+        const lines = txt.split('\n')
+        const rows: SideBySideRow[] = []
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i] ?? ''
+            const next = lines[i + 1] ?? ''
+
+            if (line.startsWith('---') && next.startsWith('+++')) {
+                rows.push({
+                    key: `hdr-${i}`,
+                    leftText: line,
+                    rightText: next,
+                    leftKind: 'del-header',
+                    rightKind: 'add-header',
+                })
+                i++
+                continue
+            }
+
+            if (line.startsWith('+++') && next.startsWith('---')) {
+                rows.push({
+                    key: `hdr-${i}`,
+                    leftText: next,
+                    rightText: line,
+                    leftKind: 'del-header',
+                    rightKind: 'add-header',
+                })
+                i++
+                continue
+            }
+
+            if (line.startsWith('---')) {
+                rows.push({
+                    key: `hdr-left-${i}`,
+                    leftText: line,
+                    rightText: '',
+                    leftKind: 'del-header',
+                    rightKind: 'empty',
+                })
+                continue
+            }
+
+            if (line.startsWith('+++')) {
+                rows.push({
+                    key: `hdr-right-${i}`,
+                    leftText: '',
+                    rightText: line,
+                    leftKind: 'empty',
+                    rightKind: 'add-header',
+                })
+                continue
+            }
+
+            if (line.startsWith('@@')) {
+                rows.push({
+                    key: `meta-${i}`,
+                    leftText: line,
+                    rightText: line,
+                    leftKind: 'meta',
+                    rightKind: 'meta',
+                })
+                continue
+            }
+
+            const isSingleAdd = line.startsWith('+') && !line.startsWith('+++')
+            const isSingleDel = line.startsWith('-') && !line.startsWith('---')
+            const nextIsSingleAdd = next.startsWith('+') && !next.startsWith('+++')
+            const nextIsSingleDel = next.startsWith('-') && !next.startsWith('---')
+            const pairable = (isSingleDel && nextIsSingleAdd) || (isSingleAdd && nextIsSingleDel)
+
+            if (pairable) {
+                const delLine = isSingleDel ? line : next
+                const addLine = isSingleDel ? next : line
+                const delText = delLine.slice(1)
+                const addText = addLine.slice(1)
+
+                if (intraEnabled && areSimilarForIntra(delText, addText)) {
+                    const { a, b } = intralineSegments(delText, addText)
+                    rows.push({
+                        key: `pair-${i}`,
+                        leftText: delLine,
+                        rightText: addLine,
+                        leftKind: 'del',
+                        rightKind: 'add',
+                        leftSegs: a,
+                        rightSegs: b,
+                    })
+                } else {
+                    rows.push({
+                        key: `pair-${i}`,
+                        leftText: delLine,
+                        rightText: addLine,
+                        leftKind: 'del',
+                        rightKind: 'add',
+                    })
+                }
+
+                i++
+                continue
+            }
+
+            if (isSingleDel) {
+                rows.push({
+                    key: `del-${i}`,
+                    leftText: line,
+                    rightText: '',
+                    leftKind: 'del',
+                    rightKind: 'empty',
+                })
+                continue
+            }
+
+            if (isSingleAdd) {
+                rows.push({
+                    key: `add-${i}`,
+                    leftText: '',
+                    rightText: line,
+                    leftKind: 'empty',
+                    rightKind: 'add',
+                })
+                continue
+            }
+
+            rows.push({
+                key: `ctx-${i}`,
+                leftText: line,
+                rightText: line,
+                leftKind: 'ctx',
+                rightKind: 'ctx',
+            })
+        }
+
+        return rows
+    }, [selectedDiffText, intraEnabled])
+
+    const sideBySideColChars = useMemo(() => {
+        let maxChars = 40
+        for (const row of sideBySideRows) {
+            maxChars = Math.max(maxChars, row.leftText.length, row.rightText.length)
+        }
+        return maxChars + 2
+    }, [sideBySideRows])
+
+    useEffect(() => {
+        if (diffLayout !== 'side-by-side') return
+
+        const frame = requestAnimationFrame(() => {
+            updateSharedSideScrollMetrics()
+        })
+
+        const handleResize = () => updateSharedSideScrollMetrics()
+        window.addEventListener('resize', handleResize)
+
+        return () => {
+            cancelAnimationFrame(frame)
+            window.removeEventListener('resize', handleResize)
+        }
+    }, [diffLayout, sideBySideRows, sideBySideColChars])
+
     const selectedCode = useMemo(() => {
         if (codeFiles.length === 0) return null
         return codeFiles.find((f) => f.name === selectedCodeFile) ?? codeFiles[0]
@@ -551,6 +821,177 @@ export default function DiffView(props: DiffViewProps) {
 
     const isLineClickable = Boolean(onLineMouseDown)
 
+    const renderSideBySideCell = (text: string, kind: DiffCellKind, segs?: Seg[]) => {
+        if (kind === 'empty') return <span className="sbs-placeholder">{'\u00A0'}</span>
+
+        if (kind === 'add' || kind === 'del') {
+            const rawText = text.slice(1)
+            return (
+                <>
+                    <span className="diff-sign">{kind === 'add' ? '+' : '-'}</span>
+                    {segs ? renderSegs(segs, kind === 'add' ? 'add-ch' : 'del-ch') : rawText || '\u00A0'}
+                </>
+            )
+        }
+
+        return text || '\u00A0'
+    }
+
+    const renderStackedDiff = () => {
+        const txt = selectedDiffText || ''
+        if (!txt.trim()) {
+            return <div className="muted">No diff text was provided for this test in {diffMode}.</div>
+        }
+
+        const lines = txt.split('\n')
+        const out: JSX.Element[] = []
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i] ?? ''
+
+            // Headers/hunks first so they never pair or get intra
+            if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) {
+                const headerCls = line.startsWith('---')
+                    ? 'del header'
+                    : line.startsWith('+++')
+                        ? 'add header'
+                        : 'meta header'
+                out.push(
+                    <div key={i} className={`diff-line ${headerCls}`}>
+                        {line || ' '}
+                    </div>
+                )
+                continue
+            }
+
+            const type = line[0]
+            const content = line.slice(1)
+            const next = lines[i + 1] ?? ''
+
+            const isSingleAdd = line.startsWith('+') && !line.startsWith('+++')
+            const isSingleDel = line.startsWith('-') && !line.startsWith('---')
+            const nextIsSingleAdd = next.startsWith('+') && !next.startsWith('+++')
+            const nextIsSingleDel = next.startsWith('-') && !next.startsWith('---')
+            const pairable = (isSingleDel && nextIsSingleAdd) || (isSingleAdd && nextIsSingleDel)
+
+            if (pairable) {
+                const otherContent = next.slice(1)
+                const addText = type === '-' ? otherContent : content
+                const delText = type === '-' ? content : otherContent
+
+                if (!intraEnabled || !areSimilarForIntra(delText, addText)) {
+                    out.push(
+                        <div key={`d-${i}`} className="diff-line del">
+                            <span className="diff-sign">-</span>
+                            {delText || '\u00A0'}
+                        </div>
+                    )
+                    out.push(
+                        <div key={`a-${i + 1}`} className="diff-line add">
+                            <span className="diff-sign">+</span>
+                            {addText || '\u00A0'}
+                        </div>
+                    )
+                    i++
+                    continue
+                }
+
+                const { a, b } = intralineSegments(delText, addText)
+                out.push(
+                    <div key={`d-${i}`} className="diff-line del">
+                        <span className="diff-sign">-</span>
+                        {renderSegs(a, 'del-ch')}
+                    </div>
+                )
+                out.push(
+                    <div key={`a-${i + 1}`} className="diff-line add">
+                        <span className="diff-sign">+</span>
+                        {renderSegs(b, 'add-ch')}
+                    </div>
+                )
+                i++
+                continue
+            }
+
+            const cls = line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : 'ctx'
+
+            out.push(
+                <div key={i} className={`diff-line ${cls}`}>
+                    {line || ' '}
+                </div>
+            )
+        }
+
+        return out
+    }
+
+    const renderSideBySideDiff = () => {
+        if (sideBySideRows.length === 0) {
+            return <div className="muted">No diff text was provided for this test in {diffMode}.</div>
+        }
+
+        return (
+            <div className="diff-content side-by-side">
+                <div className="diff-side-by-side-shell" role="region" aria-label="Side-by-side testcase diff">
+                    <div className="diff-side-pane actual">
+                        <div
+                            className="sbs-pane-scroll"
+                            ref={sideBySideLeftRef}
+                            onScroll={() => syncSideBySideScroll('left')}
+                        >
+                            <div
+                                className="sbs-pane-content"
+                                style={{ minWidth: `${sideBySideColChars}ch` }}
+                            >
+                                {sideBySideRows.map((row) => (
+                                    <div key={`left-${row.key}`} className={`diff-line sbs-cell ${row.leftKind}`}>
+                                        {renderSideBySideCell(row.leftText, row.leftKind, row.leftSegs)}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="diff-side-pane expected">
+                        <div
+                            className="sbs-pane-scroll"
+                            ref={sideBySideRightRef}
+                            onScroll={() => syncSideBySideScroll('right')}
+                        >
+                            <div
+                                className="sbs-pane-content"
+                                style={{ minWidth: `${sideBySideColChars}ch` }}
+                            >
+                                {sideBySideRows.map((row) => (
+                                    <div key={`right-${row.key}`} className={`diff-line sbs-cell ${row.rightKind}`}>
+                                        {renderSideBySideCell(row.rightText, row.rightKind, row.rightSegs)}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    className="diff-side-by-side-bar"
+                    ref={sideBySideBarRef}
+                    onScroll={() => syncSideBySideScroll('bar')}
+                    aria-label="Shared horizontal scrollbar for side-by-side diff"
+                >
+                    <div
+                        className="diff-side-by-side-bar-inner"
+                        style={{
+                            width:
+                                sideBySideBarInnerWidth > 0
+                                    ? `${sideBySideBarInnerWidth}px`
+                                    : `calc(${sideBySideColChars}ch + 50%)`,
+                        }}
+                    />
+                </div>
+            </div>
+        )
+    }
+
     const DiffViewSection = () => {
         return (
             <section
@@ -562,7 +1003,7 @@ export default function DiffView(props: DiffViewProps) {
                     <ul className="diff-file-list">
                         {!testsLoaded && <li className="muted">Loading…</li>}
                         {testsLoaded && diffFilesAll.length === 0 && <li className="muted">No tests.</li>}
-                        {diffFilesAll.sort((a, b) => a.num - b.num).map((f) => (
+                        {[...diffFilesAll].sort((a, b) => a.num - b.num).map((f) => (
                             <li
                                 key={f.id}
                                 className={
@@ -593,21 +1034,53 @@ export default function DiffView(props: DiffViewProps) {
 
                         <div className="spacer" />
 
-                        {/* Button 1: shortDiff vs longDiff */}
-                        {showDiffModeToggle && (
-                            <button
-                                type="button"
-                                className={`btn toggle-mode ${diffMode === 'long' ? 'on' : 'off'}`}
-                                aria-pressed={diffMode === 'long'}
-                                onClick={() => {
-                                    const next: DiffMode = diffMode === 'short' ? 'long' : 'short'
-                                    logUiClick('Diff Mode', diffMode === 'long', next === 'long')
-                                    setDiffMode(next)
-                                }}
-                                title="Toggle between shortDiff and longDiff"
-                            >
-                                Diff Mode: {diffMode === 'short' ? 'Short' : 'Long'}
-                            </button>
+                                                {(showLayoutToggle || showDiffModeToggle) && (
+                            <div className="diff-toolbar-mode-group">
+                                {showLayoutToggle && (
+                                    <button
+                                        type="button"
+                                        className={`btn toggle-mode ${diffLayout === 'side-by-side' ? 'on' : 'off'}`}
+                                       aria-pressed={diffLayout === 'side-by-side'}
+                                        onClick={() => {
+                                            const next: DiffLayout = diffLayout === 'stacked' ? 'side-by-side' : 'stacked'
+                                            logUiClick(
+                                                'Diff Layout',
+                                                diffLayout === 'side-by-side',
+                                                diffLayoutStateLabel(diffLayout),
+                                                diffLayoutStateLabel(next)
+                                            )
+                                            setDiffLayout(next)
+                                        }}
+                                        title="Toggle between stacked and side-by-side diff layouts"
+                                    >
+                                        Diff Layout: {diffLayout === 'side-by-side' ? 'Side by Side' : 'Vertical'}
+                                    </button>
+                                )}
+
+                                {/* Button 1: shortDiff vs longDiff */}
+                                {showDiffModeToggle && (
+                                    <button
+                                        type="button"
+                                        className={`btn toggle-mode ${diffMode === 'long' ? 'on' : 'off'}`}
+                                        aria-pressed={diffMode === 'long'}
+                                        onClick={() => {
+                                            const next: DiffMode = diffMode === 'short' ? 'long' : 'short'
+
+                                            logUiClick(
+                                                'Diff Mode',
+                                                diffMode === 'long',
+                                                diffModeStateLabel(diffMode),
+                                                diffModeStateLabel(next)
+                                            )
+
+                                            setDiffMode(next)
+                                        }}
+                                        title="Toggle between shortDiff and longDiff"
+                                    >
+                                        Diff Mode: {diffMode === 'short' ? 'Short' : 'Long'}
+                                    </button>
+                                )}
+                            </div>
                         )}
 
                         {/* Button 2: Diff Finder */}
@@ -619,7 +1092,14 @@ export default function DiffView(props: DiffViewProps) {
                                 disabled={!hasIntraInSelected}
                                 onClick={() => {
                                     const next = !intraEnabled
-                                    logUiClick('Diff Finder', initialIntraRef.current, next)
+
+                                    logUiClick(
+                                        'Diff Finder',
+                                        intraEnabled,
+                                        intraEnabled ? 'On' : 'Off',
+                                        next ? 'On' : 'Off'
+                                    )
+
                                     setIntraEnabled(next)
                                 }}
                                 title={
@@ -633,7 +1113,7 @@ export default function DiffView(props: DiffViewProps) {
                         )}
                     </div>
 
-                    <div className="diff-code">
+                    <div className={`diff-code ${diffLayout === 'side-by-side' ? 'side-by-side-mode' : ''}`}>
                         {!selectedFile && <div className="muted">Select a test on the left to view its diff.</div>}
 
                         {selectedFile && selectedFile.hidden && (
@@ -668,95 +1148,7 @@ export default function DiffView(props: DiffViewProps) {
                         )}
 
                         {selectedFile && (!selectedFile.hidden || revealHiddenOutput) && !selectedFile.passed && (
-                            <div className="diff-content">
-                                {(() => {
-                                    const txt = selectedDiffText || ''
-                                    if (!txt.trim()) {
-                                        return <div className="muted">No diff text was provided for this test in {diffMode}.</div>
-                                    }
-
-                                    const lines = txt.split('\n')
-                                    const out: JSX.Element[] = []
-
-                                    for (let i = 0; i < lines.length; i++) {
-                                        const line = lines[i] ?? ''
-
-                                        // Headers/hunks first so they never pair or get intra
-                                        if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) {
-                                            const headerCls = line.startsWith('---')
-                                                ? 'del header'
-                                                : line.startsWith('+++')
-                                                    ? 'add header'
-                                                    : 'meta header'
-                                            out.push(
-                                                <div key={i} className={`diff-line ${headerCls}`}>
-                                                    {line || ' '}
-                                                </div>
-                                            )
-                                            continue
-                                        }
-
-                                        const type = line[0]
-                                        const content = line.slice(1)
-                                        const next = lines[i + 1] ?? ''
-
-                                        const isSingleAdd = line.startsWith('+') && !line.startsWith('+++')
-                                        const isSingleDel = line.startsWith('-') && !line.startsWith('---')
-                                        const nextIsSingleAdd = next.startsWith('+') && !next.startsWith('+++')
-                                        const nextIsSingleDel = next.startsWith('-') && !next.startsWith('---')
-                                        const pairable = (isSingleDel && nextIsSingleAdd) || (isSingleAdd && nextIsSingleDel)
-
-                                        if (pairable) {
-                                            const otherContent = next.slice(1)
-                                            const addText = type === '-' ? otherContent : content
-                                            const delText = type === '-' ? content : otherContent
-
-                                            if (!intraEnabled || !areSimilarForIntra(delText, addText)) {
-                                                out.push(
-                                                    <div key={`d-${i}`} className="diff-line del">
-                                                        <span className="diff-sign">-</span>
-                                                        {delText || '\u00A0'}
-                                                    </div>
-                                                )
-                                                out.push(
-                                                    <div key={`a-${i + 1}`} className="diff-line add">
-                                                        <span className="diff-sign">+</span>
-                                                        {addText || '\u00A0'}
-                                                    </div>
-                                                )
-                                                i++
-                                                continue
-                                            }
-
-                                            const { a, b } = intralineSegments(delText, addText)
-                                            out.push(
-                                                <div key={`d-${i}`} className="diff-line del">
-                                                    <span className="diff-sign">-</span>
-                                                    {renderSegs(a, 'del-ch')}
-                                                </div>
-                                            )
-                                            out.push(
-                                                <div key={`a-${i + 1}`} className="diff-line add">
-                                                    <span className="diff-sign">+</span>
-                                                    {renderSegs(b, 'add-ch')}
-                                                </div>
-                                            )
-                                            i++
-                                            continue
-                                        }
-
-                                        const cls = line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : 'ctx'
-
-                                        out.push(
-                                            <div key={i} className={`diff-line ${cls}`}>
-                                                {line || ' '}
-                                            </div>
-                                        )
-                                    }
-
-                                    return out
-                                })()}
-                            </div>
+                            diffLayout === 'side-by-side' ? renderSideBySideDiff() : <div className="diff-content">{renderStackedDiff()}</div>
                         )}
                     </div>
                 </div>

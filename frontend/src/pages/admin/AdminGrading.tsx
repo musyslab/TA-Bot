@@ -225,6 +225,26 @@ export function AdminGrading() {
     const codeContainerRef = useRef<HTMLDivElement | null>(null)
     const lineRefs = useRef<Record<number, HTMLLIElement | null>>({})
 
+    const [suppressNativeSelection, setSuppressNativeSelection] = useState<boolean>(false)
+
+    const clearBrowserSelection = () => {
+        const sel = window.getSelection()
+        if (sel && sel.rangeCount > 0) {
+            sel.removeAllRanges()
+        }
+    }
+
+    useEffect(() => {
+        const el = codeContainerRef.current
+        if (!el) return
+
+        el.classList.toggle('suppress-native-selection', suppressNativeSelection)
+
+        return () => {
+            el.classList.remove('suppress-native-selection')
+        }
+    }, [suppressNativeSelection])
+
     const errorCountByKey = useMemo(() => {
         const m: Record<string, number> = {}
         for (const e of observedErrors) {
@@ -385,6 +405,7 @@ export function AdminGrading() {
     }
 
     const handleMouseDown = (line: number) => {
+        setSuppressNativeSelection(false)
         setInitialLine(line)
         selectLines(line, line)
     }
@@ -392,13 +413,31 @@ export function AdminGrading() {
     const handleMouseEnter = (line: number) => {
         setHoveredLine(line)
         if (initialLine === null) return
-        setSelectedRange({
+
+        const nextRange = {
             start: Math.min(initialLine, line),
             end: Math.max(initialLine, line),
-        })
+        }
+
+        setSelectedRange(nextRange)
+
+        const isMultiLine = nextRange.start !== nextRange.end
+        setSuppressNativeSelection(isMultiLine)
+
+        if (isMultiLine) {
+            clearBrowserSelection()
+        }
     }
 
     const handleMouseUp = () => {
+        const range = selectedRangeRef.current
+        const isMultiLine = range !== null && range.start !== range.end
+
+        if (isMultiLine) {
+            clearBrowserSelection()
+        }
+
+        setSuppressNativeSelection(false)
         setInitialLine(null)
     }
 

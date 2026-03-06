@@ -321,10 +321,11 @@
 
                     &.view-cell {
                         .view-link {
-                            min-width: 110px;
-                            color: #1d4ed8;
-                            border-color: #2f6fd6;
-                            background: #edf4ff;
+                            min-width: 96px;
+                            padding: 0.58rem 0.82rem;
+                            color: #007bff;
+                            border-color: #007bff;
+                            background: #eaf3ff;
 
                             /* ensure icon is perfectly centered vertically */
                             .icon {
@@ -333,9 +334,9 @@
                             }
 
                             &:hover {
-                                background: #dceaff;
-                                border-color: #215fc4;
-                                color: #173f84;
+                                background: #d9ebff;
+                                border-color: #006ae0;
+                                color: #006ae0;
                             }
 
                             &:focus-visible {
@@ -349,14 +350,14 @@
                         .download-btn {
                             min-width: 48px;
                             padding: 0.68rem 0.8rem;
-                            border-color: #6d28d9;
-                            background: #f3e8ff;
-                            color: #6b21a8;
+                            background: #d9ebff;
+                            border-color: #006ae0;
+                            color: #006ae0;
 
                             &:hover {
-                                background: #e9d5ff;
-                                border-color: #5b21b6;
-                                color: #581c87;
+                                background: #d9ebff;
+                                border-color: #006ae0;
+                                color: #006ae0;
                             }
 
                             .icon {
@@ -403,15 +404,15 @@
                             min-width: 78px;
                             padding: 0.58rem 0.68rem;
                             font-size: 0.9rem;
-                            border-color: #df7a1c;
-                            background: #fff3e3;
-                            color: #9a4f0d;
+                            background: #d9ebff;
+                            border-color: #006ae0;
+                            color: #006ae0;
                             font-weight: 700;
 
                             &:hover {
-                                background: #ffe4c2;
-                                border-color: #bb620f;
-                                color: #7a3e08;
+                                background: #d9ebff;
+                                border-color: #006ae0;
+                                color: #006ae0;
                             }
                         }
                     }

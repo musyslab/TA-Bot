@@ -451,6 +451,7 @@
             display: flex;
             align-items: center;
             gap: 0.5rem;
+            flex-wrap: wrap;
             padding: 0.6rem 0.75rem;
             border-bottom: 1px solid #e7eaf1;
             background: #f9fafb;
@@ -462,6 +463,13 @@
 
             .spacer {
                 flex: 1;
+            }
+
+            .diff-toolbar-mode-group {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                flex-wrap: nowrap;
             }
 
             .toggle-intra {
@@ -611,6 +619,11 @@
             display: flex;
             flex-direction: column;
             gap: 0.25rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+
+            &.side-by-side-mode {
+                overflow-x: hidden;
+            }
 
             .diff-content {
                 display: inline-block;
@@ -618,6 +631,71 @@
                 min-width: 100%;
                 flex-shrink: 0;
                 background: #ffffff;
+            }
+
+            .diff-content.side-by-side {
+                display: flex;
+                flex-direction: column;
+                width: 100%;
+                min-width: 0;
+                flex-shrink: 1;
+            }
+
+            .diff-side-by-side-shell {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                width: 100%;
+                min-width: 0;
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+                overflow: hidden;
+                background: #ffffff;
+            }
+
+            .diff-side-pane {
+                min-width: 0;
+                background: #ffffff;
+
+                &.actual {
+                    border-right: 1px solid #e5e7eb;
+                }
+            }
+
+            .sbs-pane-scroll {
+                overflow-x: auto;
+                overflow-y: hidden;
+            }
+
+            .sbs-pane-content {
+                width: max-content;
+                min-width: 100%;
+                background: #ffffff;
+            }
+
+            .diff-side-by-side-bar {
+                width: 100%;
+                overflow-x: auto;
+                overflow-y: hidden;
+                margin-top: 0.35rem;
+            }
+
+            .diff-side-by-side-bar-inner {
+                height: 1px;
+            }
+
+            .sbs-cell {
+                min-width: 0;
+                border-bottom: 1px solid #f3f4f6;
+
+                &.empty {
+                    background: #ffffff;
+                    border-left-color: transparent;
+                }
+            }
+
+            .sbs-placeholder {
+                display: inline-block;
+                min-width: 1ch;
             }
 
             &::before,
@@ -662,6 +740,24 @@
 
                 &.ctx {
                     color: #1f2937;
+                }
+
+                &.add-header {
+                    background: rgba(16, 185, 129, 0.18);
+                    color: #065f46;
+                    border-left-color: #10b981;
+                    font-weight: 600;
+                }
+
+                &.del-header {
+                    background: rgba(239, 68, 68, 0.18);
+                    color: #7f1d1d;
+                    border-left-color: #ef4444;
+                    font-weight: 600;
+                }
+
+                &.header {
+                    font-weight: 600;
                 }
 
                 .intra {

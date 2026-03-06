@@ -35,6 +35,9 @@ export default function AdminPracticeSelect() {
     const [practiceEnabled, setPracticeEnabled] = useState(false)
     const [rows, setRows] = useState<PracticeRow[]>([])
     const [creating, setCreating] = useState(false)
+        const [deleting, setDeleting] = useState(false)
+        const [deleteTarget, setDeleteTarget] = useState<PracticeRow | null>(null)
+    
 
     const parseEnabled = (raw: any): boolean => {
         if (raw === true) return true

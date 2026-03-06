@@ -52,6 +52,7 @@
 }
 
 .aps__card {
+    position: relative;
     border: 1px solid rgba(0, 0, 0, 0.12);
     border-radius: 16px;
     padding: 14px 14px 12px;
@@ -76,6 +77,7 @@
 }
 
 .aps__cardTitle {
+    padding-right: 34px;
     font-size: 18px;
     font-weight: 800;
     line-height: 1.2;

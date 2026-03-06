@@ -816,10 +816,14 @@ def ConsumeCharge(submission_repo: SubmissionRepository = Provide[Container.subm
 @jwt_required()
 def log_ui_click():
     data = request.get_json(silent=True) or {}
+    class_id = data.get('class_id', -1)
     submission_id = data.get('id', -1)
     action = str(data.get('action', '')).strip()
     started_state = data.get('started_state', None)
-    switched_to = data.get('switched_to', None)
+    previous_state_label = data.get('previous_state_label', None)
+    next_state_label = data.get('next_state_label', None)
+    practice = parse_bool(data.get('practice', False))
+    practice_problem_id = data.get('practice_problem_id', None)
 
     username = getattr(current_user, 'Username', None) or 'unknown'
     role = getattr(current_user, 'Role', None) or 0
@@ -829,9 +833,19 @@ def log_ui_click():
     log_path = ui_clicks_log
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    line = f"{ts} | user:{username} | role:{role} | submission:{submission_id} | action:{action}"
-    if action == 'Diff Finder':
-        line += f" | switched_to:{bool(switched_to)} | started:{bool(started_state)}"
+    line = (
+        f"{ts} | user:{username} | role:{role} | class:{class_id} | submission:{submission_id}"
+        f" | action:{action} | practice:{practice}"
+    )
+    if practice_problem_id not in (None, ''):
+        line += f" | practice_problem_id:{practice_problem_id}"
+    if action == 'Diff Finder' and started_state is not None:
+        line += f" | started:{bool(started_state)}"
+    if previous_state_label not in (None, ''):
+        line += f" | from:{previous_state_label}"
+    if next_state_label not in (None, ''):
+        line += f" | to:{next_state_label}"
+
     line += "\n"
 
     with open(log_path, 'a', encoding='utf-8') as f:

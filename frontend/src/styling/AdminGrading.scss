@@ -44,6 +44,14 @@
     }
 }
 
+.code-viewer.suppress-native-selection,
+.code-viewer.suppress-native-selection * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
 /* Banner explaining interaction */
 .grading-banner {
     width: 100%;
