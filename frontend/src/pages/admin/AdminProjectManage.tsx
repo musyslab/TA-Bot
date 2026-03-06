@@ -61,10 +61,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         return <div>Error: Missing or invalid project or class ID.</div>
     }
 
-    const [CreateNewState, setCreateNewState] = useState<boolean>()
     const [testcases, setTestcases] = useState<Array<Testcase>>([])
     const [ProjectName, setProjectName] = useState<string>('')
     const [ProjectLanguage, setProjectLanguage] = useState<string>('')
+    const [serverProjectNameSnapshot, setServerProjectNameSnapshot] = useState<string>('')
     const [serverProjectLanguageSnapshot, setServerProjectLanguageSnapshot] = useState<string>('')
     const [SubmitButton, setSubmitButton] = useState<string>('Create new assignment')
     const [SubmitJSON, setSubmitJSON] = useState<string>('Submit JSON file')
@@ -81,6 +81,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const [solutionFileNames, setSolutionFileNames] = useState<string[]>([])
     const [descfileName, setDescFileName] = useState<string>('')
     const [serverDescFileName, setServerDescFileName] = useState<string>('')
+    const [serverProjectStartSnapshot, setServerProjectStartSnapshot] = useState<string>('')
+    const [serverProjectEndSnapshot, setServerProjectEndSnapshot] = useState<string>('')
     const [jsonfilename, setjsonfilename] = useState<string>('')
     const [activeTab, setActiveTab] = useState<'psettings' | 'testcases'>('psettings')
     const [submittingProject, setSubmittingProject] = useState<boolean>(false)
@@ -94,11 +96,15 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const [serverFiles, setServerFiles] = useState<string[] | null>(null)
     const [showAdditionalFile, setShowAdditionalFile] = useState<boolean>(false)
     const [additionalFileNames, setAdditionalFileNames] = useState<string[]>([])
+    const [serverShowAdditionalFileSnapshot, setServerShowAdditionalFileSnapshot] = useState<boolean>(false)
+    const [serverAdditionalFileNamesSnapshot, setServerAdditionalFileNamesSnapshot] = useState<string[]>([])
     const [removedAdditionalFiles, setRemovedAdditionalFiles] = useState<string[]>([])
     const [mainJavaFileName, setMainJavaFileName] = useState<string>('')
     const [practiceProblemsEnabled, setPracticeProblemsEnabled] = useState<boolean>(false)
     const [serverPracticeProblemsEnabledSnapshot, setServerPracticeProblemsEnabledSnapshot] = useState<boolean>(false)
     const [practiceProblemNumber, setPracticeProblemNumber] = useState<number | null>(null)
+
+
 
     async function togglePracticeProblemsEnabled() {
         const next = !practiceProblemsEnabled
@@ -158,6 +164,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const isJavaFileName = (n: string) => /\.java$/i.test(n)
 
     const basename = (p: string) => (p || '').split(/[\\/]/).pop() || ''
+
+    const normalizeNameList = (names: string[]) =>
+        [...names.map(basename).filter(Boolean)].sort((a, b) => a.localeCompare(b))
+
 
     const parseHidden = (v: any): boolean => {
         if (typeof v === 'boolean') return v
@@ -505,6 +515,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         const resetForSwitch = () => {
             setLoadingProjectState(true)
 
+            setServerProjectNameSnapshot('')
+            setServerProjectStartSnapshot('')
+            setServerProjectEndSnapshot('')
+            setServerAdditionalFileNamesSnapshot([])
+            setServerShowAdditionalFileSnapshot(false)
+
             // Clear UI that frequently shows stale values during practice <-> main switches
             setTestcases([])
             setProjectName('')
@@ -578,9 +594,19 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                 // Project info
                 {
                     const data = projRes.data
-                    setProjectName(data[project_id][0])
-                    setProjectStartDate(new Date(data[project_id][2]))
-                    setProjectEndDate(new Date(data[project_id][3]))
+                    const projectName = data[project_id][0] || ''
+                    const projectStart = new Date(data[project_id][2])
+                    const projectEnd = new Date(data[project_id][3])
+
+                    setProjectName(projectName)
+                    setServerProjectNameSnapshot(projectName)
+
+                    setProjectStartDate(projectStart)
+                    setServerProjectStartSnapshot(formatDateTimeLocal(projectStart))
+
+                    setProjectEndDate(projectEnd)
+                    setServerProjectEndSnapshot(formatDateTimeLocal(projectEnd))
+
                     setProjectLanguage(data[project_id][4])
                     setServerProjectLanguageSnapshot(data[project_id][4])
                     const ppe = parseHidden(data[project_id][8])
@@ -607,8 +633,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                             addList = rawAdd ? [rawAdd] : []
                         }
                     }
-                    setAdditionalFileNames(addList.map(basename).filter(Boolean))
-                    setShowAdditionalFile(addList.length > 0)
+
+                    const normalizedAdditionalFiles = addList.map(basename).filter(Boolean)
+                    setAdditionalFileNames(normalizedAdditionalFiles)
+                    setServerAdditionalFileNamesSnapshot(normalizedAdditionalFiles)
+                    setShowAdditionalFile(normalizedAdditionalFiles.length > 0)
+                    setServerShowAdditionalFileSnapshot(normalizedAdditionalFiles.length > 0)
 
                     setEdit(true)
                     setSubmitButton('Submit changes')
@@ -1244,6 +1274,74 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         ].join('')
     }
 
+    const hasUnsavedProjectChanges = useMemo(() => {
+        if (loadingProjectState) return false
+
+        if (!edit) {
+            return (
+                ProjectName.trim() !== '' ||
+                !!ProjectStartDate ||
+                !!ProjectEndDate ||
+                ProjectLanguage !== '' ||
+                SolutionFiles.length > 0 ||
+                !!AssignmentDesc ||
+                selectedAddFiles.length > 0 ||
+                showAdditionalFile ||
+                practiceProblemsEnabled
+            )
+        }
+
+        if (!ProjectStartDate || !ProjectEndDate) return false
+
+        const currentSolutionNames = normalizeNameList(
+            SolutionFiles.length > 0 ? SolutionFiles.map(f => f.name) : serverSolutionFileNames
+        )
+        const originalSolutionNames = normalizeNameList(serverSolutionFileNamesSnapshot)
+        const currentAdditionalNames = normalizeNameList(additionalFileNames)
+        const originalAdditionalNames = normalizeNameList(serverAdditionalFileNamesSnapshot)
+
+        return (
+            ProjectName.trim() !== serverProjectNameSnapshot.trim() ||
+            formatDateTimeLocal(ProjectStartDate) !== serverProjectStartSnapshot ||
+            formatDateTimeLocal(ProjectEndDate) !== serverProjectEndSnapshot ||
+            ProjectLanguage !== serverProjectLanguageSnapshot ||
+            practiceProblemsEnabled !== serverPracticeProblemsEnabledSnapshot ||
+            showAdditionalFile !== serverShowAdditionalFileSnapshot ||
+            !!AssignmentDesc ||
+            SolutionFiles.length > 0 ||
+            selectedAddFiles.length > 0 ||
+            removedAdditionalFiles.length > 0 ||
+            descfileName !== serverDescFileName ||
+            JSON.stringify(currentSolutionNames) !== JSON.stringify(originalSolutionNames) ||
+            JSON.stringify(currentAdditionalNames) !== JSON.stringify(originalAdditionalNames)
+        )
+    }, [
+        loadingProjectState,
+        edit,
+        ProjectName,
+        ProjectStartDate,
+        ProjectEndDate,
+        ProjectLanguage,
+        SolutionFiles,
+        AssignmentDesc,
+        selectedAddFiles,
+        showAdditionalFile,
+        practiceProblemsEnabled,
+        serverProjectNameSnapshot,
+        serverProjectStartSnapshot,
+        serverProjectEndSnapshot,
+        serverProjectLanguageSnapshot,
+        serverSolutionFileNames,
+        serverSolutionFileNamesSnapshot,
+        serverAdditionalFileNamesSnapshot,
+        serverShowAdditionalFileSnapshot,
+        serverPracticeProblemsEnabledSnapshot,
+        additionalFileNames,
+        removedAdditionalFiles,
+        descfileName,
+        serverDescFileName,
+    ])
+
     async function buttonhandleClick(testcase: number) {
         if (!modalDraft) return
 
@@ -1554,6 +1652,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                 <div className="detected-language">{languageLabel}</div>
                                             </div>
 
+                                            {hasUnsavedProjectChanges && (
+                                                <div className="unsaved-project-warning" role="status" aria-live="polite">
+                                                    You have unsaved Project Settings changes. They will not be saved until you click "{SubmitButton}".
+                                                </div>
+                                            )}
+
                                             <div className="file-section">
                                                 <div className="info-segment">
                                                     <h1 className="info-title">
@@ -1824,17 +1928,73 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                     )}
                                                 </div>
 
-                                                <div className="optional-file-toggle">
-                                                    <button
-                                                        type="button"
-                                                        className={`toggle-optional-file ${showAdditionalFile ? 'on' : 'off'}`}
-                                                        aria-pressed={showAdditionalFile}
-                                                        onClick={() => setShowAdditionalFile(prev => !prev)}
-                                                    >
-                                                        {showAdditionalFile
-                                                            ? 'Optional additional text file: On'
-                                                            : 'Optional additional text file: Off'}
-                                                    </button>
+                                                <div className={`feature-toggle-row${isPractice ? ' single-column' : ''}`}>
+                                                    {!isPractice && (
+                                                        <div className={`feature-toggle-card practice-toggle-card ${practiceProblemsEnabled ? 'enabled' : 'disabled'}`}>
+                                                            <button
+                                                                type="button"
+                                                                className="feature-toggle-button"
+                                                                aria-pressed={practiceProblemsEnabled}
+                                                                onClick={togglePracticeProblemsEnabled}
+                                                            >
+                                                                <span className="feature-toggle-button-content">
+                                                                    <span className="feature-toggle-icon" aria-hidden="true">
+                                                                        <FaClipboardCheck />
+                                                                    </span>
+                                                                    <span className="feature-toggle-copy">
+                                                                        <span className="feature-toggle-heading-row">
+                                                                            <span className="feature-toggle-label">Practice Problems</span>
+                                                                            <span className={`feature-toggle-state ${practiceProblemsEnabled ? 'enabled' : 'disabled'}`}>
+                                                                                {practiceProblemsEnabled ? 'Enabled' : 'Disabled'}
+                                                                            </span>
+                                                                        </span>
+                                                                        <span className="feature-toggle-description">
+                                                                            Enable linked practice problems for this assignment.
+                                                                        </span>
+                                                                    </span>
+                                                                </span>
+                                                            </button>
+
+                                                            {practiceProblemsEnabled &&
+                                                                edit &&
+                                                                project_id > 0 &&
+                                                                practiceProblemsEnabled === serverPracticeProblemsEnabledSnapshot && (
+                                                                    <button
+                                                                        type="button"
+                                                                        className="manage-practice-problems-link"
+                                                                        onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice/select`)}
+                                                                    >
+                                                                        Manage practice problems
+                                                                    </button>
+                                                                )}
+                                                        </div>
+                                                    )}
+
+                                                    <div className={`feature-toggle-card additional-files-toggle-card ${showAdditionalFile ? 'enabled' : 'disabled'}${isPractice ? ' full-width' : ''}`}>
+                                                        <button
+                                                            type="button"
+                                                            className="feature-toggle-button"
+                                                            aria-pressed={showAdditionalFile}
+                                                            onClick={() => setShowAdditionalFile(prev => !prev)}
+                                                        >
+                                                            <span className="feature-toggle-button-content">
+                                                                <span className="feature-toggle-icon" aria-hidden="true">
+                                                                    <FaFileAlt />
+                                                                </span>
+                                                                <span className="feature-toggle-copy">
+                                                                    <span className="feature-toggle-heading-row">
+                                                                        <span className="feature-toggle-label">Optional Additional Text File</span>
+                                                                        <span className={`feature-toggle-state ${showAdditionalFile ? 'enabled' : 'disabled'}`}>
+                                                                            {showAdditionalFile ? 'Enabled' : 'Disabled'}
+                                                                        </span>
+                                                                    </span>
+                                                                    <span className="feature-toggle-description">
+                                                                        Allow optional .txt support files to be uploaded with this project.
+                                                                    </span>
+                                                                </span>
+                                                            </span>
+                                                        </button>
+                                                    </div>
                                                 </div>
 
                                                 {showAdditionalFile && (
@@ -1866,32 +2026,6 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                     </div>
                                                 )}
                                             </div>
-
-                                            {!isPractice && (
-                                                <div className="practice-problems-toggle">
-                                                    <button
-                                                        type="button"
-                                                        className={`toggle-practice-problems ${practiceProblemsEnabled ? 'on' : 'off'}`}
-                                                        aria-pressed={practiceProblemsEnabled}
-                                                        onClick={togglePracticeProblemsEnabled}
-                                                    >
-                                                        {practiceProblemsEnabled ? 'Practice problems: On' : 'Practice problems: Off'}
-                                                    </button>
-
-                                                    {practiceProblemsEnabled &&
-                                                        edit &&
-                                                        project_id > 0 &&
-                                                        practiceProblemsEnabled === serverPracticeProblemsEnabledSnapshot && (
-                                                            <button
-                                                                type="button"
-                                                                className="manage-practice-problems-link"
-                                                                onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice/select`)}
-                                                            >
-                                                                Manage practice problems
-                                                            </button>
-                                                        )}
-                                                </div>
-                                            )}
 
                                             <button
                                                 type="button"

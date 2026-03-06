@@ -1005,7 +1005,7 @@ const StudentUpload = () => {
             <div className="status-card">
               <div className="status-card__top">
                 <div className="status-card__label">
-                  <FaFlask aria-hidden="true" /> Practice bonus (new)
+                  <FaFlask aria-hidden="true" /> Practice Completed
                 </div>
                 <div className="status-card__value">
                   <span className="big">{practiceProgress.earned}</span>

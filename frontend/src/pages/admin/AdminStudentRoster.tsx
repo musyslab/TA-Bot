@@ -93,6 +93,7 @@ interface StudentListState {
     isLoading: boolean
     lecture_numbers: Array<Option>
     lab_numbers: Array<Option>
+    projectName: string
     selectedStudent: number
     modalIsLoading: boolean
     modalIsOpen: boolean
@@ -135,6 +136,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             lecture_numbers: [{ key: -1, text: 'All', value: -1 }],
             lab_numbers: [{ key: -1, text: 'All', value: -1 }],
             isLoading: false,
+            projectName: '',
             selectedStudent: -1,
             modalIsLoading: false,
             modalIsOpen: false,
@@ -255,6 +257,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                 },
             }
         );
+
         const ohVisitsRequest = axios.post(
             import.meta.env.VITE_API_URL + `/submissions/get_oh_visits_by_projectId`,
             { project_id: this.props.project_id },
@@ -264,9 +267,37 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                 },
             }
         );
-        Promise.all([submissionsRequest, ohVisitsRequest])
-            .then(([submissionsRes, officeHoursRes]) => {
+
+        const projectInfoRequest = axios.get(
+            import.meta.env.VITE_API_URL + `/projects/get_project_id?id=${this.props.project_id}`,
+            {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                },
+            }
+        );
+
+        Promise.all([submissionsRequest, ohVisitsRequest, projectInfoRequest])
+            .then(([submissionsRes, officeHoursRes, projectInfoRes]) => {
                 const data = submissionsRes.data
+
+                let projectName = ''
+                try {
+                    const parsed =
+                        typeof projectInfoRes.data === 'string'
+                            ? JSON.parse(projectInfoRes.data || '{}')
+                            : projectInfoRes.data || {}
+
+                    const firstEntry = Object.values(parsed as Record<string, any>)[0]
+
+                    if (Array.isArray(firstEntry)) {
+                        projectName = String(firstEntry[1] ?? firstEntry[0] ?? '').trim()
+                    } else {
+                        projectName = String((parsed as any)?.Name ?? '').trim()
+                    }
+                } catch (_e) {
+                    projectName = ''
+                }
 
                 const officeHoursAttendees = new Set(officeHoursRes.data);
                 const rows: Array<Row> = []
@@ -326,7 +357,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                 rows.sort((a, b) => a.Lname.localeCompare(b.Lname))
 
-                this.setState({ rows, lecture_numbers, lab_numbers })
+                this.setState({ rows, lecture_numbers, lab_numbers, projectName })
             })
     }
 
@@ -812,7 +843,13 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                 />
 
                 <div className="pageTitle">
-                    {this.props.isPractice ? 'Review Practice Submissions' : 'Grade or Review Student Submissions'}
+
+                    {this.props.isPractice
+                        ? 'Review Practice Submissions'
+                        : this.state.projectName
+                            ? `${this.state.projectName} Student List`
+                            : 'Student List'}
+
                 </div>
 
                 <div className="main-grid">
@@ -822,7 +859,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                             <div className="student-sub-panel">
                                 <div className="filter-bar">
                                     <label className="filter-label" htmlFor="lectureFilter">
-                                        Lecture:&nbsp;
+                                        Lecture:
                                     </label>
                                     <select
                                         id="lectureFilter"
@@ -837,10 +874,9 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                         ))}
                                     </select>
 
-                                    &nbsp;&nbsp;
 
                                     <label className="filter-label" htmlFor="labFilter">
-                                        Lab:&nbsp;
+                                        Lab:
                                     </label>
                                     <select
                                         id="labFilter"
@@ -855,8 +891,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                         ))}
                                     </select>
 
-                                    &nbsp;&nbsp;
-
                                     {!this.props.isPractice && (
                                         <>
                                             <button
@@ -868,10 +902,8 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                 title="Run Plagiarism Detector"
                                             >
                                                 <FaClone aria-hidden="true" />
-                                                &nbsp;Run Plagiarism Detector
+                                                Run Plagiarism Detector
                                             </button>
-
-                                            &nbsp;&nbsp;
 
                                             <button
                                                 type="button"
@@ -882,25 +914,26 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                 title="Export Student Grades"
                                             >
                                                 <FaFileExport aria-hidden="true" />
-                                                &nbsp;Export Grades to D2L
+                                                Export Grades to D2L
                                             </button>
 
-                                            &nbsp;&nbsp;
                                         </>
                                     )}
 
-                                    <label className="filter-label" htmlFor="sortSelect">
-                                        Sort by:&nbsp;
-                                    </label>
-                                    <select
-                                        id="sortSelect"
-                                        className="filter-select sort-select"
-                                        value={this.state.sortBy}
-                                        onChange={this.handleSortChange}
-                                    >
-                                        <option value="lastname">Last name (A→Z)</option>
-                                        <option value="lastsubmitted">Last submitted (newest)</option>
-                                    </select>
+                                    <div className="sort-control-group">
+                                        <label className="filter-label" htmlFor="sortSelect">
+                                            Sort by:
+                                        </label>
+                                        <select
+                                            id="sortSelect"
+                                            className="filter-select sort-select"
+                                            value={this.state.sortBy}
+                                            onChange={this.handleSortChange}
+                                        >
+                                            <option value="lastname">Last name (A→Z)</option>
+                                            <option value="lastsubmitted">Last submitted (newest)</option>
+                                        </select>
+                                    </div>
                                 </div>
 
                                 <div className="table-scroll" role="region" aria-label="Student submissions" tabIndex={0}>
