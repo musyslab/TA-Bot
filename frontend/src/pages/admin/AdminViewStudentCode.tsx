@@ -22,6 +22,8 @@ export function AdminViewStudentCode() {
     const [projectDisplayName, setProjectDisplayName] = useState<string>('')
 
     const params = new URLSearchParams(search)
+    const fromParam = (params.get('from') || '').toLowerCase()
+    const fromOfficeHours = fromParam === 'office-hours'
     const practiceParam = (params.get('practice') || '').toLowerCase()
     const isPractice = ['1', 'true', 'yes', 'y', 'on'].includes(practiceParam)
 
@@ -116,11 +118,15 @@ export function AdminViewStudentCode() {
             <DirectoryBreadcrumbs
                 items={[
                     { label: 'Class Selection', to: '/admin/classes' },
-                    { label: 'Project List', to: `/admin/${classIdStr}/projects` },
-                    {
-                        label: isPractice ? 'Practice Submissions' : 'Student List',
-                        to: `/admin/${classIdStr}/project/${projectIdStr}${practiceQuery}`,
-                    },
+                    ...(fromOfficeHours
+                        ? [{ label: 'Office Hours', to: '/admin/OfficeHours' }]
+                        : [
+                            { label: 'Project List', to: `/admin/${classIdStr}/projects` },
+                            {
+                                label: isPractice ? 'Practice Submissions' : 'Student List',
+                                to: `/admin/${classIdStr}/project/${projectIdStr}${practiceQuery}`,
+                            },
+                        ]),
                     { label: 'Code View' },
                 ]}
             />

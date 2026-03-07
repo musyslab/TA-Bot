@@ -246,7 +246,7 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
                                     <th className="col-feedback">Decision</th>
                                     <th className="col-code">Student Code</th>
                                     <th className="col-assignment">Assignment</th>
-                                    <th className="col-complete">Complete</th>
+                                    <th className="col-complete">Question</th>
                                 </tr>
                             </thead>
 
@@ -328,7 +328,7 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
                                                     </div>
                                                 ) : item.submission_id !== -1 ? (
                                                     <Link
-                                                        to={`/admin/${item.class_id}/project/${item.project_id}/codeview/${item.submission_id}`}
+                                                        to={`/admin/${item.class_id}/project/${item.project_id}/codeview/${item.submission_id}?from=office-hours`}
                                                         className="link-code"
                                                     >
                                                         <button className="button button-view-code">View</button>
@@ -447,7 +447,7 @@ class AdminOfficeHours extends Component<{}, OfficeHoursState> {
                                             <td className="cell-code">
                                                 {item.submission_id !== -1 ? (
                                                     <Link
-                                                        to={`/admin/${item.class_id}/project/${item.project_id}/codeview/${item.submission_id}`}
+                                                        to={`/admin/${item.class_id}/project/${item.project_id}/codeview/${item.submission_id}?from=office-hours`}
                                                         className="link-code"
                                                     >
                                                         <button className="button button-view-code">View</button>
