@@ -589,6 +589,11 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             return [...visible].sort((a, b) => a.Lname.localeCompare(b.Lname) || a.Fname.localeCompare(b.Fname))
         })()
 
+        const practiceQuery =
+            this.props.isPractice
+                ? `?practice=true${this.props.practice_problem_id ? `&practice_problem_id=${this.props.practice_problem_id}` : ''}`
+                : ''
+
         // ===== Helpers for modal "CodePage-like" UI =====
         const code = this.state.selectedStudentCode || ''
 
@@ -1022,7 +1027,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                         <td className="view-cell">
                                                             <Link
                                                                 className="view-link"
-                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/codeview/${row.subid}`}
+                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/codeview/${row.subid}${practiceQuery}`}
                                                                 rel="noreferrer"
                                                             >
                                                                 <FaEye aria-hidden="true" /> View

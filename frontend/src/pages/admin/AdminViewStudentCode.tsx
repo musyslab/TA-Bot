@@ -1,7 +1,7 @@
 // frontend/src/pages/admin/AdminViewStudentCode.tsx
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
@@ -10,6 +10,8 @@ import DiffView from '../components/CodeDiffView'
 const defaultpagenumber = -1
 
 export function AdminViewStudentCode() {
+
+    const { search } = useLocation()
     const { id, class_id, project_id } = useParams<{ id: string; class_id: string; project_id: string }>()
 
     const submissionId = id !== undefined ? parseInt(id, 10) : defaultpagenumber
@@ -18,15 +20,31 @@ export function AdminViewStudentCode() {
 
     const [studentName, setStudentName] = useState<string>('')
 
+    const params = new URLSearchParams(search)
+    const practiceParam = (params.get('practice') || '').toLowerCase()
+    const isPractice = ['1', 'true', 'yes', 'y', 'on'].includes(practiceParam)
+
+    const ppidParam = (params.get('practice_problem_id') || '').trim()
+    const parsedPpid = parseInt(ppidParam, 10)
+    const practiceProblemId =
+        isPractice && !Number.isNaN(parsedPpid) && parsedPpid > 0 ? parsedPpid : undefined
+
     const classIdStr = class_id ?? ''
     const projectIdStr = project_id ?? ''
+
+    const practiceQuery =
+        isPractice ? `?practice=true${practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''}` : ''
 
     useEffect(() => {
         if (submissionId < 0 || pid < 0) return
         axios
             .post(
                 `${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
-                { project_id: pid },
+                {
+                    project_id: pid,
+                    practice: isPractice,
+                    practice_problem_id: practiceProblemId ?? null,
+                },
                 {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -44,7 +62,7 @@ export function AdminViewStudentCode() {
                 }
             })
             .catch((err) => console.log(err))
-    }, [submissionId, pid])
+    }, [submissionId, pid, isPractice, practiceProblemId])
 
     return (
         <div className="page-container" id="admin-view-student-code">
@@ -65,13 +83,16 @@ export function AdminViewStudentCode() {
                 items={[
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${classIdStr}/projects` },
-                    { label: 'Student List', to: `/admin/${classIdStr}/project/${projectIdStr}` },
+                    {
+                        label: isPractice ? 'Practice Submissions' : 'Student List',
+                        to: `/admin/${classIdStr}/project/${projectIdStr}${practiceQuery}`,
+                    },
                     { label: 'Code View' },
                 ]}
             />
 
             <div className="pageTitle">
-                View Submission Code: {studentName || 'Unknown Student'}
+                {isPractice ? 'View Practice Submission' : 'View Main Submission'}: {studentName || 'Unknown Student'}
             </div>
 
             <DiffView submissionId={submissionId} classId={cid} revealHiddenOutput />
