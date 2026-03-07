@@ -4,7 +4,7 @@ import { useNavigate, NavigateFunction } from 'react-router-dom'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
-import { FaAlignJustify, FaCode, FaExchangeAlt, FaRegFile, FaTimes } from 'react-icons/fa'
+import { FaAlignJustify, FaCloudUploadAlt, FaCode, FaExchangeAlt, FaRegFile, FaTimes } from 'react-icons/fa'
 import LoadingAnimation from '../components/LoadingAnimation'
 import '../../styling/AdminUploadPage.scss'
 import '../../styling/FileUploadCommon.scss'
@@ -603,9 +603,12 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                         onChange={this.handleFilesChange}
                                                         disabled={disableUpload}
                                                     />
-                                                    <div className="file-drop-message">
-                                                        Drag &amp; drop your file here or&nbsp;
-                                                        <span className="browse-text">browse</span>
+                                                    <div className="file-drop-content">
+                                                        <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                        <div className="file-drop-message">
+                                                            Drag &amp; drop your file here or{' '}
+                                                            <span className="browse-text">browse</span>
+                                                        </div>
                                                     </div>
                                                 </>
                                             ) : (

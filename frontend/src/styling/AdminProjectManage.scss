@@ -1607,3 +1607,34 @@ body:has(.testcase-modal) {
 .react-datepicker-popper {
   z-index: 50 !important;
 }
+
+.file-drop-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  text-align: center;
+  gap: 0.15rem;
+  padding: 0.35rem 0 0.2rem;
+}
+
+.file-drop-message {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.browse-text {
+  margin-left: 0.1rem;
+}
+
+.file-drop-cloud-icon {
+  font-size: 2.75rem;
+  line-height: 1;
+  color: #000000;
+  margin-bottom: 0.1rem;
+  flex: 0 0 auto;
+  pointer-events: none;
+}

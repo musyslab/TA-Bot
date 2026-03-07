@@ -15,6 +15,7 @@ import { TbJson } from 'react-icons/tb'
 import {
     FaAlignJustify,
     FaCircleNotch,
+    FaCloudUploadAlt,
     FaClipboardCheck,
     FaCode,
     FaDownload,
@@ -1683,9 +1684,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                                     accept={SOLUTION_ACCEPT}
                                                                     onChange={handleSolutionFilesChange}
                                                                 />
-                                                                <div className="file-drop-message">
-                                                                    Drag &amp; drop your file here or&nbsp;
-                                                                    <span className="browse-text">browse</span>
+                                                                <div className="file-drop-content">
+                                                                    <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                                    <div className="file-drop-message">
+                                                                        Drag &amp; drop your file here or{' '}
+                                                                        <span className="browse-text">browse</span>
+                                                                    </div>
                                                                 </div>
                                                             </>
                                                         ) : (
@@ -1821,9 +1825,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                                     accept={DESC_ACCEPT}
                                                                     onChange={handleDescFileChange}
                                                                 />
-                                                                <div className="file-drop-message">
-                                                                    Drag &amp; drop your file here or&nbsp;
-                                                                    <span className="browse-text">browse</span>
+                                                                <div className="file-drop-content">
+                                                                    <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                                    <div className="file-drop-message">
+                                                                        Drag &amp; drop your file here or{' '}
+                                                                        <span className="browse-text">browse</span>
+                                                                    </div>
                                                                 </div>
                                                             </>
                                                         ) : (
@@ -2018,9 +2025,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                                 accept={ADD_ACCEPT}
                                                                 onChange={handleAdditionalFileChange}
                                                             />
-                                                            <div className="file-drop-message">
-                                                                Drag &amp; drop your file(s) here or&nbsp;
-                                                                <span className="browse-text">browse</span>
+                                                            <div className="file-drop-content">
+                                                                <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                                <div className="file-drop-message">
+                                                                    Drag &amp; drop your file(s) here or{' '}
+                                                                    <span className="browse-text">browse</span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -2169,9 +2179,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                                     accept=".json,application/json"
                                                                     onChange={handleJsonFileChange}
                                                                 />
-                                                                <div className="file-drop-message">
-                                                                    Drag &amp; drop your JSON file here or&nbsp;
-                                                                    <span className="browse-text">browse</span>
+                                                                <div className="file-drop-content">
+                                                                    <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                                    <div className="file-drop-message">
+                                                                        Drag &amp; drop your JSON file here or{' '}
+                                                                        <span className="browse-text">browse</span>
+                                                                    </div>
                                                                 </div>
                                                             </>
                                                         ) : (
