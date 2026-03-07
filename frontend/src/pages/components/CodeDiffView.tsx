@@ -1,10 +1,20 @@
 // frontend/src/pages/components/CodeDiffView.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
-import { FaRegCheckSquare, FaChevronDown, FaLock } from 'react-icons/fa'
 import { diffChars } from 'diff'
 import '../../styling/CodeDiffView.scss'
 import { Highlight, themes, Prism } from 'prism-react-renderer'
+
+ import {
+         FaRegCheckSquare,
+         FaChevronDown,
+         FaLock,
+         FaBars,
+         FaColumns,
+         FaGripLines,
+         FaAlignJustify,
+         FaSearch,
+     } from 'react-icons/fa'
 
 // Ensure Prism languages (like Java) are registered once per page load.
 let prismLangsLoaded = false
@@ -1034,13 +1044,13 @@ export default function DiffView(props: DiffViewProps) {
 
                         <div className="spacer" />
 
-                                                {(showLayoutToggle || showDiffModeToggle) && (
+                        {(showLayoutToggle || showDiffModeToggle) && (
                             <div className="diff-toolbar-mode-group">
                                 {showLayoutToggle && (
                                     <button
                                         type="button"
-                                        className={`btn toggle-mode ${diffLayout === 'side-by-side' ? 'on' : 'off'}`}
-                                       aria-pressed={diffLayout === 'side-by-side'}
+                                        className={`btn toggle-mode view-toggle ${diffLayout === 'side-by-side' ? 'on' : 'off'}`}
+                                        aria-pressed={diffLayout === 'side-by-side'}
                                         onClick={() => {
                                             const next: DiffLayout = diffLayout === 'stacked' ? 'side-by-side' : 'stacked'
                                             logUiClick(
@@ -1051,9 +1061,17 @@ export default function DiffView(props: DiffViewProps) {
                                             )
                                             setDiffLayout(next)
                                         }}
-                                        title="Toggle between stacked and side-by-side diff layouts"
+                                        title="Switch between stacked and split diff views"
                                     >
-                                        Diff Layout: {diffLayout === 'side-by-side' ? 'Side by Side' : 'Vertical'}
+                                        <span className="toggle-copy">
+                                            <span className="toggle-label">View</span>
+                                            <span className="toggle-value">
+                                                {diffLayout === 'side-by-side' ? 'Split' : 'Stacked'}
+                                            </span>
+                                        </span>
+                                        <span className="toggle-icon" aria-hidden="true">
+                                            {diffLayout === 'side-by-side' ? <FaColumns /> : <FaBars />}
+                                        </span>
                                     </button>
                                 )}
 
@@ -1061,7 +1079,7 @@ export default function DiffView(props: DiffViewProps) {
                                 {showDiffModeToggle && (
                                     <button
                                         type="button"
-                                        className={`btn toggle-mode ${diffMode === 'long' ? 'on' : 'off'}`}
+                                        className={`btn toggle-mode scope-toggle ${diffMode === 'long' ? 'on' : 'off'}`}
                                         aria-pressed={diffMode === 'long'}
                                         onClick={() => {
                                             const next: DiffMode = diffMode === 'short' ? 'long' : 'short'
@@ -1075,9 +1093,17 @@ export default function DiffView(props: DiffViewProps) {
 
                                             setDiffMode(next)
                                         }}
-                                        title="Toggle between shortDiff and longDiff"
+                                        title="Switch between changed lines only and all diff lines"
                                     >
-                                        Diff Mode: {diffMode === 'short' ? 'Short' : 'Long'}
+                                        <span className="toggle-copy">
+                                            <span className="toggle-label">Lines</span>
+                                            <span className="toggle-value">
+                                                {diffMode === 'short' ? 'Differences' : 'All'}
+                                            </span>
+                                        </span>
+                                        <span className="toggle-icon" aria-hidden="true">
+                                            {diffMode === 'short' ? <FaGripLines /> : <FaAlignJustify />}
+                                        </span>
                                     </button>
                                 )}
                             </div>
@@ -1108,7 +1134,13 @@ export default function DiffView(props: DiffViewProps) {
                                         : 'Intra-line highlighting is not available for this diff'
                                 }
                             >
-                                Diff Finder: {intraEnabled ? 'On' : 'Off'}
+                                <span className="toggle-copy">
+                                    <span className="toggle-label">Diff Finder</span>
+                                    <span className="toggle-value">{intraEnabled ? 'On' : 'Off'}</span>
+                                </span>
+                                <span className="toggle-icon" aria-hidden="true">
+                                    <FaSearch />
+                                </span>
                             </button>
                         )}
                     </div>
