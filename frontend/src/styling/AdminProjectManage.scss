@@ -1603,3 +1603,7 @@ body:has(.testcase-modal) {
   margin-top: -0.75rem;
   margin-bottom: 0.5rem;
 }
+
+.react-datepicker-popper {
+  z-index: 50 !important;
+}
