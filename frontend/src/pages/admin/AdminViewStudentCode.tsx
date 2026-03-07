@@ -19,6 +19,7 @@ export function AdminViewStudentCode() {
     const pid = project_id !== undefined ? parseInt(project_id, 10) : -1
 
     const [studentName, setStudentName] = useState<string>('')
+    const [projectDisplayName, setProjectDisplayName] = useState<string>('')
 
     const params = new URLSearchParams(search)
     const practiceParam = (params.get('practice') || '').toLowerCase()
@@ -64,6 +65,39 @@ export function AdminViewStudentCode() {
             .catch((err) => console.log(err))
     }, [submissionId, pid, isPractice, practiceProblemId])
 
+    useEffect(() => {
+        if (pid < 0) return
+        axios
+            .get(
+                `${import.meta.env.VITE_API_URL}/projects/get_project_id?id=${pid}${isPractice && practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''
+                }`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            .then((res) => {
+                try {
+                    const parsed =
+                        typeof res.data === 'string'
+                            ? JSON.parse(res.data || '{}')
+                            : res.data || {}
+
+                    const firstEntry = Object.values(parsed as Record<string, any>)[0]
+
+                    if (Array.isArray(firstEntry)) {
+                        setProjectDisplayName(String(firstEntry[0] ?? firstEntry[1] ?? '').trim())
+                    } else {
+                        setProjectDisplayName(String((parsed as any)?.Name ?? '').trim())
+                    }
+                } catch (_err) {
+                    setProjectDisplayName('')
+                }
+            })
+            .catch((err) => console.log(err))
+    }, [pid, isPractice, practiceProblemId])
+
     return (
         <div className="page-container" id="admin-view-student-code">
             <Helmet>
@@ -92,7 +126,7 @@ export function AdminViewStudentCode() {
             />
 
             <div className="pageTitle">
-                {isPractice ? 'View Practice Submission' : 'View Main Submission'}: {studentName || 'Unknown Student'}
+                {(projectDisplayName || (isPractice ? 'Practice Submission' : 'Main Submission'))}: {studentName || 'Unknown Student'}
             </div>
 
             <DiffView submissionId={submissionId} classId={cid} revealHiddenOutput />

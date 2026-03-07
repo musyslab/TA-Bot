@@ -269,7 +269,9 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         );
 
         const projectInfoRequest = axios.get(
-            import.meta.env.VITE_API_URL + `/projects/get_project_id?id=${this.props.project_id}`,
+            import.meta.env.VITE_API_URL +
+            `/projects/get_project_id?id=${this.props.project_id}` +
+            `${this.props.isPractice && this.props.practice_problem_id ? `&practice_problem_id=${this.props.practice_problem_id}` : ''}`,
             {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -291,7 +293,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                     const firstEntry = Object.values(parsed as Record<string, any>)[0]
 
                     if (Array.isArray(firstEntry)) {
-                        projectName = String(firstEntry[1] ?? firstEntry[0] ?? '').trim()
+                        projectName = String(firstEntry[0] ?? firstEntry[1] ?? '').trim()
                     } else {
                         projectName = String((parsed as any)?.Name ?? '').trim()
                     }
@@ -849,11 +851,9 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                 <div className="pageTitle">
 
-                    {this.props.isPractice
-                        ? 'Review Practice Submissions'
-                        : this.state.projectName
-                            ? `${this.state.projectName} Student List`
-                            : 'Student List'}
+                    {this.state.projectName
+                        ? `Student List: ${this.state.projectName}`
+                        : 'Student List'}
 
                 </div>
 
