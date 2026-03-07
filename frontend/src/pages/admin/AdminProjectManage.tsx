@@ -1949,7 +1949,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                                             </span>
                                                                         </span>
                                                                         <span className="feature-toggle-description">
-                                                                            Enable linked practice problems for this assignment.
+                                                                            Enable practice problems for this assignment.
                                                                         </span>
                                                                     </span>
                                                                 </span>
