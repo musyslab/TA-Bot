@@ -5,16 +5,16 @@ import { diffChars } from 'diff'
 import '../../styling/CodeDiffView.scss'
 import { Highlight, themes, Prism } from 'prism-react-renderer'
 
- import {
-         FaRegCheckSquare,
-         FaChevronDown,
-         FaLock,
-         FaBars,
-         FaColumns,
-         FaGripLines,
-         FaAlignJustify,
-         FaSearch,
-     } from 'react-icons/fa'
+import {
+    FaRegCheckSquare,
+    FaChevronDown,
+    FaLock,
+    FaBars,
+    FaColumns,
+    FaGripLines,
+    FaAlignJustify,
+    FaSearch,
+} from 'react-icons/fa'
 
 // Ensure Prism languages (like Java) are registered once per page load.
 let prismLangsLoaded = false
@@ -308,7 +308,6 @@ export default function DiffView(props: DiffViewProps) {
     const [selectedDiffId, setSelectedDiffId] = useState<string | null>(null)
     const [diffMode, setDiffMode] = useState<DiffMode>('short')
     const [diffLayout, setDiffLayout] = useState<DiffLayout>('stacked')
-    const [sideBySideBarInnerWidth, setSideBySideBarInnerWidth] = useState<number>(0)
 
     // Intra-line highlight toggle
     const initialIntraRef = useRef<boolean>(Math.random() < 0.5)
@@ -383,7 +382,7 @@ export default function DiffView(props: DiffViewProps) {
         const barClientWidth = bar.clientWidth
         const nextWidth = Math.max(barClientWidth, maxPaneScrollWidth - paneClientWidth + barClientWidth)
 
-        setSideBySideBarInnerWidth(nextWidth)
+        bar.style.setProperty('--side-by-side-bar-inner-width', `${nextWidth}px`)
     }
 
     useEffect(() => {
@@ -792,14 +791,6 @@ export default function DiffView(props: DiffViewProps) {
         return rows
     }, [selectedDiffText, intraEnabled])
 
-    const sideBySideColChars = useMemo(() => {
-        let maxChars = 40
-        for (const row of sideBySideRows) {
-            maxChars = Math.max(maxChars, row.leftText.length, row.rightText.length)
-        }
-        return maxChars + 2
-    }, [sideBySideRows])
-
     useEffect(() => {
         if (diffLayout !== 'side-by-side') return
 
@@ -814,7 +805,7 @@ export default function DiffView(props: DiffViewProps) {
             cancelAnimationFrame(frame)
             window.removeEventListener('resize', handleResize)
         }
-    }, [diffLayout, sideBySideRows, sideBySideColChars])
+    }, [diffLayout, sideBySideRows])
 
     const selectedCode = useMemo(() => {
         if (codeFiles.length === 0) return null
@@ -949,10 +940,7 @@ export default function DiffView(props: DiffViewProps) {
                             ref={sideBySideLeftRef}
                             onScroll={() => syncSideBySideScroll('left')}
                         >
-                            <div
-                                className="sbs-pane-content"
-                                style={{ minWidth: `${sideBySideColChars}ch` }}
-                            >
+                            <div className="sbs-pane-content">
                                 {sideBySideRows.map((row) => (
                                     <div key={`left-${row.key}`} className={`diff-line sbs-cell ${row.leftKind}`}>
                                         {renderSideBySideCell(row.leftText, row.leftKind, row.leftSegs)}
@@ -968,10 +956,7 @@ export default function DiffView(props: DiffViewProps) {
                             ref={sideBySideRightRef}
                             onScroll={() => syncSideBySideScroll('right')}
                         >
-                            <div
-                                className="sbs-pane-content"
-                                style={{ minWidth: `${sideBySideColChars}ch` }}
-                            >
+                            <div className="sbs-pane-content">
                                 {sideBySideRows.map((row) => (
                                     <div key={`right-${row.key}`} className={`diff-line sbs-cell ${row.rightKind}`}>
                                         {renderSideBySideCell(row.rightText, row.rightKind, row.rightSegs)}
@@ -988,15 +973,7 @@ export default function DiffView(props: DiffViewProps) {
                     onScroll={() => syncSideBySideScroll('bar')}
                     aria-label="Shared horizontal scrollbar for side-by-side diff"
                 >
-                    <div
-                        className="diff-side-by-side-bar-inner"
-                        style={{
-                            width:
-                                sideBySideBarInnerWidth > 0
-                                    ? `${sideBySideBarInnerWidth}px`
-                                    : `calc(${sideBySideColChars}ch + 50%)`,
-                        }}
-                    />
+                    <div className="diff-side-by-side-bar-inner" />
                 </div>
             </div>
         )

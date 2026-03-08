@@ -758,6 +758,7 @@
             }
 
             .diff-side-by-side-bar {
+                --side-by-side-bar-inner-width: 100%;
                 width: 100%;
                 overflow-x: auto;
                 overflow-y: hidden;
@@ -766,6 +767,7 @@
 
             .diff-side-by-side-bar-inner {
                 height: 1px;
+                width: var(--side-by-side-bar-inner-width);
             }
 
             .sbs-cell {
