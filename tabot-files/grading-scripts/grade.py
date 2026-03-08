@@ -94,29 +94,20 @@ def build_short_diff(student_text: str, expected_text: str, from_name: str = "ac
     student_lines = normalize_newlines(student_text).splitlines()
     expected_lines = normalize_newlines(expected_text).splitlines()
 
-    sm = difflib.SequenceMatcher(a=student_lines, b=expected_lines)
     changed: List[str] = []
+    max_len = max(len(student_lines), len(expected_lines))
 
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "equal":
+    for i in range(max_len):
+        student_line = student_lines[i] if i < len(student_lines) else None
+        expected_line = expected_lines[i] if i < len(expected_lines) else None
+
+        if student_line == expected_line:
             continue
 
-        a_chunk = student_lines[i1:i2]
-        b_chunk = expected_lines[j1:j2]
-
-        if tag == "replace":
-            n = max(len(a_chunk), len(b_chunk))
-            for k in range(n):
-                if k < len(a_chunk):
-                    changed.append(f"-{a_chunk[k]}")
-                if k < len(b_chunk):
-                    changed.append(f"+{b_chunk[k]}")
-        elif tag == "delete":
-            for line in a_chunk:
-                changed.append(f"-{line}")
-        elif tag == "insert":
-            for line in b_chunk:
-                changed.append(f"+{line}")
+        if student_line is not None:
+            changed.append(f"-{student_line}")
+        if expected_line is not None:
+            changed.append(f"+{expected_line}")
 
     if not changed:
         return ""
