@@ -5,6 +5,7 @@ from dependency_injector import containers, providers
 from src.repositories.class_repository import ClassRepository
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.submission_repository import SubmissionRepository
+from src.services.authentication_service import PAMAuthenticationService, SAMLAuthenticationService
 
 
 class Container(containers.DeclarativeContainer):
@@ -28,6 +29,9 @@ class Container(containers.DeclarativeContainer):
 
     auth_service = providers.Factory(
         PAMAuthenticationService
+    )
+    saml_service = providers.Singleton(
+        SAMLAuthenticationService
     )
     
     class_service = providers.Factory(

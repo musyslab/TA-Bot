@@ -1,0 +1,42 @@
+{
+    "strict": true,
+    "debug": false,
+    "sp": {
+        "entityId": "https://pioneer.cs.mu.edu/tabot",
+        "assertionConsumerService": {
+            "url": "https://pioneer.cs.mu.edu/api/auth/saml/acs",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+        },
+        "singleLogoutService": {
+            "url": "https://pioneer.cs.mu.edu/api/auth/saml/sls",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "x509cert": "",
+        "privateKey": ""
+    },
+    "idp": {
+        "entityId": "https://sts.windows.net/4caba98f-9d6f-4bf1-99e3-deaa93b90716/",
+        "singleSignOnService": {
+            "url": "https://login.microsoftonline.com/4caba98f-9d6f-4bf1-99e3-deaa93b90716/saml2",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "singleLogoutService": {
+            "url": "https://login.microsoftonline.com/4caba98f-9d6f-4bf1-99e3-deaa93b90716/saml2",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "x509cert": "MIIC8DCCAdigAwIBAgIQPnBFumZNnIlJ3ux4mKHJpjANBgkqhkiG9w0BAQsFADA0MTIwMAYDVQQDEylNaWNyb3NvZnQgQXp1cmUgRmVkZXJhdGVkIFNTTyBDZXJ0aWZpY2F0ZTAeFw0yNTA5MzAxNTQ5MDNaFw0yODA5MzAxNTQ5MDNaMDQxMjAwBgNVBAMTKU1pY3Jvc29mdCBBenVyZSBGZWRlcmF0ZWQgU1NPIENlcnRpZmljYXRlMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvdhR+l5Jr02luM2mBaAp4xtIjafYrLEP/Xav9qOs8p44rjUHwQpcR/0pASTWwLZ4YiiCid2fApXYwMKmZok1477zmxiZXwKEv87S8DAZk2zK0LQfDvTSdszQVO6fGIjp6H6ST6jpZ4bIDFzwdMhZ4d5VMRYMu+XCJpjv9O6BqLYIzs21/R1ruv4wffi99JOTAbZrpqPcU44bwbTTOoJawkqrY7CFAPw/9+RyoMvwHT3Y4DvI1L6G+Vv6uTvuQgLdz7ngafNh73a7Ph91L2a7MVBNWfArVJNjSmER5U7S1vxqpNoxppEaLFGbklPTbebhTpAYXTNeCoKUc9DZkRhb0QIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCxQhwMzqtKceuRgbzr3UMdkEuy1Zanqm+3KXzqdt5j0r/AFDayrUgnaIV/YbRssgOiMFZWl673LjbTYzlM/hnDcZ6L+sc+QYy5J6mm7/dTmiXYUuJ537pWdxp1neKsRULmegOa+zk9SM5wW0r5vdmbUv3lbRLL1aMHHeMj1qfNRlqOl8jTgrjILuzWudWAZC2+1EeuEYT8u5nUnlLocQIbofH8+7Uiqx4TB9lXO7ZH73jWDQ/4ew54C4EIFcfRznqdTyzrWYNZjzF76fMmMgcuAmy/2jDMbHLBnF95SIE1a1XNxyp6hcLEAGF+zUkDC6yEybFJSbrbhiDr1tYY+msQ"
+    },
+    "security": {
+        "nameIdEncrypted": false,
+        "authnRequestsSigned": false,
+        "logoutRequestSigned": false,
+        "logoutResponseSigned": false,
+        "signMetadata": false,
+        "wantMessagesSigned": false,
+        "wantAssertionsSigned": false,
+        "wantAssertionsEncrypted": false,
+        "wantNameIdEncrypted": false,
+        "requestedAuthnContext": true
+    }
+}

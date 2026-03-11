@@ -1,10 +1,10 @@
 import React, { Component } from "react";
 
 // Uncomment for Marquette
-import img from "../../images/MUCS-tag.png";
+// import img from "../../images/MUCS-tag.png";
 
 // Uncomment for Carroll
-// import img from "../../Pioneer.png";
+import img from "../../images/Pioneer.png";
 
 import { FaUser, FaLock } from "react-icons/fa";
 
@@ -23,6 +23,9 @@ interface LoginPageState {
   role: number;
   error_message: string;
   isLoading: boolean;
+  samlEmail?: string;
+  samlFirstName?: string;
+  samlLastName?: string;
 
   // NewUserModal state (inlined)
   FirstName: string;
@@ -38,6 +41,7 @@ interface LoginPageState {
   classOptions: Array<DropDownOption>;
   labOptions: Array<DropDownOption>;
   lectureOptions: Array<DropDownOption>;
+  isSAMLUser: boolean;
 }
 
 interface IdNamePair {
@@ -87,12 +91,14 @@ class Login extends Component<{}, LoginPageState> {
       classOptions: [],
       labOptions: [],
       lectureOptions: [],
+      isSAMLUser: false,
     };
 
     // login handlers
     this.handleSubmit = this.handleSubmit.bind(this);
     this.handleUsernameChange = this.handleUsernameChange.bind(this);
     this.handlePasswordChange = this.handlePasswordChange.bind(this);
+    this.handleSAMLLogin = this.handleSAMLLogin.bind(this);
 
     // modal handlers
     this.handleFirstNameChange = this.handleFirstNameChange.bind(this);
@@ -103,6 +109,39 @@ class Login extends Component<{}, LoginPageState> {
     this.handleLabIdChange = this.handleLabIdChange.bind(this);
     this.handleLectureIdChange = this.handleLectureIdChange.bind(this);
     this.handleNewUserSubmit = this.handleNewUserSubmit.bind(this);
+  }
+
+  componentDidMount() {
+    // Check if SAML brought us here with a new user
+    const samlNewUser = localStorage.getItem('SAML_NEW_USER');
+    if (samlNewUser === 'true') {
+      const username = localStorage.getItem('SAML_USERNAME') || '';
+      const email = localStorage.getItem('SAML_EMAIL') || '';
+      const firstName = localStorage.getItem('SAML_FIRST_NAME') || '';
+      const lastName = localStorage.getItem('SAML_LAST_NAME') || '';
+
+      // Clear the flag
+      localStorage.removeItem('SAML_NEW_USER');
+
+      this.setState({
+        isNewUser: true,
+        username: username,
+        samlEmail: email,
+        samlFirstName: firstName,
+        samlLastName: lastName,
+        FirstName: firstName,
+        LastName: lastName,
+        Email: email,
+        isSAMLUser: true,
+      }, () => {
+        this.fetchSections();
+      });
+    }
+  }
+
+  handleSAMLLogin() {
+    const baseUrl = import.meta.env.VITE_API_URL as string | undefined;
+    window.location.href = `${baseUrl}/auth/saml/login`;
   }
 
   // -----------------------------
@@ -221,30 +260,64 @@ class Login extends Component<{}, LoginPageState> {
 
     const apiBase = (import.meta.env.VITE_API_URL as string) || "";
 
-    // Original code checked password twice; keep intent but fix to username+password.
-    const useCreate = this.state.username !== "NAN" && this.state.password !== "NAN";
-    const endpoint = useCreate ? "/auth/create" : "/auth/create_newclass";
+    // For SAML users, use a dummy password since they authenticate via SAML
+    const password = this.state.isSAMLUser ? 'SAML_AUTH' : this.state.password;
 
-    axios
-      .post(`${apiBase}${endpoint}`, {
-        password: this.state.password,
-        username: this.state.username,
-        fname: this.state.FirstName,
-        lname: this.state.LastName,
-        id: this.state.StudentNumber,
-        email: this.state.Email,
-        class_id: this.state.ClassId,
-        lab_id: this.state.LabId,
-        lecture_id: this.state.LectureId,
-      })
-      .then((res) => {
-        localStorage.setItem("AUTOTA_AUTH_TOKEN", res.data.access_token);
-        window.location.href = "/student/classes";
-      })
-      .catch((err) => {
-        const msg = err.response?.data?.message || "Account creation failed.";
-        this.setState({ new_user_error_msg: msg });
-      });
+    if (!this.state.isSAMLUser && this.state.password !== "NAN" && this.state.password !== "NAN") {
+      // Regular PAM authentication user
+      axios
+        .post(`${apiBase}/auth/create`, {
+          password: this.state.password,
+          username: this.state.username,
+          fname: this.state.FirstName,
+          lname: this.state.LastName,
+          id: this.state.StudentNumber,
+          email: this.state.Email,
+          class_id: this.state.ClassId,
+          lab_id: this.state.LabId,
+          lecture_id: this.state.LectureId,
+        })
+        .then((res) => {
+          localStorage.setItem("AUTOTA_AUTH_TOKEN", res.data.access_token);
+          // Clear SAML data from localStorage if any
+          localStorage.removeItem('SAML_USERNAME');
+          localStorage.removeItem('SAML_EMAIL');
+          localStorage.removeItem('SAML_FIRST_NAME');
+          localStorage.removeItem('SAML_LAST_NAME');
+          window.location.href = "/class/classes";
+        })
+        .catch((err) => {
+          const msg = err.response?.data?.message || "Account creation failed.";
+          this.setState({ new_user_error_msg: msg });
+        });
+    } else {
+      // SAML user or create_newclass path
+      axios
+        .post(`${apiBase}/auth/create`, {
+          password: password,
+          username: this.state.username,
+          fname: this.state.FirstName,
+          lname: this.state.LastName,
+          id: this.state.StudentNumber,
+          email: this.state.Email,
+          class_id: this.state.ClassId,
+          lab_id: this.state.LabId,
+          lecture_id: this.state.LectureId,
+        })
+        .then((res) => {
+          localStorage.setItem("AUTOTA_AUTH_TOKEN", res.data.access_token);
+          // Clear SAML data from localStorage
+          localStorage.removeItem('SAML_USERNAME');
+          localStorage.removeItem('SAML_EMAIL');
+          localStorage.removeItem('SAML_FIRST_NAME');
+          localStorage.removeItem('SAML_LAST_NAME');
+          window.location.href = "/class/classes";
+        })
+        .catch((err) => {
+          const msg = err.response?.data?.message || "Account creation failed.";
+          this.setState({ new_user_error_msg: msg });
+        });
+    }
   }
 
   render() {
@@ -397,9 +470,13 @@ class Login extends Component<{}, LoginPageState> {
           </div>
         ) : null}
 
-        <h2 className="login-title">Login to your MSCSNet account</h2>
+        {/* Uncomment for Marquette */}
+        {/* <h2 className="login-title">Login to your MSCSNet account</h2> */}
 
-        <form className="login-form" onSubmit={this.handleSubmit}>
+        {/* Uncomment for Carroll */}
+        <h2 className="login-title">Login to your Pioneer account</h2>
+
+        {/* <form className="login-form" onSubmit={this.handleSubmit}>
           <div className="form-group">
             <label className="form-label" htmlFor="username">
               Username
@@ -441,26 +518,26 @@ class Login extends Component<{}, LoginPageState> {
           <button className="btn btn--primary login-form__submit" type="submit" disabled={this.state.isLoading}>
             {this.state.isLoading ? "Logging in…" : "Login"}
           </button>
-        </form>
+        </form> */}
+
+        <div style={{ marginTop: '1em', marginBottom: '1em', textAlign: 'center' }}>
+          <span>or</span>
+        </div>
+
+        <button
+          className="btn btn--primary login-form__submit"
+          style={{ marginBottom: '1em', width: '100%' }}
+          onClick={this.handleSAMLLogin}
+        >
+          <i className="microsoft icon"></i>
+          Sign in with Microsoft
+        </button>
 
         {!this.state.isErrorMessageHidden && this.state.error_message ? (
           <div className="alert alert--error" role="alert" aria-live="assertive">
             {this.state.error_message}
           </div>
         ) : null}
-
-        <div className="login-links">
-          Create an account{" "}
-          <a
-            className="login-links__link"
-            href="https://docs.google.com/document/d/1QT--iGWE-y1Ix8GknsMAoiIKyZJcO_yEOhMBg0WFpyU/edit?usp=sharing"
-            target="_blank"
-            rel="noreferrer"
-          >
-            here
-          </a>
-          .
-        </div>
 
         <div className="login-logo">
           <img className="login-logo__img" src={img} alt="School logo" />

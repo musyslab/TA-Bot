@@ -18,12 +18,15 @@ from src.jwt_manager import jwt
 from src import classes, auth, projects, submission, upload, ai_suggestions
 from src.services import timeout_service
 import os
+from src.saml_auth import saml_auth_api
+from src import classes, auth, projects, submission, upload, settings, saml_auth
 
 def create_app():
     app = Flask(__name__)
     container = Container()
     app.container = container
     container.wire(modules=[classes, auth, projects, submission, upload, ai_suggestions, timeout_service])
+    container.wire(modules=[classes, auth, saml_auth, projects, submission, upload, settings, timeout_service])
     
     TEACHER_DIR = "/tabot-files/project-files/teacher-files"
     STUDENT_DIR = "/tabot-files/project-files/student-files"
@@ -56,6 +59,7 @@ def create_app():
     app.register_blueprint(ai_api, url_prefix='/api/ai')
     app.register_blueprint(class_api,url_prefix='/api/class')
     app.register_blueprint(error_api,url_prefix='/api/error')
+    app.register_blueprint(saml_auth_api, url_prefix='/api/auth/saml')
     
     # Initialize extensions
     jwt.init_app(app)
