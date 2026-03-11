@@ -38,4 +38,3 @@ jobs:
       - name: Push backend Docker image
         run: |
           docker push ghcr.io/musyslab/tabot-carroll-backend:latest
-# changes
