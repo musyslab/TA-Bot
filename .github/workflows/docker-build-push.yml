@@ -1,19 +1,20 @@
-
 name: Docker Build and Push
 
 on:
-permissions:
-  contents: read
-  packages: write
   push:
     branches: [ "CarrollTABot-3-11-26" ]
   workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
