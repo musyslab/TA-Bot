@@ -2,6 +2,9 @@
 name: Docker Build and Push
 
 on:
+permissions:
+  contents: read
+  packages: write
   push:
     branches: [ "CarrollTABot-3-11-26" ]
   workflow_dispatch:
