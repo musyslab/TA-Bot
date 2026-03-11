@@ -21,17 +21,18 @@ jobs:
       - name: Build frontend Docker image
         working-directory: frontend
         run: |
-          docker build -f Dockerfile.prod -t ghcr.io/musysslab/tabot-carroll-frontend:latest .
+          docker build -f Dockerfile.prod -t ghcr.io/musyslab/tabot-carroll-frontend:latest .
 
       - name: Push frontend Docker image
         run: |
-          docker push ghcr.io/musysslab/tabot-carroll-frontend:latest
+          docker push ghcr.io/musyslab/tabot-carroll-frontend:latest
 
       - name: Build backend Docker image
         working-directory: backend
         run: |
-          docker build -f Dockerfile.prod -t ghcr.io/musysslab/tabot-carroll-backend:latest .
+          docker build -f Dockerfile.prod -t ghcr.io/musyslab/tabot-carroll-backend:latest .
 
       - name: Push backend Docker image
         run: |
-          docker push ghcr.io/musysslab/tabot-carroll-backend:latest
+          docker push ghcr.io/musyslab/tabot-carroll-backend:latest
+# changes
