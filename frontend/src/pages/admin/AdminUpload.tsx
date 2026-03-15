@@ -418,7 +418,16 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                     },
                 })
                 .then((res) => {
-                    window.location.href = `/admin/${this.state.class_id.toString()}/project/${this.state.project_id.toString()}/codeview/${res.data.sid.toString()}`
+                    const isPractice = this.state.selectedPracticeProblemId > 0
+                    const practiceQuery = isPractice
+                        ? `?practice=true&practice_problem_id=${this.state.selectedPracticeProblemId.toString()}`
+                        : ''
+
+                    window.location.href =
+                        `/admin/${this.state.class_id.toString()}` +
+                        `/project/${this.state.project_id.toString()}` +
+                        `/codeview/${res.data.sid.toString()}` +
+                        practiceQuery
                 })
                 .catch((err) => {
                     this.setState({
