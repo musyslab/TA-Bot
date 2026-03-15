@@ -15,12 +15,25 @@ class Projects(db.Model):
     Start = Column(Date)
     End = Column(Date)
     Language = Column(String)
-
     Submissions=relationship('Submissions') 
     StudentUnlocks=relationship('StudentUnlocks') 
     solutionpath=Column(String)
     AsnDescriptionPath = Column(String)
     AdditionalFilePath = Column(String)
+    PracticeProblems = relationship('PracticeProblems', back_populates='Project', cascade="all, delete-orphan")
+
+class PracticeProblems(db.Model):
+    __tablename__ = "PracticeProblems"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    ProjectId = Column(Integer, ForeignKey('Projects.Id', ondelete='CASCADE'), nullable=False)
+    PracticeNumber = Column(Integer, nullable=False, default=1)
+    Enabled = Column(Boolean, nullable=False, default=True)
+    Name = Column(String)
+    Language = Column(String)
+    solutionpath = Column(String)
+    AsnDescriptionPath = Column(String)
+    AdditionalFilePath = Column(String)
+    Project = relationship('Projects', back_populates='PracticeProblems')
 
 class Users(db.Model):
     __tablename__ = "Users"
@@ -42,7 +55,9 @@ class Submissions(db.Model):
     Id = Column(Integer, primary_key=True)
     OutputFilepath = Column(String)
     CodeFilepath = Column(String)
-    IsPassing = Column(Boolean)
+    IsPassing = Column(Boolean, nullable=False, default=False)
+    IsPractice = Column(Boolean, nullable=False, default=False)
+    PracticeProblemId = Column(Integer, ForeignKey('PracticeProblems.Id'), nullable=True)
     Time = Column(Date)
     User = Column(Integer, ForeignKey('Users.Id'))
     Project = Column(Integer, ForeignKey('Projects.Id'))
@@ -92,11 +107,13 @@ class Testcases(db.Model):
     __tablename__ = "Testcases"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     ProjectId = Column(Integer, ForeignKey('Projects.Id'))
+    PracticeProblemId = Column(Integer, ForeignKey('PracticeProblems.Id'), nullable=True)
     Name = Column(String)
     Description = Column(String)
     input = Column(String)
     Output = Column(String)
     Hidden = Column(Boolean, default=False)
+    Practice = Column(Boolean, default=False)
 
 class OHVisits(db.Model):
     __tablename__ = "OHVisits"

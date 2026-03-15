@@ -19,6 +19,8 @@
 /* Section wrappers for the two tables */
 .table-section {
     margin-top: 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .tableTitle {
@@ -37,18 +39,33 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.5rem 0.9rem;
-    border: 1px solid #d1d5db;
+    gap: 0.4rem;
+    padding: 0.62rem 0.9rem;
+    min-height: 38px;
+    font-size: 0.92rem;
+    line-height: 1;
+    border: 1px solid #d0d0d0;
     border-radius: 10px;
-    background: #f9fafb;
-    color: #111827;
+    background: #ffffff;
+    color: #1f2937;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    transition:
+        background 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease,
+        transform 120ms ease;
     text-decoration: none;
+    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 
     &:hover {
-        background: #f3f4f6;
+        background: #f8fafc;
+        border-color: #cbd5e1;
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+        transform: translateY(-1px);
+        text-decoration: none;
+        color: #1f2937;
     }
 
     &:active {
@@ -95,36 +112,19 @@
         }
     }
 
-    &.button-assignment {
-        border-color: #8b5cf6;
-        background: #f5f3ff;
-        color: #4c1d95;
-
-        &:hover {
-            background: #ede9fe;
-            border-color: #7c3aed;
-        }
-    }
-
-    &.button-view-code {
-        border-color: #3b82f6;
-        background: #eff6ff;
-        color: #1d4ed8;
-
-        &:hover {
-            background: #dbeafe;
-            border-color: #2563eb;
-        }
-    }
-
+    &.button-view-code,
+    &.button-assignment,
     &.button-completed {
-        border-color: #9ca3af;
-        background: #f3f4f6;
-        color: #111827;
+        border-color: #c7d2fe;
+        background: #eef2ff;
+        color: #3730a3;
+        font-size: 0.92rem;
+        font-weight: 700;
 
         &:hover {
-            background: #e5e7eb;
-            border-color: #6b7280;
+            background: #e0e7ff;
+            border-color: #a5b4fc;
+            color: #312e81;
         }
     }
 }
@@ -143,6 +143,7 @@
 /* ===== Queue table ===== */
 .question-queue-table {
     width: 95%;
+    min-width: 1200px;
     margin: 15px auto 24px;
     border-collapse: collapse;
     border: 1px solid #d1d5db;
@@ -186,8 +187,6 @@
 
             &.is-in-oh {
                 background: #ecfdf5 !important;
-                /* subtle green */
-                /* left accent to stand out */
                 box-shadow: inset 4px 0 0 0 #10b981;
             }
 
@@ -240,7 +239,6 @@
                         font-size: 1.75rem;
                         line-height: 1;
                     }
-
                 }
 
                 &.cell-feedback {
@@ -248,6 +246,8 @@
 
                     .feedback-actions {
                         display: inline-flex;
+                        flex-direction: row;
+                        flex-wrap: nowrap;
                         gap: 0.5rem;
                         align-items: center;
                         justify-content: center;
@@ -284,12 +284,13 @@
                 font-style: italic;
             }
         }
-
     }
 }
 
 /* History-specific tweaks */
 .history-table {
+    min-width: 1050px;
+
     .table-body {
         tr.data-row.is-history {
             background: #ffffff;
@@ -329,5 +330,122 @@
     .pagination-meta {
         color: #374151;
         font-weight: 600;
+    }
+}
+
+@media (max-width: 1300px) {
+
+    .oh-page .directory,
+    .oh-page .pageTitle,
+    .oh-page .question-queue-table,
+    .oh-page .table-section {
+        width: 97vw;
+    }
+
+    .tableTitle {
+        font-size: 0.96rem;
+        margin: 10px 0 6px;
+    }
+
+    .button {
+        gap: 0.3rem;
+        padding: 0.48rem 0.65rem;
+        min-height: 32px;
+        font-size: 0.8rem;
+        border-radius: 8px;
+    }
+
+    .question-queue-table,
+    .history-table {
+        min-width: 780px;
+        font-size: 0.84rem;
+
+        .table-head {
+            .head-row {
+                th {
+                    padding: 0.5rem 0.55rem;
+                    font-size: 0.8rem;
+                }
+            }
+        }
+
+        .table-body {
+            tr.data-row {
+                td {
+                    padding: 0.45rem 0.55rem;
+                }
+
+                td.cell-position,
+                td.cell-question,
+                td.cell-wait,
+                td.cell-feedback {
+                    font-size: 0.8rem;
+                }
+
+                td.cell-student {
+                    font-size: 0.83rem;
+                }
+
+                td.cell-status {
+                    .status svg {
+                        font-size: 1.15rem;
+                        line-height: 1;
+                    }
+                }
+
+                td.cell-assignment,
+                td.cell-code,
+                td.cell-complete {
+                    .button {
+                        width: 100%;
+                        max-width: 130px;
+                    }
+                }
+
+                td.cell-feedback {
+                    .feedback-actions {
+                        flex-direction: column;
+                        align-items: stretch;
+                        width: 100%;
+                        gap: 0.35rem;
+
+                        .button {
+                            width: 100%;
+                            max-width: none;
+                        }
+                    }
+                }
+            }
+
+            tr.empty-row {
+                td.empty-cell {
+                    padding: 1rem 0.6rem;
+                    font-size: 0.82rem;
+                }
+            }
+        }
+    }
+
+    .history-table {
+        .table-body {
+            tr.data-row.is-history {
+
+                .status.outcome-accepted svg,
+                .status.outcome-rejected svg,
+                .status.outcome-unknown svg {
+                    font-size: 1.1rem;
+                }
+            }
+        }
+    }
+
+    .pagination-controls {
+        gap: 0.55rem;
+        margin-top: -6px;
+        margin-bottom: 16px;
+
+        .pagination-meta {
+            font-size: 0.84rem;
+        }
     }
 }

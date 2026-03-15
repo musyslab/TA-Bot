@@ -1,12 +1,15 @@
 // AdminGrading.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
-import { useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
 import '../../styling/AdminGrading.scss'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import DiffView from '../components/CodeDiffView'
+import LoadingAnimation from '../components/LoadingAnimation'
+
+import { FiTrendingUp, FiChevronLeft, FiChevronRight, FiSave, FiUser } from 'react-icons/fi'
 
 const defaultpagenumber = -1
 
@@ -32,13 +35,28 @@ type LineRange = {
 
 type ScoringMode = 'perInstance' | 'flatPerError'
 
+type StudentSubmissionNavRow = {
+    userId: number
+    firstName: string
+    lastName: string
+    fullName: string
+    submissionId: number
+}
+
 export function AdminGrading() {
     const { id, class_id, project_id } = useParams<{ id: string; class_id: string; project_id: string }>()
     const submissionId = id !== undefined ? parseInt(id, 10) : defaultpagenumber
     const cid = class_id !== undefined ? parseInt(class_id, 10) : -1
     const pid = project_id !== undefined ? parseInt(project_id, 10) : -1
+    const navigate = useNavigate()
+    const location = useLocation()
 
     const [studentName, setStudentName] = useState<string>('')
+    const [studentRoster, setStudentRoster] = useState<StudentSubmissionNavRow[]>([])
+    const [studentHeaderLoading, setStudentHeaderLoading] = useState<boolean>(true)
+    const [savedGradingLoading, setSavedGradingLoading] = useState<boolean>(true)
+    const [showSavedBanner, setShowSavedBanner] = useState<boolean>(false)
+    const [savedGrade, setSavedGrade] = useState<number | null>(null)
     const [activeTestcaseName, setActiveTestcaseName] = useState<string>('')
     const [activeTestcaseLongDiff, setActiveTestcaseLongDiff] = useState<string>('')
 
@@ -225,6 +243,26 @@ export function AdminGrading() {
     const codeContainerRef = useRef<HTMLDivElement | null>(null)
     const lineRefs = useRef<Record<number, HTMLLIElement | null>>({})
 
+    const [suppressNativeSelection, setSuppressNativeSelection] = useState<boolean>(false)
+
+    const clearBrowserSelection = () => {
+        const sel = window.getSelection()
+        if (sel && sel.rangeCount > 0) {
+            sel.removeAllRanges()
+        }
+    }
+
+    useEffect(() => {
+        const el = codeContainerRef.current
+        if (!el) return
+
+        el.classList.toggle('suppress-native-selection', suppressNativeSelection)
+
+        return () => {
+            el.classList.remove('suppress-native-selection')
+        }
+    }, [suppressNativeSelection])
+
     const errorCountByKey = useMemo(() => {
         const m: Record<string, number> = {}
         for (const e of observedErrors) {
@@ -365,6 +403,38 @@ export function AdminGrading() {
     }, [observedErrors, ERROR_MAP, scoringMode])
 
     const grade = Math.max(0, 100 - totalPoints)
+    const gradedStudentRoster = useMemo(() => studentRoster.filter((row) => row.submissionId > 0), [studentRoster])
+
+    const currentStudentIndex = useMemo(
+        () => gradedStudentRoster.findIndex((row) => row.submissionId === submissionId),
+        [gradedStudentRoster, submissionId],
+    )
+
+    const previousStudentNav =
+        currentStudentIndex > 0
+            ? gradedStudentRoster[currentStudentIndex - 1]
+            : null
+
+    const currentStudentNav = currentStudentIndex >= 0 ? gradedStudentRoster[currentStudentIndex] : null
+    const nextStudentNav =
+        currentStudentIndex >= 0 && currentStudentIndex < gradedStudentRoster.length - 1
+            ? gradedStudentRoster[currentStudentIndex + 1]
+            : null
+
+    const goToSubmission = (nextSubmissionId: number) => {
+        const parts = location.pathname.split('/')
+        let targetIndex = parts.length - 1
+
+        for (let i = parts.length - 1; i >= 0; i -= 1) {
+            if (parts[i] === String(submissionId)) {
+                targetIndex = i
+                break
+            }
+        }
+
+        parts[targetIndex] = String(nextSubmissionId)
+        navigate(`${parts.join('/')}${location.search}${location.hash}`)
+    }
 
     // Line hover and selection
     const [hoveredLine, setHoveredLine] = useState<number | null>(null)
@@ -385,6 +455,7 @@ export function AdminGrading() {
     }
 
     const handleMouseDown = (line: number) => {
+        setSuppressNativeSelection(false)
         setInitialLine(line)
         selectLines(line, line)
     }
@@ -392,13 +463,31 @@ export function AdminGrading() {
     const handleMouseEnter = (line: number) => {
         setHoveredLine(line)
         if (initialLine === null) return
-        setSelectedRange({
+
+        const nextRange = {
             start: Math.min(initialLine, line),
             end: Math.max(initialLine, line),
-        })
+        }
+
+        setSelectedRange(nextRange)
+
+        const isMultiLine = nextRange.start !== nextRange.end
+        setSuppressNativeSelection(isMultiLine)
+
+        if (isMultiLine) {
+            clearBrowserSelection()
+        }
     }
 
     const handleMouseUp = () => {
+        const range = selectedRangeRef.current
+        const isMultiLine = range !== null && range.start !== range.end
+
+        if (isMultiLine) {
+            clearBrowserSelection()
+        }
+
+        setSuppressNativeSelection(false)
         setInitialLine(null)
     }
 
@@ -473,7 +562,12 @@ export function AdminGrading() {
 
     // Fetch student name for header
     useEffect(() => {
-        if (submissionId < 0 || pid < 0) return
+        if (submissionId < 0 || pid < 0) {
+            setStudentHeaderLoading(false)
+            return
+        }
+
+        setStudentHeaderLoading(true)
 
         axios
             .post(
@@ -486,21 +580,49 @@ export function AdminGrading() {
                 },
             )
             .then((res) => {
-                const data = res.data
-                const entry = Object.entries(data).find(
-                    ([_, value]) => parseInt((value as Array<string>)[7], 10) === submissionId,
-                )
-                if (entry) {
-                    const studentData = entry[1] as Array<string>
-                    setStudentName(`${studentData[1]} ${studentData[0]}`)
-                }
+                const data = res.data ?? {}
+                const rows: StudentSubmissionNavRow[] = Object.entries(data)
+                    .map(([userId, value]) => {
+                        const studentData = Array.isArray(value) ? value : []
+                        const lastName = String(studentData[0] ?? '').trim()
+                        const firstName = String(studentData[1] ?? '').trim()
+                        const rawSubmissionId = parseInt(String(studentData[7] ?? ''), 10)
+
+                        return {
+                            userId: parseInt(userId, 10),
+                            firstName: firstName,
+                            lastName: lastName,
+                            fullName: `${firstName} ${lastName}`.trim(),
+                            submissionId: Number.isFinite(rawSubmissionId) ? rawSubmissionId : -1,
+                        }
+                    })
+                    .sort((a, b) => {
+                        const byLast = a.lastName.localeCompare(b.lastName, undefined, { sensitivity: 'base' })
+                        if (byLast !== 0) return byLast
+
+                        const byFirst = a.firstName.localeCompare(b.firstName, undefined, { sensitivity: 'base' })
+                        if (byFirst !== 0) return byFirst
+
+                        return a.userId - b.userId
+                    })
+
+                setStudentRoster(rows)
+
+                const currentRow = rows.find((row) => row.submissionId === submissionId)
+                setStudentName(currentRow?.fullName ?? '')
             })
             .catch((err) => console.log(err))
+            .finally(() => setStudentHeaderLoading(false))
     }, [submissionId, pid])
 
     // Fetch saved grading errors
     useEffect(() => {
-        if (submissionId < 0) return
+        if (submissionId < 0) {
+            setSavedGradingLoading(false)
+            return
+        }
+
+        setSavedGradingLoading(true)
 
         axios
             .get(`${import.meta.env.VITE_API_URL}/submissions/get-grading/${submissionId}`, {
@@ -508,6 +630,9 @@ export function AdminGrading() {
             })
             .then((response) => {
                 const { errors, scoringMode: savedMode, errorPoints: savedPoints, errorDefs: savedDefs } = response.data
+                const savedDbGrade = response.data?.grade
+
+                setSavedGrade(Number.isFinite(Number(savedDbGrade)) ? Number(savedDbGrade) : null)
 
                 if (savedMode === 'perInstance' || savedMode === 'flatPerError') {
                     setScoringMode(savedMode)
@@ -558,11 +683,14 @@ export function AdminGrading() {
 
             })
             .catch((err) => console.error('Could not load saved grading:', err))
+            .finally(() => setSavedGradingLoading(false))
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [submissionId])
 
     // Handles saving grading errors
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+    const isInitialPageLoading = studentHeaderLoading || savedGradingLoading
+    const showLoadingOverlay = isInitialPageLoading || saveStatus === 'saving'
 
     // Unsaved changes tracking (dirty state)
     const [isDirty, setIsDirty] = useState<boolean>(false)
@@ -617,6 +745,23 @@ export function AdminGrading() {
         setIsDirty(dirty)
     }, [currentSignature])
 
+    useEffect(() => {
+        if (!isDirty) return
+        setShowSavedBanner(false)
+        setSaveStatus((prev) => (prev === 'saved' ? 'idle' : prev))
+    }, [isDirty])
+
+    useEffect(() => {
+        if (!showSavedBanner) return
+
+        const timer = window.setTimeout(() => {
+            setShowSavedBanner(false)
+            setSaveStatus('idle')
+        }, 3000)
+
+        return () => window.clearTimeout(timer)
+    }, [showSavedBanner])
+
     // Warn before leaving the page if there are unsaved changes (tab close/refresh/navigate away)
     useEffect(() => {
         const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -641,6 +786,7 @@ export function AdminGrading() {
 
     const handleSave = () => {
         setSaveStatus('saving')
+        setShowSavedBanner(false)
 
         const customDefsForSave: Record<string, { label: string; description: string; points: number }> = {}
         for (const e of customErrorDefs) {
@@ -664,10 +810,12 @@ export function AdminGrading() {
                     },
                 },
             )
-            .then((response) => {
+            .then(() => {
                 setSaveStatus('saved')
+                setSavedGrade(grade)
                 savedSignatureRef.current = currentSignature
                 setIsDirty(false)
+                setShowSavedBanner(true)
             })
             .catch((error) => {
                 console.error('Failed to save:', error)
@@ -708,6 +856,7 @@ export function AdminGrading() {
 
     return (
         <div className="page-container" id="admin-output-diff">
+            <LoadingAnimation show={showLoadingOverlay} message={isInitialPageLoading ? 'Loading grading page...' : 'Saving grade...'} />
             <Helmet>
                 <title>TA-Bot</title>
             </Helmet>
@@ -725,6 +874,95 @@ export function AdminGrading() {
             />
 
             <div className="pageTitle">Grade Submission: {studentName || 'Unknown Student'}</div>
+
+            <div className="grading-student-nav">
+                <div className="grading-student-nav__summary">
+                    <div className="grading-student-chip">
+                        <span className="grading-student-chip__icon" aria-hidden="true">
+                            <FiUser />
+                        </span>
+                        <div className="grading-student-chip__content">
+                            <span className="grading-student-chip__label">Student</span>
+                            <span className="grading-student-chip__value">{currentStudentNav?.fullName || studentName || 'Unknown Student'}</span>
+                        </div>
+                    </div>
+
+                    <div className="grading-student-chip">
+                        <span className="grading-student-chip__icon" aria-hidden="true">
+                            <FiSave />
+                        </span>
+                        <div className="grading-student-chip__content">
+                            <span className="grading-student-chip__label">Current Saved Grade</span>
+                            <span className="grading-student-chip__value">{savedGrade ?? 'Not saved yet'}</span>
+                        </div>
+                    </div>
+
+                    <div className="grading-student-chip grading-student-chip--progress">
+                        <span className="grading-student-chip__icon" aria-hidden="true">
+                            <FiTrendingUp />
+                        </span>
+                        <div className="grading-student-chip__content">
+                            <span className="grading-student-chip__label">Progress</span>
+                            <span className="grading-student-chip__value">
+                                {currentStudentIndex >= 0
+                                    ? `Student ${currentStudentIndex + 1} of ${gradedStudentRoster.length}`
+                                    : 'Student not found in roster'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="grading-student-nav__actions">
+                    <button
+                        type="button"
+                        className="grading-student-nav__button"
+                        disabled={!previousStudentNav}
+                        onClick={() => (previousStudentNav ? goToSubmission(previousStudentNav.submissionId) : null)}
+                    >
+                        <span className="grading-student-nav__button-icon" aria-hidden="true">
+                            <FiChevronLeft />
+                        </span>
+                        <span className="grading-student-nav__button-text">
+                            <span className="grading-student-nav__button-label">Previous</span>
+                            <span className="grading-student-nav__button-name">
+                                {previousStudentNav ? previousStudentNav.fullName : 'No previous submission'}
+                            </span>
+                        </span>
+                    </button>
+
+                    <button
+                        type="button"
+                        className="grading-student-nav__button"
+                        disabled={!nextStudentNav}
+                        onClick={() => (nextStudentNav ? goToSubmission(nextStudentNav.submissionId) : null)}
+                    >
+                        <span className="grading-student-nav__button-text">
+                            <span className="grading-student-nav__button-label">Next</span>
+                            <span className="grading-student-nav__button-name">
+                                {nextStudentNav ? nextStudentNav.fullName : 'No next submission'}
+                            </span>
+                        </span>
+                        <span className="grading-student-nav__button-icon" aria-hidden="true">
+                            <FiChevronRight />
+                        </span>
+                    </button>
+                </div>
+            </div>
+
+            <div
+                className={`grading-saved-banner-popup ${showSavedBanner ? 'is-visible' : ''}`}
+                role="status"
+                aria-live="polite"
+                aria-hidden={!showSavedBanner}
+            >
+                <div className="grading-saved-banner-popup__icon" aria-hidden="true">
+                    ✓
+                </div>
+                <div className="grading-saved-banner-popup__content">
+                    <div className="grading-saved-banner-popup__title">Changes saved</div>
+                    <div className="grading-saved-banner-popup__text">Saved to the database successfully.</div>
+                </div>
+            </div>
 
             <DiffView
                 submissionId={submissionId}
@@ -776,8 +1014,6 @@ export function AdminGrading() {
                                     </div>
                                 </div>
 
-                                <button className="save-grade">Save as draft</button>
-
                                 <button className={`save-grade ${saveStatus}`} onClick={handleSave} disabled={saveStatus === 'saving'}>
                                     {saveStatus === 'idle' && 'Save'}
                                     {saveStatus === 'saving' && 'Saving...'}
@@ -795,7 +1031,6 @@ export function AdminGrading() {
                                 </div>
 
                                 {saveStatus === 'error' && <div className="muted small save-status">Save failed. Try again.</div>}
-                                {saveStatus === 'saved' && <div className="muted small save-status">Saved to the database.</div>}
                             </div>
 
                             {!hasErrors && <div className="muted">No errors added yet.</div>}

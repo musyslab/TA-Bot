@@ -38,10 +38,13 @@ def allowed_file(filename):
     Returns:
         [Boolean]: [returns a bool if the file is allowed or not]
     """
+    if not filename or "." not in filename:
+        return False
     filetype = filename.rsplit('.', 1)[1].lower()
     for key in ext:
         if filetype in ext[key]:
             return True
+    return False
 
 @upload_api.route('/total_students_by_cid', methods=['GET'])
 @jwt_required()
@@ -79,18 +82,39 @@ def file_upload(
     """
 
     class_id = request.form['class_id']
+    practice_raw = (request.form.get("practice", "") or "").strip().lower()
+    is_practice = practice_raw in ("1", "true", "yes", "y", "on")
+    ppid_raw = (request.form.get("practice_problem_id", "") or "").strip()
+    practice_problem_id = int(ppid_raw) if ppid_raw.isdigit() else None
+
     username = current_user.Username
     user_id = current_user.Id
     if "student_id" in request.form:
         username = user_repository.get_user_by_id(int(request.form["student_id"]))
         user_id = user_repository.getUserByName(username).Id
 
-    project_id = project_repo.get_current_project_by_class(class_id)
     project = None
     if "project_id" in request.form:
         project = project_repo.get_selected_project(int(request.form["project_id"]))
     else:
         project = project_repo.get_current_project_by_class(class_id)
+
+    # Practice mode uses PracticeProjects (if enabled), but still ties to the same main project Id.
+    pp = None
+    if is_practice and project is not None:
+        try:
+            if practice_problem_id:
+                pp = project_repo.get_practice_problem(int(practice_problem_id))
+                # Safety: ensure this practice problem belongs to the selected project
+                if not pp or int(getattr(pp, "ProjectId", 0) or 0) != int(project.Id):
+                    pp = None
+            if pp is None:
+                # Back-compat: if client did not send a practice_problem_id
+                pp = project_repo.get_practice_project(int(project.Id))
+            if not (pp and bool(getattr(pp, "Enabled", False))):
+                pp = None
+        except Exception:
+            pp = None
 
     if project is None:
         message = {
@@ -113,7 +137,8 @@ def file_upload(
         message = {'message': 'No selected file'}
         return make_response(message, HTTPStatus.BAD_REQUEST)
 
-    proj_lang = (project.Language or "").strip().lower()
+    eff_language = (pp.Language if (pp and getattr(pp, "Language", None)) else project.Language) or ""
+    proj_lang = eff_language.strip().lower()
     if proj_lang == "java":
         bad = [f.filename for f in upload_files if os.path.splitext(f.filename)[1].lower() != ".java"]
         if bad:
@@ -131,7 +156,9 @@ def file_upload(
     student_base = current_app.config['STUDENT_FILES_DIR']
 
     # student-files/<projecttimestamp__projectname>/<username>/<submissiontimestamp>/...
-    teacher_proj_dir = os.path.dirname(project.solutionpath)
+    eff_solutionpath = (pp.solutionpath if (pp and getattr(pp, "solutionpath", None)) else project.solutionpath) or ""
+    teacher_proj_dir = os.path.dirname(eff_solutionpath) if not os.path.isdir(eff_solutionpath) else eff_solutionpath
+
     teacher_folder_name = os.path.basename(teacher_proj_dir)
     project_bucket = os.path.join(student_base, teacher_folder_name)
 
@@ -145,7 +172,7 @@ def file_upload(
     os.makedirs(user_bucket, exist_ok=True)
 
     if upload_files and all(allowed_file(f.filename) for f in upload_files):
-        language = (project.Language or "").lower()
+        language = (eff_language or "").lower()
 
         # Per-submission timestamp for filenames
         ts_now = datetime.now()
@@ -175,7 +202,13 @@ def file_upload(
         path = submission_dir
 
         # Step 2: Run grade.py
-        testcase_info_json = project_repo.testcases_to_json(project.Id)
+        if is_practice and not practice_problem_id:
+            return make_response({'message': 'Missing practice_problem_id for practice submission'}, HTTPStatus.BAD_REQUEST)
+
+        testcase_info_json = project_repo.testcases_to_json(
+            project.Id,
+            practice_problem_id=(practice_problem_id if is_practice else None),
+        )
 
         grading_script = "/tabot-files/grading-scripts/grade.py"
         project_id_arg = str(project.Id)
@@ -185,10 +218,11 @@ def file_upload(
         # DB stores basenames (or JSON list). Resolve them to absolute paths under the teacher solution folder.
         add_payload = ""
         try:
-            sol_root = getattr(project, "solutionpath", "") or ""
+            sol_root = eff_solutionpath
             teacher_base_dir = sol_root if os.path.isdir(sol_root) else os.path.dirname(sol_root)
 
-            raw = (getattr(project, "AdditionalFilePath", "") or "").strip()
+            raw = (getattr(pp, "AdditionalFilePath", "") if pp else getattr(project, "AdditionalFilePath", "")) or ""
+            raw = raw.strip()
             if raw.startswith("[") or raw.startswith("{"):
                 lst = json.loads(raw)
             else:
@@ -211,7 +245,7 @@ def file_upload(
         cmd = [
             "python", grading_script,
             username,
-            project.Language,
+            eff_language,
             str(testcase_info_json),
             path,
             add_payload,
@@ -264,9 +298,26 @@ def file_upload(
             status=status,
             errorcount=0,
             testcase_results=TestCaseResults,
+            is_practice=is_practice,
+            practice_problem_id=(practice_problem_id if is_practice else None),
         )
 
-        submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
+        # Practice bonus: passing a practice problem grants +1 FastPass once per problem.
+        try:
+            if is_practice and status and practice_problem_id and pp is not None:
+                submission_repo.award_practice_bonus(
+                    user_id=int(user_id),
+                    class_id=int(class_id),
+                    project_id=int(project.Id),
+                    practice_problem_id=int(practice_problem_id),
+                    submission_id=int(submissionId),
+                )
+        except Exception:
+            pass
+
+        # Admin uploads and practice submissions should not consume charges.
+        if current_user.Role != ADMIN_ROLE and not is_practice:
+            submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
 
         message = {
             'message': 'Success',

@@ -2,7 +2,7 @@
 import React, { Component } from 'react'
 import axios from 'axios'
 import { Helmet } from 'react-helmet'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import MenuComponent from '../components/MenuComponent'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import '../../styling/AdminStudentRoster.scss'
@@ -11,6 +11,7 @@ import { FaClone, FaFileExport, FaDownload, FaEye, FaHandPaper } from 'react-ico
 
 const AdminStudentRoster = () => {
     const { class_id, id } = useParams<{ class_id: string; id: string }>()
+    const { search } = useLocation()
 
     if (!class_id || !id) {
         return <div>Error: project id missing or invalid</div>
@@ -21,7 +22,22 @@ const AdminStudentRoster = () => {
         return <div>Error: project id missing or invalid</div>
     }
 
-    return <StudentListInternal project_id={project_id} class_id={class_id} />
+    const practiceParam = (new URLSearchParams(search).get('practice') || '').toLowerCase()
+    const isPractice = ['1', 'true', 'yes', 'y', 'on'].includes(practiceParam)
+
+    const ppidParam = (new URLSearchParams(search).get('practice_problem_id') || '').trim()
+    const parsedPpid = parseInt(ppidParam, 10)
+    const practice_problem_id =
+        isPractice && !Number.isNaN(parsedPpid) && parsedPpid > 0 ? parsedPpid : undefined
+
+    return (
+        <StudentListInternal
+            project_id={project_id}
+            class_id={class_id}
+            isPractice={isPractice}
+            practice_problem_id={practice_problem_id}
+        />
+    )
 }
 
 export default AdminStudentRoster
@@ -29,6 +45,8 @@ export default AdminStudentRoster
 interface StudentListProps {
     project_id: number
     class_id: string
+    isPractice: boolean
+    practice_problem_id?: number
 }
 
 class Row {
@@ -75,6 +93,7 @@ interface StudentListState {
     isLoading: boolean
     lecture_numbers: Array<Option>
     lab_numbers: Array<Option>
+    projectName: string
     selectedStudent: number
     modalIsLoading: boolean
     modalIsOpen: boolean
@@ -117,6 +136,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             lecture_numbers: [{ key: -1, text: 'All', value: -1 }],
             lab_numbers: [{ key: -1, text: 'All', value: -1 }],
             isLoading: false,
+            projectName: '',
             selectedStudent: -1,
             modalIsLoading: false,
             modalIsOpen: false,
@@ -154,6 +174,20 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         this.downloadProjectGrades = this.downloadProjectGrades.bind(this)
     }
 
+    private formatDate12h(value: string): string {
+        if (!value || value === 'N/A') return 'N/A'
+        const d = new Date(value)
+        if (Number.isNaN(d.getTime())) return value
+        return new Intl.DateTimeFormat('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+        }).format(d)
+    }
+
     async downloadProjectGrades(rows: Row[]) {
         try {
             const url = `${import.meta.env.VITE_API_URL}/submissions/exportprojectgrades?project_id=${this.props.project_id}`
@@ -166,7 +200,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             const match = /filename\*?=(?:UTF-8''|")?([^\";]+)\"?/i.exec(cd)
             const fname = match
                 ? decodeURIComponent(match[1])
-                : `${res.headers['project-name']}-grades.xlsx`
+                : `${res.headers['project-name']}-grades.csv`
 
             const a = document.createElement('a')
             a.href = URL.createObjectURL(res.data)
@@ -211,13 +245,19 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
     componentDidMount() {
         const submissionsRequest = axios.post(
             import.meta.env.VITE_API_URL + `/submissions/recentsubproject`,
-            { project_id: this.props.project_id },
+            {
+                project_id: this.props.project_id,
+                practice: this.props.isPractice,
+                // When viewing practice submissions, scope to the specific practice problem if provided.
+                practice_problem_id: this.props.practice_problem_id ?? null,
+            },
             {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
                 },
             }
         );
+
         const ohVisitsRequest = axios.post(
             import.meta.env.VITE_API_URL + `/submissions/get_oh_visits_by_projectId`,
             { project_id: this.props.project_id },
@@ -227,9 +267,39 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                 },
             }
         );
-        Promise.all([submissionsRequest, ohVisitsRequest])
-            .then(([submissionsRes, officeHoursRes]) => {
+
+        const projectInfoRequest = axios.get(
+            import.meta.env.VITE_API_URL +
+            `/projects/get_project_id?id=${this.props.project_id}` +
+            `${this.props.isPractice && this.props.practice_problem_id ? `&practice_problem_id=${this.props.practice_problem_id}` : ''}`,
+            {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                },
+            }
+        );
+
+        Promise.all([submissionsRequest, ohVisitsRequest, projectInfoRequest])
+            .then(([submissionsRes, officeHoursRes, projectInfoRes]) => {
                 const data = submissionsRes.data
+
+                let projectName = ''
+                try {
+                    const parsed =
+                        typeof projectInfoRes.data === 'string'
+                            ? JSON.parse(projectInfoRes.data || '{}')
+                            : projectInfoRes.data || {}
+
+                    const firstEntry = Object.values(parsed as Record<string, any>)[0]
+
+                    if (Array.isArray(firstEntry)) {
+                        projectName = String(firstEntry[0] ?? firstEntry[1] ?? '').trim()
+                    } else {
+                        projectName = String((parsed as any)?.Name ?? '').trim()
+                    }
+                } catch (_e) {
+                    projectName = ''
+                }
 
                 const officeHoursAttendees = new Set(officeHoursRes.data);
                 const rows: Array<Row> = []
@@ -289,7 +359,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                 rows.sort((a, b) => a.Lname.localeCompare(b.Lname))
 
-                this.setState({ rows, lecture_numbers, lab_numbers })
+                this.setState({ rows, lecture_numbers, lab_numbers, projectName })
             })
     }
 
@@ -481,7 +551,12 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         axios
             .post(
                 import.meta.env.VITE_API_URL + `/projects/ProjectGrading`,
-                { userID: UserId, ProjectId: this.props.project_id },
+                {
+                    userID: UserId,
+                    ProjectId: this.props.project_id,
+                    practice: this.props.isPractice,
+                    practice_problem_id: this.props.practice_problem_id ?? null,
+                },
                 {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -515,6 +590,11 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             }
             return [...visible].sort((a, b) => a.Lname.localeCompare(b.Lname) || a.Fname.localeCompare(b.Fname))
         })()
+
+        const practiceQuery =
+            this.props.isPractice
+                ? `?practice=true${this.props.practice_problem_id ? `&practice_problem_id=${this.props.practice_problem_id}` : ''}`
+                : ''
 
         // ===== Helpers for modal "CodePage-like" UI =====
         const code = this.state.selectedStudentCode || ''
@@ -765,11 +845,17 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                     items={[
                         { label: 'Class Selection', to: '/admin/classes' },
                         { label: 'Project List', to: `/admin/${this.props.class_id}/projects/` },
-                        { label: 'Student List' },
+                        { label: this.props.isPractice ? 'Practice Submissions' : 'Student List' },
                     ]}
                 />
 
-                <div className="pageTitle">Grade or Review Student Submissions</div>
+                <div className="pageTitle">
+
+                    {this.state.projectName
+                        ? `Student List: ${this.state.projectName}`
+                        : 'Student List'}
+
+                </div>
 
                 <div className="main-grid">
                     <>
@@ -778,7 +864,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                             <div className="student-sub-panel">
                                 <div className="filter-bar">
                                     <label className="filter-label" htmlFor="lectureFilter">
-                                        Lecture:&nbsp;
+                                        Lecture:
                                     </label>
                                     <select
                                         id="lectureFilter"
@@ -793,10 +879,9 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                         ))}
                                     </select>
 
-                                    &nbsp;&nbsp;
 
                                     <label className="filter-label" htmlFor="labFilter">
-                                        Lab:&nbsp;
+                                        Lab:
                                     </label>
                                     <select
                                         id="labFilter"
@@ -811,48 +896,49 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                         ))}
                                     </select>
 
-                                    &nbsp;&nbsp;
+                                    {!this.props.isPractice && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="btn plagiarism-btn"
+                                                onClick={this.handleClick}
+                                                disabled={this.state.isLoading}
+                                                aria-label="Run Plagiarism Detector"
+                                                title="Run Plagiarism Detector"
+                                            >
+                                                <FaClone aria-hidden="true" />
+                                                Run Plagiarism Detector
+                                            </button>
 
-                                    <button
-                                        type="button"
-                                        className="btn plagiarism-btn"
-                                        onClick={this.handleClick}
-                                        disabled={this.state.isLoading}
-                                        aria-label="Run Plagiarism Detector"
-                                        title="Run Plagiarism Detector"
-                                    >
-                                        <FaClone aria-hidden="true" />
-                                        &nbsp;Run Plagiarism Detector
-                                    </button>
+                                            <button
+                                                type="button"
+                                                className="btn export-btn"
+                                                onClick={() => this.downloadProjectGrades(rowsForView)}
+                                                disabled={this.state.isLoading}
+                                                aria-label="Export Student Grades"
+                                                title="Export Student Grades"
+                                            >
+                                                <FaFileExport aria-hidden="true" />
+                                                Export Grades to D2L
+                                            </button>
 
-                                    &nbsp;&nbsp;
+                                        </>
+                                    )}
 
-                                    <button
-                                        type="button"
-                                        className="btn export-btn"
-                                        onClick={() => this.downloadProjectGrades(rowsForView)}
-                                        disabled={this.state.isLoading}
-                                        aria-label="Export Student Grades"
-                                        title="Export Student Grades"
-                                    >
-                                        <FaFileExport aria-hidden="true" />
-                                        &nbsp;Export Grades to D2L
-                                    </button>
-
-                                    &nbsp;&nbsp;
-
-                                    <label className="filter-label" htmlFor="sortSelect">
-                                        Sort by:&nbsp;
-                                    </label>
-                                    <select
-                                        id="sortSelect"
-                                        className="filter-select sort-select"
-                                        value={this.state.sortBy}
-                                        onChange={this.handleSortChange}
-                                    >
-                                        <option value="lastname">Last name (A→Z)</option>
-                                        <option value="lastsubmitted">Last submitted (newest)</option>
-                                    </select>
+                                    <div className="sort-control-group">
+                                        <label className="filter-label" htmlFor="sortSelect">
+                                            Sort by:
+                                        </label>
+                                        <select
+                                            id="sortSelect"
+                                            className="filter-select sort-select"
+                                            value={this.state.sortBy}
+                                            onChange={this.handleSortChange}
+                                        >
+                                            <option value="lastname">Last name (A→Z)</option>
+                                            <option value="lastsubmitted">Last submitted (newest)</option>
+                                        </select>
+                                    </div>
                                 </div>
 
                                 <div className="table-scroll" role="region" aria-label="Student submissions" tabIndex={0}>
@@ -867,7 +953,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                 <th className="col-status">Status</th>
                                                 <th className="col-view">View</th>
                                                 <th className="col-download">Download</th>
-                                                <th className="col-grade">Grade</th>
+                                                {!this.props.isPractice && <th className="col-grade">Grade</th>}
                                             </tr>
                                         </thead>
 
@@ -905,6 +991,59 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                             <td className="status-cell">N/A</td>
                                                             <td className="view-cell">N/A</td>
                                                             <td className="download-cell">N/A</td>
+                                                            {!this.props.isPractice && (
+                                                                <td className="grade-cell">
+                                                                    <input
+                                                                        className="grade-input"
+                                                                        type="text"
+                                                                        placeholder="optional"
+                                                                        value={row.grade}
+                                                                        onChange={(e) => this.handleGradeChange(e, row)}
+                                                                        disabled
+                                                                    />
+                                                                    <Link
+                                                                        to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
+                                                                        className="btn grade-btn"
+                                                                        rel="noreferrer"
+                                                                    >
+                                                                        Grade
+                                                                    </Link>
+                                                                </td>
+                                                            )}
+                                                        </tr>
+                                                    )
+                                                }
+
+                                                return (
+                                                    <tr className="student-row" key={`row-${row.id}`}>
+                                                        {renderStudentName()}
+                                                        <td className="lecture-number-cell">{row.lecture_number}</td>
+                                                        <td className="lab-number-cell">{row.lab_number}</td>
+                                                        <td className="submissions-cell">{row.numberOfSubmissions}</td>
+                                                        <td className="date-cell">{this.formatDate12h(row.date)}</td>
+                                                        <td className={row.isPassing ? 'status-cell status passed' : 'status-cell status failed'}>
+                                                            {row.isPassing ? 'PASSED' : 'FAILED'}
+                                                        </td>
+                                                        <td className="view-cell">
+                                                            <Link
+                                                                className="view-link"
+                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/codeview/${row.subid}${practiceQuery}`}
+                                                                rel="noreferrer"
+                                                            >
+                                                                <FaEye aria-hidden="true" /> View
+                                                            </Link>
+                                                        </td>
+                                                        <td className="download-cell">
+                                                            <button
+                                                                className="btn download-btn"
+                                                                onClick={() => this.downloadStudentCode(row)}
+                                                                aria-label="Download code"
+                                                                title="Download code"
+                                                            >
+                                                                <FaDownload aria-hidden="true" />
+                                                            </button>
+                                                        </td>
+                                                        {!this.props.isPractice && (
                                                             <td className="grade-cell">
                                                                 <input
                                                                     className="grade-input"
@@ -922,56 +1061,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                     Grade
                                                                 </Link>
                                                             </td>
-                                                        </tr>
-                                                    )
-                                                }
-
-                                                return (
-                                                    <tr className="student-row" key={`row-${row.id}`}>
-                                                        {renderStudentName()}
-                                                        <td className="lecture-number-cell">{row.lecture_number}</td>
-                                                        <td className="lab-number-cell">{row.lab_number}</td>
-                                                        <td className="submissions-cell">{row.numberOfSubmissions}</td>
-                                                        <td className="date-cell">{row.date}</td>
-                                                        <td className={row.isPassing ? 'status-cell status passed' : 'status-cell status failed'}>
-                                                            {row.isPassing ? 'PASSED' : 'FAILED'}
-                                                        </td>
-                                                        <td className="view-cell">
-                                                            <Link
-                                                                className="view-link"
-                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/codeview/${row.subid}`}
-                                                                rel="noreferrer"
-                                                            >
-                                                                <FaEye aria-hidden="true" /> View
-                                                            </Link>
-                                                        </td>
-                                                        <td className="download-cell">
-                                                            <button
-                                                                className="btn download-btn"
-                                                                onClick={() => this.downloadStudentCode(row)}
-                                                                aria-label="Download code"
-                                                                title="Download code"
-                                                            >
-                                                                <FaDownload aria-hidden="true" />
-                                                            </button>
-                                                        </td>
-                                                        <td className="grade-cell">
-                                                            <input
-                                                                className="grade-input"
-                                                                type="text"
-                                                                placeholder="optional"
-                                                                value={row.grade}
-                                                                onChange={(e) => this.handleGradeChange(e, row)}
-                                                                disabled
-                                                            />
-                                                            <Link
-                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
-                                                                className="btn grade-btn"
-                                                                rel="noreferrer"
-                                                            >
-                                                                Grade
-                                                            </Link>
-                                                        </td>
+                                                        )}
                                                     </tr>
                                                 )
                                             })}

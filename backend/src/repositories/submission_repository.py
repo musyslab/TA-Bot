@@ -4,8 +4,27 @@ import os
 from src.repositories.database import db
 from .models import StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users, SubmissionManualErrors
 from sqlalchemy import desc, and_
+from sqlalchemy.exc import IntegrityError
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
+
+class PracticeBonusAwards(db.Model):
+    """
+    Idempotent record of practice-problem bonus awards.
+    One award per (UserId, PracticeProblemId).
+    """
+    __tablename__ = "PracticeBonusAwards"
+    Id = db.Column(db.Integer, primary_key=True)
+    UserId = db.Column(db.Integer, nullable=False, index=True)
+    ClassId = db.Column(db.Integer, nullable=False)
+    ProjectId = db.Column(db.Integer, nullable=False)
+    PracticeProblemId = db.Column(db.Integer, nullable=False, index=True)
+    AwardedAt = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    SubmissionId = db.Column(db.Integer, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("UserId", "PracticeProblemId", name="uq_practice_bonus_user_pp"),
+    )
 
 class SubmissionRepository():
 
@@ -31,7 +50,19 @@ class SubmissionRepository():
         Returns:
             Submissions: The latest submission object made by the user for the given project.
         """
-        submission = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User == user_id)).order_by(desc("Time")).first()
+
+        # MAIN submissions only (exclude practice submissions that share the same Project id)
+        submission = (
+            Submissions.query
+            .filter(and_(
+                Submissions.Project == project_id,
+                Submissions.User == user_id,
+                Submissions.IsPractice == False
+            ))
+            .order_by(desc("Time"))
+            .first()
+        )
+
         return submission
 
     def get_submission_by_submission_id(self, submission_id: int) -> Submissions:
@@ -93,7 +124,19 @@ class SubmissionRepository():
             student_output_file = f.read()
         return student_output_file
     
-    def create_submission(self, user_id: int, output: str, codepath: str, time: str, project_id: int, status: bool, errorcount: int, testcase_results: str):
+    def create_submission(
+        self,
+        user_id: int,
+        output: str,
+        codepath: str,
+        time: str,
+        project_id: int,
+        status: bool,
+        errorcount: int,
+        testcase_results,
+        is_practice: bool = False,
+        practice_problem_id: int = None,
+    ):
         """Creates a new submission record in the database.
 
         Args:
@@ -115,6 +158,8 @@ class SubmissionRepository():
             User=user_id,
             Project=project_id,
             IsPassing=status,
+            IsPractice=bool(is_practice),
+            PracticeProblemId=(int(practice_problem_id) if (is_practice and practice_problem_id is not None) else None),
             TestCaseResults=str(testcase_results),
         )        
         db.session.add(submission)
@@ -132,7 +177,12 @@ class SubmissionRepository():
         thisdic={}
         project_ids = Projects.query.with_entities(Projects.Id).all()
         for proj in project_ids:
-            count = Submissions.query.with_entities(Submissions.User).filter(Submissions.Project == proj[0]).distinct().count()
+            count = (
+                Submissions.query.with_entities(Submissions.User)
+                .filter(Submissions.Project == proj[0], Submissions.IsPractice == False)
+                .distinct()
+                .count()
+            )
             thisdic[proj[0]]=count
         return thisdic
 
@@ -147,7 +197,18 @@ class SubmissionRepository():
         Returns:
             Dict[int, Submissions]: A dictionary where the keys are user IDs and the values are the most recent submission for each user.
         """
-        holder = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User.in_(user_ids))).order_by(desc(Submissions.Time)).all()
+
+        holder = (
+            Submissions.query
+            .filter(and_(
+                Submissions.Project == project_id,
+                Submissions.User.in_(user_ids),
+                Submissions.IsPractice == False
+            ))
+            .order_by(desc(Submissions.Time))
+            .all()
+        )
+
         bucket={}
         for obj in holder:
             if obj.User in bucket:
@@ -169,7 +230,9 @@ class SubmissionRepository():
             int: The ID of the project associated with the submission.
         """
         submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-        return submission.Project
+        if submission is None:
+            return -1
+        return int(getattr(submission, "Project", -1) or -1)
 
     def submission_view_verification(self, user_id, submission_id) -> bool:
         submission = Submissions.query.filter(and_(Submissions.Id==submission_id,Submissions.User==user_id)).first()
@@ -182,7 +245,17 @@ class SubmissionRepository():
         return (current_day == "Wednesday" and unlocked_info != None)
         
     def submission_counter(self, project_id: int, user_ids: List[int]) -> bool:
-        submissions = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User.in_(user_ids))).all()
+
+        submissions = (
+            Submissions.query
+            .filter(and_(
+                Submissions.Project == project_id,
+                Submissions.User.in_(user_ids),
+                Submissions.IsPractice == False
+            ))
+            .all()
+        )
+
         submission_counter_dict={}
         for sub in submissions:
             if sub.User in submission_counter_dict:
@@ -610,6 +683,14 @@ class SubmissionRepository():
             db.session.add(charge)
             db.session.commit()
 
+        # Practice submissions are always free (do not consume base or reward charges).
+        try:
+            sub = Submissions.query.filter(Submissions.Id == submission_id).first()
+            if sub is not None and bool(getattr(sub, "IsPractice", False)):
+                return "ok"
+        except Exception:
+            pass
+
         submission_charge = None
 
         # Determine if a user is in an active office hour session; if so, do not charge the student.
@@ -674,12 +755,86 @@ class SubmissionRepository():
         charge.RedeemedTime = dt_string
         db.session.commit()
         return "ok"
+
     def add_reward_charge(self, user_id, class_id, rewardAmount):
         charge = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
         charge.RewardCharge += rewardAmount
         if charge.RewardCharge > 5:
             charge.RewardCharge = 5
         db.session.commit()
+
+    def award_practice_bonus(
+        self,
+        user_id: int,
+        class_id: int,
+        project_id: int,
+        practice_problem_id: int,
+        submission_id: int | None = None,
+    ) -> bool:
+        """
+        Award +1 FastPass (RewardCharge) once per practice problem when the student passes.
+        Returns True only if a new award was created and applied.
+        """
+        if not practice_problem_id:
+            return False
+
+        # Ensure table exists without requiring a migration step.
+        try:
+            PracticeBonusAwards.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            return False
+
+        try:
+            exists = (
+                PracticeBonusAwards.query
+                .filter(PracticeBonusAwards.UserId == int(user_id))
+                .filter(PracticeBonusAwards.PracticeProblemId == int(practice_problem_id))
+                .first()
+            )
+            if exists:
+                return False
+
+            row = PracticeBonusAwards(
+                UserId=int(user_id),
+                ClassId=int(class_id),
+                ProjectId=int(project_id),
+                PracticeProblemId=int(practice_problem_id),
+                AwardedAt=datetime.utcnow(),
+                SubmissionId=(int(submission_id) if submission_id is not None else None),
+            )
+            db.session.add(row)
+
+            # Ensure a SubmissionCharges row exists for this user/class
+            charge = (
+                SubmissionCharges.query
+                .filter(and_(
+                    SubmissionCharges.UserId == int(user_id),
+                    SubmissionCharges.ClassId == int(class_id),
+                ))
+                .first()
+            )
+            if charge is None:
+                charge = SubmissionCharges(
+                    UserId=int(user_id),
+                    ClassId=int(class_id),
+                    BaseCharge=3,
+                    RewardCharge=0,
+                )
+                db.session.add(charge)
+                db.session.flush()
+
+            # Apply +1 FastPass (cap at 5 to match existing behavior)
+            charge.RewardCharge = min(5, int(charge.RewardCharge or 0) + 1)
+
+            db.session.commit()
+            return True
+        except IntegrityError:
+            db.session.rollback()
+            return False
+        except Exception:
+            db.session.rollback()
+            return False
+
     def consume_reward_charge(self, user_id, class_id, project):
         dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
         try:

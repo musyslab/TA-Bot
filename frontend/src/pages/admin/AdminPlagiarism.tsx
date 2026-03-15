@@ -6,7 +6,25 @@ import { FaColumns, FaList } from "react-icons/fa";
 import { diffChars } from "diff";
 import MenuComponent from "../components/MenuComponent";
 import { Helmet } from "react-helmet";
-import { Highlight, themes } from "prism-react-renderer";
+import { Highlight, themes, Prism } from "prism-react-renderer";
+
+// Ensure Prism languages are registered once for this page.
+let prismLangsLoaded = false;
+let prismLangsPromise: Promise<void> | null = null;
+function ensurePrismLangsLoaded() {
+    if (prismLangsLoaded) return Promise.resolve();
+    if (prismLangsPromise) return prismLangsPromise;
+
+    (globalThis as any).Prism = (globalThis as any).Prism ?? Prism;
+    prismLangsPromise = Promise.all([
+        import("prismjs/components/prism-java"),
+        import("prismjs/components/prism-python"),
+    ]).then(() => {
+        prismLangsLoaded = true;
+    });
+
+    return prismLangsPromise;
+}
 
 type CodeSide = { code: string; label: string };
 
@@ -35,6 +53,12 @@ export default function AdminPlagiarism() {
     const [error, setError] = useState<string | null>(null);
     const [simEnabled, setSimEnabled] = useState<boolean>(false);
     const [stacked, setStacked] = useState<boolean>(false); // false = side-by-side, true = top/bottom
+
+    // Force a rerender after Prism languages load so Highlight can use the grammar.
+    const [, forcePrismRefresh] = useState(0);
+    useEffect(() => {
+        ensurePrismLangsLoaded().then(() => forcePrismRefresh((v) => v + 1));
+    }, []);
 
     useEffect(() => {
         async function fetchCode(classId: string | null, subId: string | null): Promise<string> {

@@ -4,7 +4,7 @@ import { useNavigate, NavigateFunction } from 'react-router-dom'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
-import { FaAlignJustify, FaCode, FaExchangeAlt, FaRegFile, FaTimes } from 'react-icons/fa'
+import { FaAlignJustify, FaCloudUploadAlt, FaCode, FaExchangeAlt, FaRegFile, FaTimes } from 'react-icons/fa'
 import LoadingAnimation from '../components/LoadingAnimation'
 import '../../styling/AdminUploadPage.scss'
 import '../../styling/FileUploadCommon.scss'
@@ -37,6 +37,9 @@ interface UploadPageState {
     projects: Array<DropDownOption>
     student_id: number
     class_selected: boolean
+    projectPracticeEnabledById: Record<number, boolean>
+    practiceProblemsByProjectId: Record<number, { id: number; number: number; name: string; enabled: boolean }[]>
+    selectedPracticeProblemId: number
 }
 
 interface ProjectObject {
@@ -45,6 +48,7 @@ interface ProjectObject {
     Start: string
     End: string
     TotalSubmissions: number
+    PracticeProblemsEnabled?: boolean
 }
 
 interface AdminUploadPageProps {
@@ -131,6 +135,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             class_selected: false,
             files: [],
             mainJavaFileName: '',
+            projectPracticeEnabledById: {},
+            practiceProblemsByProjectId: {},
+            selectedPracticeProblemId: 0,
         }
 
         this.handleSubmit = this.handleSubmit.bind(this)
@@ -138,6 +145,36 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         this.handleStudentIdChange = this.handleStudentIdChange.bind(this)
         this.handleFilesChange = this.handleFilesChange.bind(this)
         this.handleClassIdChange = this.handleClassIdChange.bind(this)
+    }
+
+    private async loadPracticeProblemsForProject(projectId: number) {
+        if (!(projectId > 0)) return
+        if (!this.state.projectPracticeEnabledById[projectId]) return
+
+        try {
+            const res = await axios.get(
+                import.meta.env.VITE_API_URL + `/projects/list_practice_problems?project_id=${projectId}`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+                    },
+                }
+            )
+            const problems = Array.isArray(res.data?.problems) ? res.data.problems : []
+            const rows = problems.map((pp: any, idx: number) => ({
+                id: Number(pp?.id),
+                number: Number(pp?.number ?? idx + 1),
+                name: String(pp?.name ?? `Practice Problem ${idx + 1}`),
+                enabled: !!pp?.enabled,
+            }))
+            this.setState((prev) => ({
+                practiceProblemsByProjectId: { ...prev.practiceProblemsByProjectId, [projectId]: rows },
+            }))
+        } catch {
+            this.setState((prev) => ({
+                practiceProblemsByProjectId: { ...prev.practiceProblemsByProjectId, [projectId]: [] },
+            }))
+        }
     }
 
     handleStudentIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -149,12 +186,24 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             files: [],
             mainJavaFileName: '',
             isUploading: false,
+            selectedPracticeProblemId: 0,
         })
     }
 
     handleProjectIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
         const value = parseInt(e.target.value, 10)
-        this.setState({ project_id: Number.isNaN(value) ? 0 : value })
+        const nextProjectId = Number.isNaN(value) ? 0 : value
+        this.setState(
+            {
+                project_id: nextProjectId,
+                selectedPracticeProblemId: 0,
+            },
+            () => {
+                if (nextProjectId > 0 && this.state.projectPracticeEnabledById[nextProjectId]) {
+                    this.loadPracticeProblemsForProject(nextProjectId)
+                }
+            }
+        )
     }
 
     handleClassIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -173,6 +222,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             files: [],
             mainJavaFileName: '',
             isUploading: false,
+            projectPracticeEnabledById: {},
+            practiceProblemsByProjectId: {},
+            selectedPracticeProblemId: 0,
         })
 
         axios
@@ -237,7 +289,14 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                     text: p.Name,
                     value: p.Id,
                 }))
-                this.setState({ projects: projectDropdown })
+                const practiceMap: Record<number, boolean> = {}
+                for (const p of projects) {
+                    practiceMap[p.Id] = !!p.PracticeProblemsEnabled
+                }
+                this.setState({
+                    projects: projectDropdown,
+                    projectPracticeEnabledById: practiceMap,
+                })
             })
             .catch((err) => {
                 this.setState({
@@ -272,7 +331,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             })
     }
 
-    // Simplified icon system:
+    // Icon system:
     // - Code (java, python, c, racket) => code icon
     // - Text (text, word, pdf) => two-line text icon
     // - Otherwise => alternate icon
@@ -346,6 +405,12 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             formData.append('project_id', String(this.state.project_id))
             formData.append('class_id', String(this.state.class_id))
 
+            const isPractice = this.state.selectedPracticeProblemId > 0
+            formData.append('practice', isPractice ? '1' : '0')
+            if (isPractice) {
+                formData.append('practice_problem_id', String(this.state.selectedPracticeProblemId))
+            }
+
             axios
                 .post(import.meta.env.VITE_API_URL + `/upload/`, formData, {
                     headers: {
@@ -353,7 +418,16 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                     },
                 })
                 .then((res) => {
-                    window.location.href = `/admin/${this.state.class_id.toString()}/project/${this.state.project_id.toString()}/codeview/${res.data.sid.toString()}`
+                    const isPractice = this.state.selectedPracticeProblemId > 0
+                    const practiceQuery = isPractice
+                        ? `?practice=true&practice_problem_id=${this.state.selectedPracticeProblemId.toString()}`
+                        : ''
+
+                    window.location.href =
+                        `/admin/${this.state.class_id.toString()}` +
+                        `/project/${this.state.project_id.toString()}` +
+                        `/codeview/${res.data.sid.toString()}` +
+                        practiceQuery
                 })
                 .catch((err) => {
                     this.setState({
@@ -381,10 +455,17 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         const disableProject = !studentChosen || this.state.isLoading || this.state.projects.length === 0
         const disableUpload = !projectChosen || this.state.isLoading
 
+        const practiceEnabledForProject =
+            projectChosen && !!this.state.projectPracticeEnabledById[this.state.project_id]
+        const practiceRows = practiceEnabledForProject
+            ? this.state.practiceProblemsByProjectId[this.state.project_id] ?? []
+            : []
+        const enabledPracticeRows = practiceRows.filter((p) => !!p.enabled)
+
         return (
             <>
 
-<LoadingAnimation show={this.state.isUploading} message="Uploading..." />
+                <LoadingAnimation show={this.state.isUploading} message="Uploading..." />
 
                 <DirectoryBreadcrumbs
                     items={[
@@ -457,6 +538,46 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                 ))}
                             </select>
 
+                            {practiceEnabledForProject && (
+                                <>
+                                    <div className="spacer" aria-hidden="true">
+                                        &nbsp;
+                                    </div>
+
+                                    <p className="section-label">Submit to</p>
+                                    <select
+                                        className="select practice-target-select"
+                                        value={
+                                            this.state.selectedPracticeProblemId > 0
+                                                ? `practice:${this.state.selectedPracticeProblemId}`
+                                                : 'main'
+                                        }
+                                        onChange={(e) => {
+                                            const v = e.target.value || 'main'
+                                            if (v === 'main') {
+                                                this.setState({ selectedPracticeProblemId: 0 })
+                                                return
+                                            }
+                                            if (v.startsWith('practice:')) {
+                                                const idStr = v.split(':', 2)[1] || ''
+                                                const pid = parseInt(idStr, 10)
+                                                this.setState({
+                                                    selectedPracticeProblemId: Number.isNaN(pid) ? 0 : pid,
+                                                })
+                                            }
+                                        }}
+                                        disabled={this.state.isLoading}
+                                    >
+                                        <option value="main">Main Problem</option>
+                                        {enabledPracticeRows.map((pp) => (
+                                            <option key={pp.id} value={`practice:${pp.id}`}>
+                                                {`Practice ${pp.number}: ${pp.name}`}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </>
+                            )}
+
                             <div className="spacer" aria-hidden="true">
                                 &nbsp;
                             </div>
@@ -491,9 +612,12 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                         onChange={this.handleFilesChange}
                                                         disabled={disableUpload}
                                                     />
-                                                    <div className="file-drop-message">
-                                                        Drag &amp; drop your file here or&nbsp;
-                                                        <span className="browse-text">browse</span>
+                                                    <div className="file-drop-content">
+                                                        <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                        <div className="file-drop-message">
+                                                            Drag &amp; drop your file here or{' '}
+                                                            <span className="browse-text">browse</span>
+                                                        </div>
                                                     </div>
                                                 </>
                                             ) : (

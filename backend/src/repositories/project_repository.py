@@ -4,21 +4,87 @@ import random
 import shutil
 import subprocess
 from typing import Optional, Dict
-
 from flask import send_file
-
 from sqlalchemy.sql.expression import asc
-from .models import Projects, StudentGrades, Submissions, Testcases, Classes
+from .models import Projects, PracticeProblems, StudentGrades, Submissions, Testcases, Classes
 from src.repositories.database import db
-from sqlalchemy import desc, and_
+from sqlalchemy import desc, and_, func
 from datetime import datetime
 from pyston import PystonClient,File
 import asyncio
 import json
 
-
-
 class ProjectRepository():
+
+    def json_list_field(self, raw: str) -> list[str]:
+        try:
+            s = (raw or "").strip()
+            if not s:
+                return []
+            vals = json.loads(s) if s.startswith("[") else [s]
+            return [v for v in (vals or []) if v]
+        except Exception:
+            return []
+
+    def basename_or_empty(self, p: str) -> str:
+        return os.path.basename(p) if p else ""
+
+    def expand_additional_paths(self, add_path: str, project_base: str) -> str:
+        """
+        grade.py expects JSON list of absolute paths.
+        DB may store basenames or JSON list of basenames.
+        """
+        try:
+            base_dir = project_base if os.path.isdir(project_base) else os.path.dirname(project_base)
+            lst = self.json_list_field(add_path)
+            abs_list = []
+            for p in (lst or []):
+                if not p:
+                    continue
+                if os.path.isabs(p):
+                    abs_list.append(p)
+                else:
+                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
+            return json.dumps(abs_list)
+        except Exception:
+            return add_path or ""
+
+    def list_practice_problems(self, project_id: int):
+        return (
+            PracticeProblems.query
+            .filter(PracticeProblems.ProjectId == int(project_id))
+            .order_by(PracticeProblems.PracticeNumber.asc(), PracticeProblems.Id.asc())
+            .all()
+        )
+
+    def get_practice_problem(self, practice_problem_id: int) -> Optional[PracticeProblems]:
+        return PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+
+    def create_practice_problem(self, project_id: int, *, name: str = "") -> int:
+        proj = Projects.query.filter(Projects.Id == int(project_id)).first()
+        if not proj:
+            return 0
+
+        max_num = (
+            db.session.query(func.max(PracticeProblems.PracticeNumber))
+            .filter(PracticeProblems.ProjectId == int(project_id))
+            .scalar()
+        )
+        next_num = int(max_num or 0) + 1
+
+        pp = PracticeProblems(
+            ProjectId=int(project_id),
+            PracticeNumber=next_num,
+            Enabled=True,
+            Name=(name or f"Practice Problem {next_num}"),
+            Language=getattr(proj, "Language", ""),
+            solutionpath=None,
+            AsnDescriptionPath=None,
+            AdditionalFilePath="[]",
+        )
+        db.session.add(pp)
+        db.session.commit()
+        return int(pp.Id)
 
     def get_current_project(self) -> Optional[Projects]:
         """[Identifies the current project based on the start and end date]
@@ -77,34 +143,87 @@ class ProjectRepository():
         class_projects = Projects.query.filter(Projects.ClassId==class_id)
         return class_projects
     
-    def create_project(self, name: str, start: datetime, end: datetime, language:str, class_id:int, file_path:str, description_path:str, additional_file_path:str):
-        project = Projects(Name=name, Start=start, End=end, Language=language,
-                            ClassId=class_id, solutionpath=file_path,
-                            AsnDescriptionPath=description_path,
-                            AdditionalFilePath=additional_file_path)
+    def create_project(self, name: str, start: datetime, end: datetime, language:str, class_id:int, file_path:str, description_path:str, additional_file_path:str, practice_problems_enabled: bool = False):
+        project = Projects(
+            Name=name,
+            Start=start,
+            End=end,
+            Language=language,
+            ClassId=class_id,
+            solutionpath=file_path,
+            AsnDescriptionPath=description_path,
+            AdditionalFilePath=additional_file_path,
+        )
+
         db.session.add(project)
         db.session.commit()
+
+        if bool(practice_problems_enabled):
+            pp = PracticeProblems(
+                ProjectId=project.Id,
+                Enabled=True,
+                Name="Practice Problem 1",
+                PracticeNumber=1,
+                Language=language,
+                solutionpath=None,
+                AsnDescriptionPath=None,
+                AdditionalFilePath="[]",
+            )
+            db.session.add(pp)
+            db.session.commit()
+
         return project.Id
+
+    def set_practice_problems_enabled(self, project_id: int, enabled: bool):
+        proj = Projects.query.filter(Projects.Id == int(project_id)).first()
+        if not proj:
+            return
+        if bool(enabled):
+            # Ensure at least one exists when toggled on
+            existing = self.list_practice_problems(int(project_id))
+            if not existing:
+                self.create_practice_problem(int(project_id), name="Practice Problem 1")
+        # No global disable cascade here. UI can hide access when toggle off.
+        db.session.commit()
+
+    def get_practice_problems_enabled(self, project_id: int) -> bool:
+        q = PracticeProblems.query.filter(
+            PracticeProblems.ProjectId == int(project_id),
+            PracticeProblems.Enabled == True,
+        ).first()
+        return bool(q)
         
-    def get_project(self, project_id:int) -> Projects:
+    def get_project(self, project_id:int, practice_problem_id: Optional[int] = None) -> Projects:
         project_data = Projects.query.filter(Projects.Id == project_id).first()
+        pp = None
+        if practice_problem_id:
+            pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
         project ={}
         now=project_data.Start
         start_string = now.strftime("%Y-%m-%dT%H:%M:%S")
         now = project_data.End
         end_string = now.strftime("%Y-%m-%dT%H:%M:%S")
-        project_solutionFile = project_data.solutionpath
-        #Strip just the file name from the path
-        project_solutionFile = project_solutionFile.split("/")[-1]
-        project_descriptionfile = project_data.AsnDescriptionPath
-        project_descriptionfile = project_descriptionfile.split("/")[-1]
-        add_field = getattr(project_data, "AdditionalFilePath", "") or ""
-        try:
-            add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
-        except Exception:
-            add_list = []
-        project_additionalfiles = [os.path.basename(p) for p in add_list if p]
+
+        if practice_problem_id:
+            project_solutionFile = self.basename_or_empty(pp.solutionpath if (pp and pp.solutionpath) else "")
+            project_descriptionfile = self.basename_or_empty(pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else "")
+            add_field = (getattr(pp, "AdditionalFilePath", "") if pp else "") or ""
+        else:
+            project_solutionFile = self.basename_or_empty(getattr(project_data, "solutionpath", "") or "")
+            project_descriptionfile = self.basename_or_empty(getattr(project_data, "AsnDescriptionPath", "") or "")
+            add_field = (getattr(project_data, "AdditionalFilePath", "") or "")
+
+        project_additionalfiles = [os.path.basename(p) for p in self.json_list_field(add_field)]
+
+        display_name = project_data.Name
+        practice_num = 0
+
+        if practice_problem_id and pp and getattr(pp, "Name", None):
+            display_name = pp.Name
+            practice_num = int(getattr(pp, "PracticeNumber", 0) or 0)
+
         project[project_data.Id] = [
+            str(display_name),
             str(project_data.Name),
             str(start_string),
             str(end_string),
@@ -112,10 +231,12 @@ class ProjectRepository():
             str(project_solutionFile),
             str(project_descriptionfile),
             project_additionalfiles,
+            self.get_practice_problems_enabled(project_data.Id),
+            practice_num,
         ]
         return project
 
-    def edit_project(self, name: str, start: datetime, end: datetime, language:str, project_id:int, path:str, description_path:str, additional_file_path:str):
+    def edit_project(self, name: str, start: datetime, end: datetime, language:str, project_id:int, path:str, description_path:str, additional_file_path:str, practice_problems_enabled: bool = False):
         project = Projects.query.filter(Projects.Id == project_id).first()
         project.Name = name
         project.Start = start
@@ -124,10 +245,18 @@ class ProjectRepository():
         project.solutionpath = path
         project.AsnDescriptionPath = description_path
         project.AdditionalFilePath = additional_file_path
-        db.session.commit() 
+
+        db.session.commit()
+
+        self.set_practice_problems_enabled(project_id, bool(practice_problems_enabled))
         
-    def get_testcases(self, project_id: int) -> Dict[int, list]:
-        testcases = Testcases.query.filter(Testcases.ProjectId == project_id).all()
+    def get_testcases(self, project_id: int, practice_problem_id: Optional[int] = None) -> Dict[int, list]:
+        q = Testcases.query.filter(Testcases.ProjectId == int(project_id))
+        if practice_problem_id:
+            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        else:
+            q = q.filter(Testcases.PracticeProblemId.is_(None))
+        testcases = q.all()
         testcase_info: Dict[int, list] = {}
         for test in testcases:
             testcase_data = []
@@ -150,47 +279,41 @@ class ProjectRepository():
         output: str,
         class_id: int,
         hidden: bool = False,
+        practice_problem_id: Optional[int] = None,
     ):
         from flask import current_app
 
-        # Fetch project and determine teacher directory base
+        # Fetch project (main) and choose correct file roots (main vs practice)
         project = Projects.query.filter(Projects.Id == project_id).first()
-        teacher_base = current_app.config["TEACHER_FILES_DIR"]
-        # Ensure solutionpath points to the teacher project folder
-        project_base = project.solutionpath  
+        pp = None
+        if practice_problem_id:
+            pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+
+        # Ensure practice testcases NEVER fall back to main solution files
+        if practice_problem_id:
+            if not pp or not getattr(pp, "solutionpath", None):
+                raise ValueError("Practice problem has no solution files")
+            project_base = pp.solutionpath
+        else:
+            if not project or not getattr(project, "solutionpath", None):
+                raise ValueError("Assignment has no solution files")
+            project_base = project.solutionpath
 
         # Run grading-script to compute default output if none provided
         grading_script = os.path.join(
             current_app.root_path, "..", "tabot-files", "grading-scripts", "grade.py"
         )
 
-        add_path = getattr(project, "AdditionalFilePath", "") or ""
-        # Expand stored names to absolute paths under the teacher project folder for grade.py
-        try:
-            base_dir = project_base if os.path.isdir(project_base) else os.path.dirname(project_base)
-            raw = (add_path or "").strip()
-            if raw.startswith("[") or raw.startswith("{"):
-                lst = json.loads(raw)
-            else:
-                lst = [raw] if raw else []
-            abs_list = []
-            for p in (lst or []):
-                if not p:
-                    continue
-                if os.path.isabs(p):
-                    abs_list.append(p)
-                else:
-                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
-            add_path = json.dumps(abs_list)
-        except Exception:
-            pass
+        add_path = (getattr(pp, "AdditionalFilePath", "") if pp else getattr(project, "AdditionalFilePath", "")) or ""
+        add_path = self.expand_additional_paths(add_path, project_base)
+
         #   grade.py ADMIN <language> <input_text> <solution_path> [additional_files_json]
         result = subprocess.run(
             [
                 "python",
                 grading_script,
                 "ADMIN",
-                project.Language,
+                (pp.Language if (pp and pp.Language) else project.Language),
                 input_data,
                 project_base,
                 add_path,
@@ -213,11 +336,13 @@ class ProjectRepository():
         if testcase is None:
             testcase = Testcases(
                 ProjectId=project_id,
+                PracticeProblemId=(int(practice_problem_id) if practice_problem_id else None),
                 Name=name,
                 Description=description,
                 input=input_data,
                 Output=output,
                 Hidden=bool(hidden),
+                Practice=bool(practice_problem_id),
             )
             db.session.add(testcase)
         else:
@@ -226,6 +351,8 @@ class ProjectRepository():
             testcase.input = input_data
             testcase.Output = output
             testcase.Hidden = bool(hidden)
+            testcase.PracticeProblemId = (int(practice_problem_id) if practice_problem_id else None)
+            testcase.Practice = bool(practice_problem_id)
 
         db.session.commit()
 
@@ -234,55 +361,41 @@ class ProjectRepository():
         db.session.delete(testcase)
         db.session.commit()
 
-    def testcases_to_json(self, project_id: int) -> str:
+    def testcases_to_json(self, project_id: int, practice_problem_id: Optional[int] = None) -> str:
         testcase_holder: Dict[int, list] = {}
         proj = Projects.query.filter(Projects.Id == project_id).first()
         add_field = getattr(proj, "AdditionalFilePath", "") if proj else ""
-        try:
-            add_list = json.loads(add_field) if (add_field or "").startswith('[') else ([add_field] if add_field else [])
-        except Exception:
-            add_list = []
+        add_list = self.json_list_field(add_field)
 
         # Expand stored names to absolute paths under the teacher solution folder.
+        base_dir = ""
+        if proj and getattr(proj, "solutionpath", ""):
+            sp = getattr(proj, "solutionpath", "")
+            base_dir = sp if os.path.isdir(sp) else os.path.dirname(sp)
         try:
-            base_dir = ""
-            if proj and getattr(proj, "solutionpath", ""):
-                sp = getattr(proj, "solutionpath", "")
-                base_dir = sp if os.path.isdir(sp) else os.path.dirname(sp)
-            abs_list = []
-            for p in (add_list or []):
-                if not p:
-                    continue
-                if os.path.isabs(p):
-                    abs_list.append(p)
-                else:
-                    abs_list.append(os.path.join(base_dir, os.path.basename(p)))
-            add_list = abs_list
+            add_list = json.loads(self.expand_additional_paths(json.dumps(add_list), base_dir))
         except Exception:
             pass
 
-        tests = Testcases.query.filter(Testcases.ProjectId == project_id).all()
+        q = Testcases.query.filter(Testcases.ProjectId == project_id)
+        if practice_problem_id:
+            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        else:
+            q = q.filter(Testcases.PracticeProblemId.is_(None))
+        tests = q.all()
+
         for test in tests:
             testcase_holder[test.Id] = [
                 test.Name,
                 test.Description,
                 test.input,
                 test.Output,
-                add_list,
                 bool(getattr(test, "Hidden", False)),
+                add_list,
             ]
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)
         return json_object
-
-    def wipe_submissions(self, project_id:int):
-        submissions = Submissions.query.filter(Submissions.Project == project_id).all()
-        for student in student_progress:
-            db.session.delete(student)
-        db.session.commit()
-        for submission in submissions:
-            db.session.delete(submission)
-        db.session.commit()
     
     def get_className_by_projectId(self, project_id):
         try:
@@ -304,17 +417,28 @@ class ProjectRepository():
         class_id = Classes.query.filter(Classes.Name==class_name).first().Id
         return class_id
 
-    def get_project_path(self, project_id):
+    def get_project_path(self, project_id, practice_problem_id: Optional[int] = None):
         project = Projects.query.filter(Projects.Id==project_id).first()
+        if not project:
+            return ""
+        if practice_problem_id:
+            pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+            return (pp.solutionpath if (pp and pp.solutionpath) else "")
         return project.solutionpath
 
-    def get_project_desc_path(self, project_id):
-        project = Projects.query.filter(Projects.Id==project_id).first()
+    def get_project_desc_path(self, project_id, practice_problem_id: Optional[int] = None):
+        project = Projects.query.filter(Projects.Id == project_id).first()
+        if not project:
+            return ""
+        if practice_problem_id:
+            pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+            return (pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else "")
         return project.AsnDescriptionPath
 
-    def get_project_desc_file(self, project_id):
-        project = Projects.query.filter(Projects.Id == project_id).first()
-        filepath = project.AsnDescriptionPath
+    def get_project_desc_file(self, project_id, practice_problem_id: Optional[int] = None):
+        filepath = self.get_project_desc_path(project_id, practice_problem_id=practice_problem_id)
+        if not filepath:
+            return b""
         with open(filepath, 'rb') as file:
             file_contents = file.read()
         return file_contents  # Return the contents of the PDF file

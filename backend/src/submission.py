@@ -23,9 +23,10 @@ from datetime import datetime
 from dependency_injector.wiring import inject, Provide
 from container import Container
 from urllib.parse import unquote
-from openpyxl import Workbook
+import csv
+from io import StringIO
 from src.ai_suggestions import ERROR_DEFS
-from src.repositories.models import Testcases
+from src.repositories.models import Testcases, Submissions
 
 # Default grading error definitions (must match AdminGrading.tsx BASE_ERROR_DEFS).
 # We store them here so exports can resolve default point values when ErrorPointsJson
@@ -59,15 +60,157 @@ ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
 submission_api = Blueprint('submission_api', __name__)
 
-def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
-    # New grader writes JSON directly (testcases.json). If so, pass it through.
+def parse_int(v, default: int = -1) -> int:
     try:
-        if str(file_path or "").lower().endswith(".json"):
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                obj = json.load(f) or {}
-            return json.dumps(obj, sort_keys=True, indent=4)
+        return int(str(v).strip())
     except Exception:
-        # Fall back to TAP parsing below for legacy outputs
+        return default
+
+def parse_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    s = str(v or "").strip().lower()
+    return s in ("1", "true", "yes", "y", "on")
+
+def opt_int(raw) -> int | None:
+    s = str(raw or "").strip()
+    return int(s) if s.isdigit() else None
+
+def practice_params_from_args() -> tuple[bool, int | None]:
+    want_practice = parse_bool(request.args.get("practice", ""))
+    ppid = opt_int(request.args.get("practice_problem_id", ""))
+    return want_practice, ppid
+
+def latest_practice_submission(project_id: int, user_id: int, practice_problem_id: int | None):
+    try:
+        q = (
+            Submissions.query
+            .filter(
+                Submissions.Project == int(project_id),
+                Submissions.User == int(user_id),
+                Submissions.IsPractice == True,
+            )
+        )
+        if practice_problem_id is not None and hasattr(Submissions, "PracticeProblemId"):
+            q = q.filter(Submissions.PracticeProblemId == int(practice_problem_id))
+        return q.order_by(Submissions.Time.desc()).first()
+    except Exception:
+        return None
+
+def resolve_submission_for_current_user(
+    submission_repo: SubmissionRepository,
+    project_repo: ProjectRepository,
+    submission_id: int,
+    class_id: int,
+    want_practice: bool,
+    ppid: int | None,
+):
+    """
+    Resolves:
+      - real submission id -> that submission
+      - otherwise treats submission_id as project id and returns latest (main/practice) for current_user
+      - if submission_id is EMPTY, resolves current project by class_id and returns latest main submission
+    Returns: (submission | None, project_id:int, practice_problem_id_for_hidden_flags:int|None)
+    """
+    project_id = -1
+    sub = None
+    practice_problem_id = None
+
+    if submission_id != EMPTY and submission_id != -1:
+        sub = submission_repo.get_submission_by_submission_id(int(submission_id))
+        if sub is None:
+            project_id = int(submission_id)
+            if want_practice:
+                sub = latest_practice_submission(project_id, int(current_user.Id), ppid)
+            else:
+                sub = submission_repo.get_submission_by_user_and_projectid(int(current_user.Id), int(project_id))
+        if sub is None:
+            return None, int(project_id), None
+        project_id = int(getattr(sub, "Project", -1) or -1)
+    else:
+        proj = project_repo.get_current_project_by_class(int(class_id))
+        if proj is None:
+            return None, -1, None
+        project_id = int(getattr(proj, "Id", -1) or -1)
+        sub = submission_repo.get_submission_by_user_and_projectid(int(current_user.Id), int(project_id))
+        if sub is None:
+            return None, int(project_id), None
+
+    try:
+        if bool(getattr(sub, "IsPractice", False)) and getattr(sub, "PracticeProblemId", None) is not None:
+            practice_problem_id = int(getattr(sub, "PracticeProblemId"))
+    except Exception:
+        practice_problem_id = None
+
+    return sub, int(project_id), practice_problem_id
+
+def apply_hidden_flags_to_results(output_json: str, project_id: int, practice_problem_id: int | None) -> str:
+    try:
+        obj = json.loads(output_json) if isinstance(output_json, str) else (output_json or {})
+        results = obj.get("results", None) if isinstance(obj, dict) else None
+        if not isinstance(results, list) or int(project_id) <= 0:
+            return output_json
+
+        q = Testcases.query.filter(Testcases.ProjectId == int(project_id))
+        if practice_problem_id is not None:
+            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        else:
+            q = q.filter(Testcases.PracticeProblemId.is_(None))
+        tcs = q.all()
+        hidden_by_name = {
+            (str(getattr(tc, "Name", "") or "").strip().lower()): bool(getattr(tc, "Hidden", False))
+            for tc in (tcs or [])
+        }
+
+        for r in results:
+            if not isinstance(r, dict):
+                continue
+            name = None
+            if isinstance(r.get("name"), str):
+                name = r.get("name")
+            elif isinstance(r.get("test"), dict) and isinstance(r["test"].get("name"), str):
+                name = r["test"]["name"]
+
+            key = (str(name or "").strip().lower())
+            is_hidden = hidden_by_name.get(key, False)
+            r["hidden"] = is_hidden
+            if isinstance(r.get("test"), dict):
+                r["test"]["hidden"] = is_hidden
+
+        return json.dumps(obj, sort_keys=True, indent=4)
+    except Exception:
+        return output_json
+
+def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
+    # New grader may write JSON directly. Accept either:
+    #  1) a JSON file path
+    #  2) a non-.json file whose CONTENTS are JSON
+    #  3) (rare) a raw JSON string mistakenly passed as "file_path"
+    try:
+        s = str(file_path or "").strip()
+        if not s:
+            return json.dumps({"results": []}, sort_keys=True, indent=4)
+
+        # Raw JSON string fallback
+        if (s.startswith("{") or s.startswith("[")) and "\n" in s:
+            try:
+                obj = json.loads(s) or {}
+                return json.dumps(obj, sort_keys=True, indent=4)
+            except Exception:
+                pass
+
+        # If it's a real file, try parsing its contents as JSON first (regardless of extension).
+        if os.path.exists(s) and os.path.isfile(s):
+            try:
+                with open(s, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read() or ""
+                raw_strip = raw.strip()
+                if raw_strip.startswith("{") or raw_strip.startswith("["):
+                    obj = json.loads(raw_strip) or {}
+                    return json.dumps(obj, sort_keys=True, indent=4)
+            except Exception:
+                pass
+    except Exception:
         pass
 
     parser = Parser()
@@ -129,49 +272,28 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
 @jwt_required()
 @inject
 def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo:  ProjectRepository = Provide[Container.project_repo]):
-    class_id = int(request.args.get("class_id"))
-    submission_id = int(request.args.get("id"))
-    projectid = -1
-    submission = None
-    if submission_id != -1:
-        projectid = submission_repo.get_project_by_submission_id(submission_id)
-        submission = submission_repo.get_submission_by_submission_id(submission_id)
-    else:
-        projectid = project_repo.get_current_project_by_class(class_id).Id
-        submission = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid)
-        current_level=submission_repo.get_current_level(submission.Id,current_user.Id)
+    class_id = parse_int(request.args.get("class_id", "-1"), -1)
+    submission_id = parse_int(request.args.get("id", "-1"), -1)
+    want_practice, ppid_qs = practice_params_from_args()
+
+    submission, projectid, practice_problem_id = resolve_submission_for_current_user(
+        submission_repo,
+        project_repo,
+        submission_id,
+        class_id,
+        want_practice,
+        ppid_qs,
+    )
+    if submission is None:
+        return make_response(json.dumps({"results": []}), HTTPStatus.OK)
+
+    if current_user.Role != ADMIN_ROLE:
+        real_sub_id = int(getattr(submission, "Id", -1) or -1)
+        if real_sub_id <= 0 or not submission_repo.submission_view_verification(int(current_user.Id), real_sub_id):
+            return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+   
     output = convert_tap_to_json(submission.OutputFilepath, current_user.Role, 0, False)
-    # Attach hidden flags from DB Testcases table (source of truth)
-    try:
-        obj = json.loads(output) if isinstance(output, str) else (output or {})
-        results = obj.get("results", None) if isinstance(obj, dict) else None
-        if isinstance(results, list) and int(projectid) != -1:
-            tcs = Testcases.query.filter(Testcases.ProjectId == int(projectid)).all()
-            hidden_by_name = {
-                (str(getattr(tc, "Name", "") or "").strip().lower()): bool(getattr(tc, "Hidden", False))
-                for tc in (tcs or [])
-            }
-
-            for r in results:
-                if not isinstance(r, dict):
-                    continue
-                name = None
-                if isinstance(r.get("name"), str):
-                    name = r.get("name")
-                elif isinstance(r.get("test"), dict) and isinstance(r["test"].get("name"), str):
-                    name = r["test"]["name"]
-
-                key = (str(name or "").strip().lower())
-                is_hidden = hidden_by_name.get(key, False)
-
-                # New grader/UI reads r.hidden; legacy reads r.test.hidden
-                r["hidden"] = is_hidden
-                if isinstance(r.get("test"), dict):
-                    r["test"]["hidden"] = is_hidden
-
-            output = json.dumps(obj, sort_keys=True, indent=4)
-    except Exception:
-        pass
+    output = apply_hidden_flags_to_results(output, int(projectid), practice_problem_id)
 
     return make_response(output, HTTPStatus.OK)
 
@@ -179,19 +301,39 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
 @jwt_required()
 @inject
 def codefinder(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    submissionid = int(request.args.get("id"))
-    class_id = int(request.args.get("class_id"))
+    submissionid = parse_int(request.args.get("id", "-1"), -1)
+    class_id = parse_int(request.args.get("class_id", "-1"), -1)
     fmt = (request.args.get("format", "") or "").strip().lower()
     want_json = fmt in ("json", "view", "preview")
+
+    want_practice, ppid = practice_params_from_args()
+
     code_output = ""
-    if submissionid != EMPTY and (current_user.Role == ADMIN_ROLE or submission_repo.submission_view_verification(current_user.Id,submissionid)):
-        code_output = submission_repo.get_code_path_by_submission_id(submissionid)
+    if submissionid != EMPTY:
+        sub = submission_repo.get_submission_by_submission_id(submissionid)
+        if sub is not None and (current_user.Role == ADMIN_ROLE or submission_repo.submission_view_verification(current_user.Id, submissionid)):
+            code_output = submission_repo.get_code_path_by_submission_id(submissionid)
+        else:
+            resolved, _, _ = resolve_submission_for_current_user(
+                submission_repo,
+                project_repo,
+                int(submissionid),
+                int(class_id),
+                bool(want_practice),
+                ppid,
+            )
+            code_output = getattr(resolved, "CodeFilepath", "") if resolved else ""
     else:
         projectid = project_repo.get_current_project_by_class(class_id).Id
         code_output = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid).CodeFilepath
     # JSON preview mode (used by CodePage) so the UI can render readable source
     if want_json:
         files_payload = []
+        if not code_output:
+            resp = make_response(json.dumps({"files": []}), HTTPStatus.OK)
+            resp.headers["Content-Type"] = "application/json; charset=utf-8"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
         if not os.path.isdir(code_output):
             with open(code_output, 'r', encoding='utf-8', errors='replace') as f:
                 files_payload.append({"name": os.path.basename(code_output), "content": f.read()})
@@ -258,6 +400,15 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
     input_json = request.get_json()
     projectid = input_json['project_id']
+    practice_raw = (input_json or {}).get('practice', False)
+    practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+    
+    ppid_raw = (input_json or {}).get('practice_problem_id', None)
+    try:
+        practice_problem_id = int(ppid_raw) if ppid_raw is not None else None
+    except (TypeError, ValueError):
+        practice_problem_id = None
+    
     class_name = project_repo.get_className_by_projectId(projectid)
     class_id = project_repo.get_class_id_by_name(class_name)
     users = user_repo.get_all_users_by_cid(class_id)
@@ -265,14 +416,40 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
     userids=[]
     for user in users:
         userids.append(user.Id)
-    bucket = submission_repo.get_most_recent_submission_by_project(projectid, userids)
-    submission_counter_dict = submission_repo.submission_counter(projectid, userids)
+
+    if practice and hasattr(Submissions, "IsPractice"):
+        bucket = {}
+        submission_counter_dict = {uid: 0 for uid in userids}
+        
+        q = (
+            Submissions.query
+            .filter(
+                Submissions.Project == projectid,
+                Submissions.User.in_(userids),
+                Submissions.IsPractice == True,
+            )
+        )
+        # If the UI requested a specific practice problem, scope to it.
+        if practice_problem_id is not None and hasattr(Submissions, "PracticeProblemId"):
+            q = q.filter(Submissions.PracticeProblemId == practice_problem_id)
+        subs = q.order_by(Submissions.User.asc(), Submissions.Time.desc()).all()
+
+        for s in subs:
+            uid = int(getattr(s, "User", 0) or 0)
+            if uid in submission_counter_dict:
+                submission_counter_dict[uid] += 1
+                if uid not in bucket:
+                    bucket[uid] = s
+    else:
+        bucket = submission_repo.get_most_recent_submission_by_project(projectid, userids)
+        submission_counter_dict = submission_repo.submission_counter(projectid, userids)
+
     user_lectures_dict = user_repo.get_user_lectures(userids, class_id)
     user_labs_dict = user_repo.get_user_labs(userids, class_id)
     for user in users:
         if int(user.Role) == 0:
             if user.Id in bucket:
-                student_grade = project_repo.get_student_grade(projectid, user.Id)
+                student_grade = 0 if practice else project_repo.get_student_grade(projectid, user.Id)
                 student_id = user_repo.get_StudentNumber(user.Id)
                 studentattempts[user.Id]=[
                     user.Lastname,
@@ -280,7 +457,7 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
                     user_lectures_dict[user.Id],
                     user_labs_dict[user.Id],
                     submission_counter_dict[user.Id],
-                    bucket[user.Id].Time.strftime("%x %X"),
+                    bucket[user.Id].Time.isoformat(),
                     bucket[user.Id].IsPassing,
                     bucket[user.Id].Id,
                     str(class_id),
@@ -485,23 +662,38 @@ def get_accepted_oh_for_class(submission_repo: SubmissionRepository = Provide[Co
 def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
     class_id = int(request.args.get("class_id"))
     submission_details = []
-    project = project_repo.get_current_project_by_class(class_id)
-    if project is None:
-        # no active project → return all "None"/zero defaults
-        return make_response(
-            ["None", "0", "None", "", ""],
-            HTTPStatus.OK
-        )
-    projectId = project.Id
+
+    # Use the current-project ORM object directly (avoids brittle indexing/parsing)
+    proj = project_repo.get_current_project_by_class(class_id)
+    if proj is None:
+        # no active project → keep array shape consistent for frontend
+        # [remaining_oh_time, days_passed, next_submission_str, project_name, end_time, project_id]
+        return make_response(["None", "0", "None", "", "", "-1"], HTTPStatus.OK)
+
+    projectId = int(getattr(proj, "Id", 0) or 0)
     submission_details.append(str(submission_repo.get_remaining_OH_Time(current_user.Id, projectId)))
-    project = project_repo.get_project(projectId)
-    start_time = project.get(projectId)[1]
-    start_date = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%S")
+
+    # Compute days since start from proj.Start (datetime or ISO string)
+    start_val = getattr(proj, "Start", None)
     current_time = datetime.now()
-    #get days passed
-    days_passed = (current_time - start_date).days
+    start_date = None
+    try:
+        if isinstance(start_val, datetime):
+            start_date = start_val
+        elif isinstance(start_val, str) and start_val.strip():
+            # Handle "YYYY-MM-DDTHH:MM:SS" (optionally with microseconds)
+            s = start_val.strip()
+            if "." in s:
+                s = s.split(".", 1)[0]
+            start_date = datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        start_date = None
+
+    days_passed = (current_time - start_date).days if start_date else 0
     submission_details.append(str(days_passed))
+
     time_until_next_submission = submission_repo.check_timeout(current_user.Id, projectId)[1]
+
     if time_until_next_submission != "None":
         hours = time_until_next_submission.seconds // 3600
         minutes = (time_until_next_submission.seconds % 3600) // 60
@@ -510,10 +702,19 @@ def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Contai
         submission_details.append(time_until_next_submission_str)
     else:
         submission_details.append("None")
-    submission_details.append(project.get(projectId)[0])
-    end_time_str = project.get(projectId)[2]
-    submission_details.append(end_time_str)
+
+    # Project name + due date
+    submission_details.append(str(getattr(proj, "Name", "") or ""))
+
+    end_val = getattr(proj, "End", None)
+    if isinstance(end_val, datetime):
+        end_str = end_val.isoformat(timespec="seconds")
+    else:
+        end_str = str(end_val or "")
+    submission_details.append(end_str)
+
     submission_details.append(str(projectId))
+
     return make_response(submission_details, HTTPStatus.OK)
 
 @submission_api.route('/get_oh_visits_by_projectId', methods=['POST'])
@@ -615,10 +816,14 @@ def ConsumeCharge(submission_repo: SubmissionRepository = Provide[Container.subm
 @jwt_required()
 def log_ui_click():
     data = request.get_json(silent=True) or {}
+    class_id = data.get('class_id', -1)
     submission_id = data.get('id', -1)
     action = str(data.get('action', '')).strip()
     started_state = data.get('started_state', None)
-    switched_to = data.get('switched_to', None)
+    previous_state_label = data.get('previous_state_label', None)
+    next_state_label = data.get('next_state_label', None)
+    practice = parse_bool(data.get('practice', False))
+    practice_problem_id = data.get('practice_problem_id', None)
 
     username = getattr(current_user, 'Username', None) or 'unknown'
     role = getattr(current_user, 'Role', None) or 0
@@ -628,9 +833,19 @@ def log_ui_click():
     log_path = ui_clicks_log
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    line = f"{ts} | user:{username} | role:{role} | submission:{submission_id} | action:{action}"
-    if action == 'Diff Finder':
-        line += f" | switched_to:{bool(switched_to)} | started:{bool(started_state)}"
+    line = (
+        f"{ts} | user:{username} | role:{role} | class:{class_id} | submission:{submission_id}"
+        f" | action:{action} | practice:{practice}"
+    )
+    if practice_problem_id not in (None, ''):
+        line += f" | practice_problem_id:{practice_problem_id}"
+    if action == 'Diff Finder' and started_state is not None:
+        line += f" | started:{bool(started_state)}"
+    if previous_state_label not in (None, ''):
+        line += f" | from:{previous_state_label}"
+    if next_state_label not in (None, ''):
+        line += f" | to:{next_state_label}"
+
     line += "\n"
 
     with open(log_path, 'a', encoding='utf-8') as f:
@@ -688,12 +903,11 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
     grade_list = submission_repo.get_project_grade_info(project_id)
     project_name = project_repo.get_selected_project(project_id).Name
 
-    wb = Workbook()
-    ws = wb.active
-    wb.title = 'Grades'
+    sio = StringIO()
+    writer = csv.writer(sio, lineterminator="\n")
 
     headers = ['OrgDefinedId', f'{project_name} Points Grade', f'{project_name} Text Grade', 'End-of-Line Indicator']
-    ws.append(headers)
+    writer.writerow(headers)
 
     # Create excel rows
     base_defs_map = dict(ADMIN_GRADING_DEFAULT_DEFS_MAP)
@@ -759,19 +973,19 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
             desc_lines.append('Great Job!')
 
         description = "\n".join(desc_lines)
-        ws.append([row.get('number'), row.get('grade'), description, '#'])
+        writer.writerow([row.get('number'), row.get('grade'), description, '#'])
 
-    buffer = BytesIO()
-    wb.save(buffer)
+    buffer = BytesIO(sio.getvalue().encode("utf-8"))
     buffer.seek(0)
 
     resp = send_file(
         buffer,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        download_name=f'{project_name}-grades.xlsx',
+        mimetype='text/csv; charset=utf-8',
+        download_name=f'{project_name}-grades.csv',
         as_attachment=True
     )
 
     resp.headers["Project-Name"] = project_name
     resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Project-Name"
+    resp.headers["Cache-Control"] = "no-store"
     return resp

@@ -1,8 +1,8 @@
-import React, { use, useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import { useNavigate, useParams } from 'react-router-dom'
-import { eachDayOfInterval, set } from 'date-fns'
+import { eachDayOfInterval } from 'date-fns'
 import axios from 'axios'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -15,6 +15,7 @@ import { TbJson } from 'react-icons/tb'
 import {
     FaAlignJustify,
     FaCircleNotch,
+    FaCloudUploadAlt,
     FaClipboardCheck,
     FaCode,
     FaDownload,
@@ -45,8 +46,13 @@ class Testcase {
     hidden: boolean
 }
 
-const AdminProjectManage = () => {
-    const { id, class_id } = useParams()
+type AdminProjectManageProps = {
+    practiceMode?: boolean
+}
+
+const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) => {
+
+    const { id, class_id, practice_problem_id } = useParams()
     const navigate = useNavigate()
 
     const project_id = Number(id)
@@ -56,10 +62,10 @@ const AdminProjectManage = () => {
         return <div>Error: Missing or invalid project or class ID.</div>
     }
 
-    const [CreateNewState, setCreateNewState] = useState<boolean>()
     const [testcases, setTestcases] = useState<Array<Testcase>>([])
     const [ProjectName, setProjectName] = useState<string>('')
     const [ProjectLanguage, setProjectLanguage] = useState<string>('')
+    const [serverProjectNameSnapshot, setServerProjectNameSnapshot] = useState<string>('')
     const [serverProjectLanguageSnapshot, setServerProjectLanguageSnapshot] = useState<string>('')
     const [SubmitButton, setSubmitButton] = useState<string>('Create new assignment')
     const [SubmitJSON, setSubmitJSON] = useState<string>('Submit JSON file')
@@ -76,11 +82,14 @@ const AdminProjectManage = () => {
     const [solutionFileNames, setSolutionFileNames] = useState<string[]>([])
     const [descfileName, setDescFileName] = useState<string>('')
     const [serverDescFileName, setServerDescFileName] = useState<string>('')
+    const [serverProjectStartSnapshot, setServerProjectStartSnapshot] = useState<string>('')
+    const [serverProjectEndSnapshot, setServerProjectEndSnapshot] = useState<string>('')
     const [jsonfilename, setjsonfilename] = useState<string>('')
     const [activeTab, setActiveTab] = useState<'psettings' | 'testcases'>('psettings')
     const [submittingProject, setSubmittingProject] = useState<boolean>(false)
     const [submittingTestcase, setSubmittingTestcase] = useState<boolean>(false)
     const [submittingJson, setSubmittingJson] = useState<boolean>(false)
+    const [loadingProjectState, setLoadingProjectState] = useState<boolean>(true)
     const [modalDraft, setModalDraft] = useState<Testcase | null>(null)
     const [previewOpen, setPreviewOpen] = useState(false)
     const [previewTitle, setPreviewTitle] = useState('')
@@ -88,8 +97,27 @@ const AdminProjectManage = () => {
     const [serverFiles, setServerFiles] = useState<string[] | null>(null)
     const [showAdditionalFile, setShowAdditionalFile] = useState<boolean>(false)
     const [additionalFileNames, setAdditionalFileNames] = useState<string[]>([])
+    const [serverShowAdditionalFileSnapshot, setServerShowAdditionalFileSnapshot] = useState<boolean>(false)
+    const [serverAdditionalFileNamesSnapshot, setServerAdditionalFileNamesSnapshot] = useState<string[]>([])
     const [removedAdditionalFiles, setRemovedAdditionalFiles] = useState<string[]>([])
     const [mainJavaFileName, setMainJavaFileName] = useState<string>('')
+    const [practiceProblemsEnabled, setPracticeProblemsEnabled] = useState<boolean>(false)
+    const [serverPracticeProblemsEnabledSnapshot, setServerPracticeProblemsEnabledSnapshot] = useState<boolean>(false)
+    const [practiceProblemNumber, setPracticeProblemNumber] = useState<number | null>(null)
+
+
+
+    async function togglePracticeProblemsEnabled() {
+        const next = !practiceProblemsEnabled
+        setPracticeProblemsEnabled(next)
+    }
+
+    useEffect(() => {
+        document.body.style.overflow = ''
+        return () => {
+            document.body.style.overflow = ''
+        }
+    }, [])
 
     // Lock page scroll whenever either modal is open
     useEffect(() => {
@@ -106,6 +134,23 @@ const AdminProjectManage = () => {
 
     const API = import.meta.env.VITE_API_URL
     const authHeader = { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
+    const isPractice = !!practiceMode
+    const practiceProblemId = isPractice && practice_problem_id ? Number(practice_problem_id) : null
+    const practiceProblemQuery =
+        isPractice && practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''
+
+    // Testcases must NOT be editable unless solution exists (main or practice)
+    const hasSolution =
+        SolutionFiles.length > 0 || serverSolutionFileNames.length > 0
+
+    const pageTitleText =
+        isPractice
+            ? (
+                edit
+                    ? `Edit Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
+                    : `Create Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
+            )
+            : (edit ? 'Edit Assignment' : 'Create Assignment')
 
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i
     const SOLUTION_ALLOWED_RE = /\.(py|java|c|h|rkt|scm)$/i
@@ -120,6 +165,10 @@ const AdminProjectManage = () => {
     const isJavaFileName = (n: string) => /\.java$/i.test(n)
 
     const basename = (p: string) => (p || '').split(/[\\/]/).pop() || ''
+
+    const normalizeNameList = (names: string[]) =>
+        [...names.map(basename).filter(Boolean)].sort((a, b) => a.localeCompare(b))
+
 
     const parseHidden = (v: any): boolean => {
         if (typeof v === 'boolean') return v
@@ -179,6 +228,7 @@ const AdminProjectManage = () => {
                     const url = new URL(`${API}/projects/get_source_file`)
                     url.searchParams.set('project_id', String(project_id))
                     url.searchParams.set('relpath', name)
+                    url.searchParams.set('practice', isPractice ? 'true' : 'false')
                     const res = await fetch(url, { headers: authHeader })
                     if (!res.ok) return
                     const txt = await res.text()
@@ -194,7 +244,9 @@ const AdminProjectManage = () => {
     async function loadServerSolutionFiles() {
         try {
             const res = await axios.get(
-                import.meta.env.VITE_API_URL + `/projects/list_solution_files?id=${project_id}`,
+                import.meta.env.VITE_API_URL +
+                `/projects/list_solution_files?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`,
+
                 { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
             )
             const names = Array.isArray(res.data) ? res.data : []
@@ -212,7 +264,7 @@ const AdminProjectManage = () => {
             loadServerSolutionFiles()
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [edit, project_id])
+    }, [edit, project_id, isPractice])
 
     useEffect(() => {
         let cancelled = false
@@ -281,6 +333,7 @@ const AdminProjectManage = () => {
                     const url = new URL(`${API}/projects/get_source_file`)
                     url.searchParams.set('project_id', String(project_id))
                     url.searchParams.set('relpath', name)
+                    url.searchParams.set('practice', isPractice ? 'true' : 'false')
                     const res = await fetch(url, { headers: authHeader })
                     const text = res.ok ? await res.text() : '[Could not load file from server]'
                     return `// ===== ${name} =====\n${text}`
@@ -305,7 +358,12 @@ const AdminProjectManage = () => {
     })()
 
     async function fetchServerFileList(): Promise<string[]> {
-        const res = await fetch(`${API}/projects/list_source_files?project_id=${project_id}`, { headers: authHeader })
+
+        const res = await fetch(
+            `${API}/projects/list_source_files?project_id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`,
+            { headers: authHeader }
+        )
+
         if (!res.ok) return []
         const data = await res.json()
         const list = data.files.map((f: any) => f.relpath)
@@ -317,6 +375,10 @@ const AdminProjectManage = () => {
         const url = new URL(`${API}/projects/get_source_file`)
         url.searchParams.set('project_id', String(project_id))
         if (relpath) url.searchParams.set('relpath', relpath)
+
+        url.searchParams.set('practice', isPractice ? 'true' : 'false')
+        if (isPractice && practiceProblemId) url.searchParams.set('practice_problem_id', String(practiceProblemId))
+
         const res = await fetch(url, { headers: authHeader })
         if (!res.ok) return
         const text = await res.text()
@@ -329,7 +391,7 @@ const AdminProjectManage = () => {
         if (edit && project_id > 0) {
             fetchServerFileList()
         }
-    }, [edit, project_id])
+    }, [edit, project_id, isPractice])
 
     const defaultStart = (() => {
         const d = new Date()
@@ -353,30 +415,33 @@ const AdminProjectManage = () => {
     const highlightDates: Date[] =
         ProjectStartDate && ProjectEndDate ? eachDayOfInterval({ start: ProjectStartDate, end: ProjectEndDate }) : []
 
-    const [projects, setProjects] = useState([]);
+    const [projects, setProjects] = useState([])
     useEffect(() => {
+        let cancelled = false
         const fetchProjects = async () => {
             try {
                 const response = await axios.get(
                     `${import.meta.env.VITE_API_URL}/projects/get_projects_by_class_id?id=${classId}`,
                     {
-                        headers: {
-                            Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
-                        }
+                        headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
                     }
-                );
+                )
                 const otherProjects = response.data.filter((pStr) => {
-                    const p = JSON.parse(pStr);
-                    return p.Id !== project_id;
-                });
-                setProjects(otherProjects);
+                    const p = JSON.parse(pStr)
+                    return p.Id !== project_id
+                })
+                if (!cancelled) setProjects(otherProjects)
             } catch (err) {
-                console.log(err);
+                console.log(err)
+                if (!cancelled) setProjects([])
             }
-        };
+        }
 
-        fetchProjects();
-    }, []);
+        if (classId > 0) fetchProjects()
+        return () => {
+            cancelled = true
+        }
+    }, [classId, project_id])
 
     const blockedDates = useMemo(() => {
         const dates = [];
@@ -446,88 +511,157 @@ const AdminProjectManage = () => {
     };
 
     useEffect(() => {
-        axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
-            })
-            .then(res => {
-                const data = res.data
-                const rows: Array<Testcase> = []
+        let cancelled = false
 
-                Object.entries(data).map(([key, value]) => {
-                    const testcase = new Testcase()
-                    const values = value as Array<string>
+        const resetForSwitch = () => {
+            setLoadingProjectState(true)
 
-                    testcase.id = parseInt(key)
-                    testcase.name = values[1]
-                    testcase.description = values[2]
-                    testcase.input = values[3]
-                    testcase.output = values[4]
-                    testcase.hidden = parseHidden((values as any)[5])
+            setServerProjectNameSnapshot('')
+            setServerProjectStartSnapshot('')
+            setServerProjectEndSnapshot('')
+            setServerAdditionalFileNamesSnapshot([])
+            setServerShowAdditionalFileSnapshot(false)
 
-                    rows.push(testcase)
-                    return testcase
-                })
+            // Clear UI that frequently shows stale values during practice <-> main switches
+            setTestcases([])
+            setProjectName('')
+            setProjectLanguage('')
+            setServerProjectLanguageSnapshot('')
+            setSolutionFiles([])
+            setSolutionFileNames([])
+            setServerSolutionFileNames([])
+            setServerSolutionFileNamesSnapshot([])
+            setServerFiles(null)
+            setDesc(undefined)
+            setDescFileName('')
+            setServerDescFileName('')
+            setAdditionalFileNames([])
+            setRemovedAdditionalFiles([])
+            setSelectedAddFiles([])
+            setShowAdditionalFile(false)
+            setMainJavaFileName('')
+            setEdit(false)
+            setSubmitButton('Create new assignment')
+        }
 
-                const testcase = new Testcase()
-                testcase.id = -1
-                testcase.name = ''
-                testcase.description = ''
-                testcase.input = ''
-                testcase.output = ''
-                testcase.hidden = false
+        const load = async () => {
+            if (!project_id || project_id === 0) {
+                if (!cancelled) setLoadingProjectState(false)
+                return
+            }
 
-                rows.push(testcase)
-                setTestcases(rows)
-            })
-            .catch(err => {
-                console.log(err)
-            })
+            resetForSwitch()
 
-        if (!CreateNewState && project_id != 0) {
-            axios
-                .get(import.meta.env.VITE_API_URL + `/projects/get_project_id?id=${project_id}`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
-                })
-                .then(res => {
-                    const data = res.data
-                    if (!CreateNewState) {
-                        setProjectName(data[project_id][0])
-                        setProjectStartDate(new Date(data[project_id][1]))
-                        setProjectEndDate(new Date(data[project_id][2]))
-                        setProjectLanguage(data[project_id][3])
-                        setServerProjectLanguageSnapshot(data[project_id][3])
-                        setSolutionFileNames([])
-                        setSolutionFiles([])
-                        const serverDesc = (data[project_id][5] || '') as string
-                        setDescFileName(serverDesc)
-                        setServerDescFileName(serverDesc)
+            try {
+                const [tcRes, projRes] = await Promise.all([
+                    axios.get(
+                        `${import.meta.env.VITE_API_URL}/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`,
+                        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+                    ),
+                    axios.get(
+                        `${import.meta.env.VITE_API_URL}/projects/get_project_id?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`,
+                        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+                    ),
+                ])
 
-                        const rawAdd = data[project_id][6] ?? []
-                        let addList: string[] = []
-                        if (Array.isArray(rawAdd)) {
-                            addList = rawAdd as string[]
-                        } else if (typeof rawAdd === 'string') {
-                            try {
-                                const parsed = JSON.parse(rawAdd)
-                                addList = Array.isArray(parsed) ? parsed : (rawAdd ? [rawAdd] : [])
-                            } catch {
-                                addList = rawAdd ? [rawAdd] : []
-                            }
+                if (cancelled) return
+
+                // Testcases
+                {
+                    const data = tcRes.data
+                    const rows: Array<Testcase> = []
+                    Object.entries(data).forEach(([key, value]) => {
+                        const testcase = new Testcase()
+                        const values = value as Array<string>
+                        testcase.id = parseInt(key)
+                        testcase.name = values[1]
+                        testcase.description = values[2]
+                        testcase.input = values[3]
+                        testcase.output = values[4]
+                        testcase.hidden = parseHidden((values as any)[5])
+                        rows.push(testcase)
+                    })
+                    const blank = new Testcase()
+                    blank.id = -1
+                    blank.name = ''
+                    blank.description = ''
+                    blank.input = ''
+                    blank.output = ''
+                    blank.hidden = false
+                    rows.push(blank)
+                    setTestcases(rows)
+                }
+
+                // Project info
+                {
+                    const data = projRes.data
+                    const projectName = data[project_id][0] || ''
+                    const projectStart = new Date(data[project_id][2])
+                    const projectEnd = new Date(data[project_id][3])
+
+                    setProjectName(projectName)
+                    setServerProjectNameSnapshot(projectName)
+
+                    setProjectStartDate(projectStart)
+                    setServerProjectStartSnapshot(formatDateTimeLocal(projectStart))
+
+                    setProjectEndDate(projectEnd)
+                    setServerProjectEndSnapshot(formatDateTimeLocal(projectEnd))
+
+                    setProjectLanguage(data[project_id][4])
+                    setServerProjectLanguageSnapshot(data[project_id][4])
+                    const ppe = parseHidden(data[project_id][8])
+                    setPracticeProblemsEnabled(ppe)
+                    setServerPracticeProblemsEnabledSnapshot(ppe)
+
+                    const pnRaw = (data[project_id] as any)[9]
+                    const pn = typeof pnRaw === 'number' ? pnRaw : Number(pnRaw)
+                    setPracticeProblemNumber(isPractice && pn > 0 ? pn : null)
+
+                    const serverDesc = (data[project_id][6] || '') as string
+                    setDescFileName(serverDesc)
+                    setServerDescFileName(serverDesc)
+
+                    const rawAdd = data[project_id][7] ?? []
+                    let addList: string[] = []
+                    if (Array.isArray(rawAdd)) {
+                        addList = rawAdd as string[]
+                    } else if (typeof rawAdd === 'string') {
+                        try {
+                            const parsed = JSON.parse(rawAdd)
+                            addList = Array.isArray(parsed) ? parsed : (rawAdd ? [rawAdd] : [])
+                        } catch {
+                            addList = rawAdd ? [rawAdd] : []
                         }
-
-                        setAdditionalFileNames(addList.map(basename).filter(Boolean))
-                        setShowAdditionalFile(addList.length > 0)
-                        setEdit(true)
-                        setSubmitButton('Submit changes')
                     }
-                })
-                .catch(err => {
-                    console.log(err)
-                })
+
+                    const normalizedAdditionalFiles = addList.map(basename).filter(Boolean)
+                    setAdditionalFileNames(normalizedAdditionalFiles)
+                    setServerAdditionalFileNamesSnapshot(normalizedAdditionalFiles)
+                    setShowAdditionalFile(normalizedAdditionalFiles.length > 0)
+                    setServerShowAdditionalFileSnapshot(normalizedAdditionalFiles.length > 0)
+
+                    setEdit(true)
+                    setSubmitButton('Submit changes')
+                }
+
+                // Ensure filesystem/solution lists match the newly loaded (project_id, practice) state
+                await fetchServerFileList()
+                await loadServerSolutionFiles()
+
+            } catch (err) {
+                console.log(err)
+            } finally {
+                if (!cancelled) setLoadingProjectState(false)
+            }
+        }
+
+        load()
+        return () => {
+            cancelled = true
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [project_id, isPractice])
 
     function handleNameChange(testcase_id: number, name: string) {
         setModalDraft(prev => {
@@ -585,7 +719,7 @@ const AdminProjectManage = () => {
 
     function reloadtests() {
         return axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}`, {
+            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
@@ -701,10 +835,19 @@ const AdminProjectManage = () => {
     async function handleJsonSubmit() {
         try {
             setSubmittingJson(true)
+            if (!hasSolution) {
+                window.alert('Upload solution file(s) before uploading test cases.')
+                return
+            }
             const formData = new FormData()
             formData.append('file', JsonFile!)
             formData.append('project_id', project_id.toString())
             formData.append('class_id', classId.toString())
+            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
+            formData.append('practice', isPractice ? 'true' : 'false')
+            if (isPractice && practiceProblemId) {
+                formData.append('practice_problem_id', String(practiceProblemId))
+            }
 
             await axios.post(import.meta.env.VITE_API_URL + `/projects/json_add_testcases`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -771,6 +914,7 @@ const AdminProjectManage = () => {
             formData.append('end_date', formatDateTimeLocal(ProjectEndDate))
             formData.append('language', ProjectLanguage)
             formData.append('class_id', classId.toString())
+            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
 
             const res = await axios.post(`${import.meta.env.VITE_API_URL}/projects/create_project`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -778,7 +922,7 @@ const AdminProjectManage = () => {
             const newId = res.data
 
             window.alert('Your project has been created! Next, open the "Test Cases" tab to add test cases.')
-            window.location.href = `/admin/${classId}/project/manage/${newId}`
+            window.location.href = `/admin/${classId}/project/${newId}/manage/`
         } catch (error) {
             console.log(error)
         }
@@ -838,13 +982,14 @@ const AdminProjectManage = () => {
             formData.append('end_date', formatDateTimeLocal(ProjectEndDate!))
             formData.append('language', ProjectLanguage)
             formData.append('class_id', classId.toString())
+            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
 
             await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_project`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
 
             window.alert('Project information saved. Next, go to the "Test Cases" tab to create test cases.')
-            window.location.href = `/admin/${classId}/project/manage/${project_id}`
+            window.location.href = `/admin/${classId}/project/${project_id}/manage/`
         } catch (error) {
             console.log(error)
         }
@@ -875,6 +1020,10 @@ const AdminProjectManage = () => {
     }
 
     async function setHiddenFromRow(tc: Testcase, hidden: boolean) {
+        if (!hasSolution) {
+            window.alert('Upload solution file(s) before editing test cases.')
+            return
+        }
         const formData = new FormData()
         formData.append('id', tc.id.toString())
         formData.append('name', tc.name)
@@ -884,6 +1033,10 @@ const AdminProjectManage = () => {
         formData.append('output', tc.output.toString())
         formData.append('description', tc.description.toString())
         formData.append('hidden', hidden ? 'true' : 'false')
+        formData.append('practice', isPractice ? 'true' : 'false')
+        if (isPractice && practiceProblemId) {
+            formData.append('practice_problem_id', String(practiceProblemId))
+        }
 
         try {
             setSubmittingTestcase(true)
@@ -986,7 +1139,11 @@ const AdminProjectManage = () => {
 
     async function downloadAssignmentDescription() {
         try {
-            const url = `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${project_id}`
+
+            const url =
+                `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${project_id}` +
+                `&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`
+
             const res = await axios.get(url, {
                 responseType: 'blob',
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -1005,6 +1162,74 @@ const AdminProjectManage = () => {
         } catch (err) {
             console.log(err)
             window.alert('Could not download the assignment description.')
+        }
+    }
+
+    async function handlePracticeFilesSubmit() {
+        if (!isPractice) return
+        if (!practiceProblemId) {
+            window.alert('Missing practice problem id.')
+            return
+        }
+        if (!ProjectName || !ProjectName.trim()) {
+            window.alert('Please enter a practice problem name.')
+            return
+        }
+
+        const hasAnyFileChange =
+            SolutionFiles.length > 0 || !!AssignmentDesc || selectedAddFiles.length > 0
+
+        // Rename-only: allow changing Practice Problem Name without re-uploading files
+        if (!hasAnyFileChange) {
+            try {
+                setSubmittingProject(true)
+                await axios.post(
+                    `${import.meta.env.VITE_API_URL}/projects/rename_practice_problem`,
+                    {
+                        project_id,
+                        practice_problem_id: practiceProblemId,
+                        name: ProjectName,
+                    },
+                    { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+                )
+                window.alert('Practice problem name saved.')
+                window.location.reload()
+            } catch (e) {
+                console.log(e)
+                window.alert('Could not save practice problem name.')
+            } finally {
+                setSubmittingProject(false)
+            }
+            return
+        }
+
+        // File change path: still require both solution + description for the practice upload endpoint
+        if (SolutionFiles.length === 0 || !AssignmentDesc) {
+            window.alert('Please upload practice solution file(s) and a practice assignment description.')
+            return
+        }
+
+        try {
+            setSubmittingProject(true)
+            const formData = new FormData()
+            formData.append('project_id', project_id.toString())
+            SolutionFiles.forEach(f => formData.append('solutionFiles', f))
+            formData.append('assignmentdesc', AssignmentDesc)
+            selectedAddFiles.forEach(f => formData.append('additionalFiles', f))
+            formData.append('practice_problem_id', String(practiceProblemId))
+            formData.append('name', ProjectName)
+
+            await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_practice_project_files`, formData, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+            })
+
+            window.alert('Practice files saved.')
+            window.location.reload()
+        } catch (e) {
+            console.log(e)
+            window.alert('Could not save practice files.')
+        } finally {
+            setSubmittingProject(false)
         }
     }
 
@@ -1050,8 +1275,82 @@ const AdminProjectManage = () => {
         ].join('')
     }
 
+    const hasUnsavedProjectChanges = useMemo(() => {
+        if (loadingProjectState) return false
+
+        if (!edit) {
+            return (
+                ProjectName.trim() !== '' ||
+                !!ProjectStartDate ||
+                !!ProjectEndDate ||
+                ProjectLanguage !== '' ||
+                SolutionFiles.length > 0 ||
+                !!AssignmentDesc ||
+                selectedAddFiles.length > 0 ||
+                showAdditionalFile ||
+                practiceProblemsEnabled
+            )
+        }
+
+        if (!ProjectStartDate || !ProjectEndDate) return false
+
+        const currentSolutionNames = normalizeNameList(
+            SolutionFiles.length > 0 ? SolutionFiles.map(f => f.name) : serverSolutionFileNames
+        )
+        const originalSolutionNames = normalizeNameList(serverSolutionFileNamesSnapshot)
+        const currentAdditionalNames = normalizeNameList(additionalFileNames)
+        const originalAdditionalNames = normalizeNameList(serverAdditionalFileNamesSnapshot)
+
+        return (
+            ProjectName.trim() !== serverProjectNameSnapshot.trim() ||
+            formatDateTimeLocal(ProjectStartDate) !== serverProjectStartSnapshot ||
+            formatDateTimeLocal(ProjectEndDate) !== serverProjectEndSnapshot ||
+            ProjectLanguage !== serverProjectLanguageSnapshot ||
+            practiceProblemsEnabled !== serverPracticeProblemsEnabledSnapshot ||
+            showAdditionalFile !== serverShowAdditionalFileSnapshot ||
+            !!AssignmentDesc ||
+            SolutionFiles.length > 0 ||
+            selectedAddFiles.length > 0 ||
+            removedAdditionalFiles.length > 0 ||
+            descfileName !== serverDescFileName ||
+            JSON.stringify(currentSolutionNames) !== JSON.stringify(originalSolutionNames) ||
+            JSON.stringify(currentAdditionalNames) !== JSON.stringify(originalAdditionalNames)
+        )
+    }, [
+        loadingProjectState,
+        edit,
+        ProjectName,
+        ProjectStartDate,
+        ProjectEndDate,
+        ProjectLanguage,
+        SolutionFiles,
+        AssignmentDesc,
+        selectedAddFiles,
+        showAdditionalFile,
+        practiceProblemsEnabled,
+        serverProjectNameSnapshot,
+        serverProjectStartSnapshot,
+        serverProjectEndSnapshot,
+        serverProjectLanguageSnapshot,
+        serverSolutionFileNames,
+        serverSolutionFileNamesSnapshot,
+        serverAdditionalFileNamesSnapshot,
+        serverShowAdditionalFileSnapshot,
+        serverPracticeProblemsEnabledSnapshot,
+        additionalFileNames,
+        removedAdditionalFiles,
+        descfileName,
+        serverDescFileName,
+    ])
+
     async function buttonhandleClick(testcase: number) {
         if (!modalDraft) return
+
+        if (!hasSolution) {
+            window.alert('Upload solution file(s) before creating or editing test cases.')
+            return
+        }
+
         const formData = new FormData()
         formData.append('id', modalDraft.id.toString())
         formData.append('name', modalDraft.name)
@@ -1061,6 +1360,11 @@ const AdminProjectManage = () => {
         formData.append('output', modalDraft.output.toString())
         formData.append('description', modalDraft.description.toString())
         formData.append('hidden', modalDraft.hidden ? 'true' : 'false')
+        formData.append('practice', isPractice ? 'true' : 'false')
+
+        if (isPractice && practiceProblemId) {
+            formData.append('practice_problem_id', String(practiceProblemId))
+        }
 
         if (modalDraft.name === '' || modalDraft.input === '' || modalDraft.description === '') {
             window.alert('Please fill out all fields')
@@ -1084,7 +1388,7 @@ const AdminProjectManage = () => {
 
     function get_testcase_json() {
         axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}`, {
+            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
@@ -1195,8 +1499,9 @@ const AdminProjectManage = () => {
 
     const fsUniqueJavaNames = Array.from(new Set(directoryEntries.map(e => e.name).filter(isJavaFileName)))
     const fsShowMainTag = ProjectLanguage === 'java' && fsUniqueJavaNames.length > 1 && !!mainJavaFileName
-    const showFullScreenLoader = submittingProject || submittingTestcase || submittingJson
+    const showFullScreenLoader = loadingProjectState || submittingProject || submittingTestcase || submittingJson
     const loaderMessage =
+        (loadingProjectState && (isPractice ? 'Loading practice problem...' : 'Loading assignment...')) ||
         (submittingProject && (edit ? 'Saving assignment...' : 'Creating assignment...')) ||
         (submittingTestcase && 'Submitting test case...') ||
         (submittingJson && 'Uploading test cases...') ||
@@ -1221,14 +1526,23 @@ const AdminProjectManage = () => {
                 items={[
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${classId}/projects/` },
-                    { label: 'Project Manage' },
+                    { label: 'Project Manage', to: `/admin/${classId}/project/${project_id}/manage/` },
+                    ...(isPractice
+                        ? [
+                            {
+                                label: 'Practice Select' as const,
+                                to: `/admin/${classId}/project/${project_id}/practice/select`,
+                            },
+                            { label: 'Practice Problem' as const },
+                        ]
+                        : []),
                 ]}
             />
 
             <div className="main-grid">
                 <>
                     <div className={`admin-project-config-container${modalOpen ? ' blurred' : ''}`}>
-                        <div className="pageTitle">{edit ? 'Edit Assignment' : 'Create Assignment'}</div>
+                        <div className="pageTitle">{pageTitleText}</div>
 
                         <div className="tab-menu">
                             <button
@@ -1244,6 +1558,13 @@ const AdminProjectManage = () => {
                             <button
                                 className={`menu-item-testcases ${activeTab === 'testcases' ? 'active' : ''}`}
                                 onClick={() => setActiveTab('testcases')}
+                                disabled={!hasSolution}
+                                title={
+                                    !hasSolution
+                                        ? 'Upload solution file(s) first to manage test cases.'
+                                        : undefined
+                                }
+
                             >
                                 Test Cases
                             </button>
@@ -1255,7 +1576,7 @@ const AdminProjectManage = () => {
                                     <form className="form-project-settings">
                                         <div className="segment-main">
                                             <div className="form-field input-field">
-                                                <label>Project Name</label>
+                                                <label>{isPractice ? 'Practice Problem Name' : 'Project Name'}</label>
                                                 <input
                                                     type="text"
                                                     value={ProjectName}
@@ -1269,6 +1590,7 @@ const AdminProjectManage = () => {
                                                     <DatePicker
                                                         selected={ProjectStartDate}
                                                         onChange={(date: Date | null) => setDate(date, true)}
+                                                        disabled={isPractice}
                                                         showTimeSelect
                                                         timeFormat="h:mm aa"
                                                         timeIntervals={15}
@@ -1296,6 +1618,7 @@ const AdminProjectManage = () => {
                                                     <DatePicker
                                                         selected={ProjectEndDate}
                                                         onChange={(date: Date | null) => setDate(date, false)}
+                                                        disabled={isPractice}
                                                         showTimeSelect
                                                         timeFormat="h:mm aa"
                                                         timeIntervals={15}
@@ -1325,10 +1648,16 @@ const AdminProjectManage = () => {
                                                 </span>
                                             )}
 
-                                            <div className="form-group language-group">
+                                            <div className={`form-group language-group${isPractice ? ' disabled' : ''}`}>
                                                 <label>Language</label>
                                                 <div className="detected-language">{languageLabel}</div>
                                             </div>
+
+                                            {hasUnsavedProjectChanges && (
+                                                <div className="unsaved-project-warning" role="status" aria-live="polite">
+                                                    You have unsaved Project Settings changes. They will not be saved until you click "{SubmitButton}".
+                                                </div>
+                                            )}
 
                                             <div className="file-section">
                                                 <div className="info-segment">
@@ -1355,9 +1684,12 @@ const AdminProjectManage = () => {
                                                                     accept={SOLUTION_ACCEPT}
                                                                     onChange={handleSolutionFilesChange}
                                                                 />
-                                                                <div className="file-drop-message">
-                                                                    Drag &amp; drop your file here or&nbsp;
-                                                                    <span className="browse-text">browse</span>
+                                                                <div className="file-drop-content">
+                                                                    <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                                    <div className="file-drop-message">
+                                                                        Drag &amp; drop your file here or{' '}
+                                                                        <span className="browse-text">browse</span>
+                                                                    </div>
                                                                 </div>
                                                             </>
                                                         ) : (
@@ -1493,9 +1825,12 @@ const AdminProjectManage = () => {
                                                                     accept={DESC_ACCEPT}
                                                                     onChange={handleDescFileChange}
                                                                 />
-                                                                <div className="file-drop-message">
-                                                                    Drag &amp; drop your file here or&nbsp;
-                                                                    <span className="browse-text">browse</span>
+                                                                <div className="file-drop-content">
+                                                                    <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                                    <div className="file-drop-message">
+                                                                        Drag &amp; drop your file here or{' '}
+                                                                        <span className="browse-text">browse</span>
+                                                                    </div>
                                                                 </div>
                                                             </>
                                                         ) : (
@@ -1600,17 +1935,73 @@ const AdminProjectManage = () => {
                                                     )}
                                                 </div>
 
-                                                <div className="optional-file-toggle">
-                                                    <button
-                                                        type="button"
-                                                        className={`toggle-optional-file ${showAdditionalFile ? 'on' : 'off'}`}
-                                                        aria-pressed={showAdditionalFile}
-                                                        onClick={() => setShowAdditionalFile(prev => !prev)}
-                                                    >
-                                                        {showAdditionalFile
-                                                            ? 'Optional additional text file: On'
-                                                            : 'Optional additional text file: Off'}
-                                                    </button>
+                                                <div className={`feature-toggle-row${isPractice ? ' single-column' : ''}`}>
+                                                    {!isPractice && (
+                                                        <div className={`feature-toggle-card practice-toggle-card ${practiceProblemsEnabled ? 'enabled' : 'disabled'}`}>
+                                                            <button
+                                                                type="button"
+                                                                className="feature-toggle-button"
+                                                                aria-pressed={practiceProblemsEnabled}
+                                                                onClick={togglePracticeProblemsEnabled}
+                                                            >
+                                                                <span className="feature-toggle-button-content">
+                                                                    <span className="feature-toggle-icon" aria-hidden="true">
+                                                                        <FaClipboardCheck />
+                                                                    </span>
+                                                                    <span className="feature-toggle-copy">
+                                                                        <span className="feature-toggle-heading-row">
+                                                                            <span className="feature-toggle-label">Practice Problems</span>
+                                                                            <span className={`feature-toggle-state ${practiceProblemsEnabled ? 'enabled' : 'disabled'}`}>
+                                                                                {practiceProblemsEnabled ? 'Enabled' : 'Disabled'}
+                                                                            </span>
+                                                                        </span>
+                                                                        <span className="feature-toggle-description">
+                                                                            Enable practice problems for this assignment.
+                                                                        </span>
+                                                                    </span>
+                                                                </span>
+                                                            </button>
+
+                                                            {practiceProblemsEnabled &&
+                                                                edit &&
+                                                                project_id > 0 &&
+                                                                practiceProblemsEnabled === serverPracticeProblemsEnabledSnapshot && (
+                                                                    <button
+                                                                        type="button"
+                                                                        className="manage-practice-problems-link"
+                                                                        onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice/select`)}
+                                                                    >
+                                                                        Manage practice problems
+                                                                    </button>
+                                                                )}
+                                                        </div>
+                                                    )}
+
+                                                    <div className={`feature-toggle-card additional-files-toggle-card ${showAdditionalFile ? 'enabled' : 'disabled'}${isPractice ? ' full-width' : ''}`}>
+                                                        <button
+                                                            type="button"
+                                                            className="feature-toggle-button"
+                                                            aria-pressed={showAdditionalFile}
+                                                            onClick={() => setShowAdditionalFile(prev => !prev)}
+                                                        >
+                                                            <span className="feature-toggle-button-content">
+                                                                <span className="feature-toggle-icon" aria-hidden="true">
+                                                                    <FaFileAlt />
+                                                                </span>
+                                                                <span className="feature-toggle-copy">
+                                                                    <span className="feature-toggle-heading-row">
+                                                                        <span className="feature-toggle-label">Optional Additional Text File</span>
+                                                                        <span className={`feature-toggle-state ${showAdditionalFile ? 'enabled' : 'disabled'}`}>
+                                                                            {showAdditionalFile ? 'Enabled' : 'Disabled'}
+                                                                        </span>
+                                                                    </span>
+                                                                    <span className="feature-toggle-description">
+                                                                        Allow optional .txt support files to be uploaded with this project.
+                                                                    </span>
+                                                                </span>
+                                                            </span>
+                                                        </button>
+                                                    </div>
                                                 </div>
 
                                                 {showAdditionalFile && (
@@ -1634,9 +2025,12 @@ const AdminProjectManage = () => {
                                                                 accept={ADD_ACCEPT}
                                                                 onChange={handleAdditionalFileChange}
                                                             />
-                                                            <div className="file-drop-message">
-                                                                Drag &amp; drop your file(s) here or&nbsp;
-                                                                <span className="browse-text">browse</span>
+                                                            <div className="file-drop-content">
+                                                                <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                                <div className="file-drop-message">
+                                                                    Drag &amp; drop your file(s) here or{' '}
+                                                                    <span className="browse-text">browse</span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1646,7 +2040,12 @@ const AdminProjectManage = () => {
                                             <button
                                                 type="button"
                                                 className="submit-button"
-                                                onClick={edit ? handleEditSubmit : handleNewSubmit}
+                                                onClick={
+                                                    isPractice
+                                                        ? handlePracticeFilesSubmit
+                                                        : (edit ? handleEditSubmit : handleNewSubmit)
+                                                }
+
                                                 disabled={submittingProject}
                                             >
                                                 {submittingProject ? (
@@ -1666,157 +2065,172 @@ const AdminProjectManage = () => {
                             {activeTab === 'testcases' && (
                                 <div className="pane-testcases">
                                     <div className="testcase-management-group">
-                                        <div className="form-testcases-overview">
-                                            <table className="testcases-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Name</th>
-                                                        <th>Input</th>
-                                                        <th>Output</th>
-                                                        <th>Description</th>
-                                                        <th>Actions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {testcases
-                                                        .filter(tc => tc.id !== -1)
-                                                        .map(tc => (
-                                                            <tr
-                                                                key={tc.id}
-                                                                className={tc.hidden ? 'hidden-testcase' : undefined}
-                                                                aria-label={tc.hidden ? 'Hidden test case' : undefined}
-                                                            >
-                                                                <td>{tc.name}</td>
-                                                                <td>
-                                                                    <pre className="testcase-input">{tc.input}</pre>
-                                                                </td>
-                                                                <td>
-                                                                    <pre className="testcase-output">{tc.output}</pre>
-                                                                </td>
-                                                                <td>{tc.description}</td>
-                                                                <td>
+                                        {!hasSolution ? (
+                                            <div style={{ padding: 16 }}>
+                                                Test cases are disabled until you upload solution file(s).
+                                                <div style={{ marginTop: 12 }}>
+                                                    Go to the Project Settings tab and upload the solution file(s),
+                                                    then return here.
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="form-testcases-overview">
+                                                    <table className="testcases-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Name</th>
+                                                                <th>Input</th>
+                                                                <th>Output</th>
+                                                                <th>Description</th>
+                                                                <th>Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {testcases
+                                                                .filter(tc => tc.id !== -1)
+                                                                .map(tc => (
+                                                                    <tr
+                                                                        key={tc.id}
+                                                                        className={tc.hidden ? 'hidden-testcase' : undefined}
+                                                                        aria-label={tc.hidden ? 'Hidden test case' : undefined}
+                                                                    >
+                                                                        <td>{tc.name}</td>
+                                                                        <td>
+                                                                            <pre className="testcase-input">{tc.input}</pre>
+                                                                        </td>
+                                                                        <td>
+                                                                            <pre className="testcase-output">{tc.output}</pre>
+                                                                        </td>
+                                                                        <td>{tc.description}</td>
+                                                                        <td>
+                                                                            <button
+                                                                                type="button"
+                                                                                className="testcase-edit-button"
+                                                                                onClick={() => handleOpenModal(tc.id)}
+                                                                            >
+                                                                                <FaEdit aria-hidden="true" /> Edit
+                                                                            </button>
+
+                                                                            <div className="testcase-hidden-toggle">
+                                                                                <span className="toggle-label">Hidden</span>
+                                                                                <label className="switch">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={!!tc.hidden}
+                                                                                        onChange={(e) => setHiddenFromRow(tc, e.currentTarget.checked)}
+                                                                                        aria-label="Toggle hidden test case"
+                                                                                    />
+                                                                                    <span className="slider" aria-hidden="true" />
+                                                                                </label>
+                                                                            </div>
+
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            <tr>
+                                                                <td colSpan={6} className="add-row-cell">
                                                                     <button
                                                                         type="button"
-                                                                        className="testcase-edit-button"
-                                                                        onClick={() => handleOpenModal(tc.id)}
+                                                                        className="add-testcase-button"
+                                                                        onClick={() => handleOpenModal(-1)}
                                                                     >
-                                                                        <FaEdit aria-hidden="true" /> Edit
+                                                                        <FaPlusCircle aria-hidden="true" /> Add Test Case
                                                                     </button>
-
-                                                                    <div className="testcase-hidden-toggle">
-                                                                        <span className="toggle-label">Hidden</span>
-                                                                        <label className="switch">
-                                                                            <input
-                                                                                type="checkbox"
-                                                                                checked={!!tc.hidden}
-                                                                                onChange={(e) => setHiddenFromRow(tc, e.currentTarget.checked)}
-                                                                                aria-label="Toggle hidden test case"
-                                                                            />
-                                                                            <span className="slider" aria-hidden="true" />
-                                                                        </label>
-                                                                    </div>
-
                                                                 </td>
                                                             </tr>
-                                                        ))}
-                                                    <tr>
-                                                        <td colSpan={6} className="add-row-cell">
-                                                            <button
-                                                                type="button"
-                                                                className="add-testcase-button"
-                                                                onClick={() => handleOpenModal(-1)}
-                                                            >
-                                                                <FaPlusCircle aria-hidden="true" /> Add Test Case
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
 
-                                        <div className="export-json-segment">
-                                            <button
-                                                type="button"
-                                                className="export-json-button"
-                                                onClick={get_testcase_json}
-                                            >
-                                                <FaDownload aria-hidden="true" /> {getJSON}
-                                            </button>
-                                        </div>
+                                                <div className="export-json-segment">
+                                                    <button
+                                                        type="button"
+                                                        className="export-json-button"
+                                                        onClick={get_testcase_json}
+                                                    >
+                                                        <FaDownload aria-hidden="true" /> {getJSON}
+                                                    </button>
+                                                </div>
 
-                                        <div className="or-separator">
-                                            <span>or</span>
-                                        </div>
+                                                <div className="or-separator">
+                                                    <span>or</span>
+                                                </div>
 
-                                        <div className="upload-testcases-segment">
-                                            <h1 className="upload-title">Upload Test Cases</h1>
-                                            <div
-                                                className="file-drop-area"
-                                                onDragOver={e => e.preventDefault()}
-                                                onDrop={e => {
-                                                    e.preventDefault()
-                                                    const files = e.dataTransfer.files
-                                                    if (files && files.length > 0) {
-                                                        handleDescFileChange({ target: { files } } as any)
-                                                    }
-                                                }}
-                                            >
-                                                {!jsonfilename ? (
-                                                    <>
-                                                        <input
-                                                            id="jsonFile"
-                                                            type="file"
-                                                            className="file-input"
-                                                            accept=".json,application/json"
-                                                            onChange={handleJsonFileChange}
-                                                        />
-                                                        <div className="file-drop-message">
-                                                            Drag &amp; drop your JSON file here or&nbsp;
-                                                            <span className="browse-text">browse</span>
-                                                        </div>
-                                                    </>
-                                                ) : (
-                                                    <div className="file-preview json-file-preview">
-                                                        <span className="file-icon-wrapper" aria-hidden="true">
-                                                            <FaRegFile className="file-outline-icon" aria-hidden="true" />
-                                                            {getFileIcon(jsonfilename)}
-                                                        </span>
-                                                        <span className="file-name">{jsonfilename}</span>
-                                                        <button
-                                                            type="button"
-                                                            className="exchange-icon"
-                                                            onClick={() => {
-                                                                setjsonfilename('')
-                                                                const jsonInput = document.getElementById('jsonFile') as HTMLInputElement | null
-                                                                if (jsonInput) jsonInput.value = ''
-                                                            }}
-                                                        >
-                                                            <FaExchangeAlt aria-hidden="true" />
-                                                        </button>
+                                                <div className="upload-testcases-segment">
+                                                    <h1 className="upload-title">Upload Test Cases</h1>
+                                                    <div
+                                                        className="file-drop-area"
+                                                        onDragOver={e => e.preventDefault()}
+                                                        onDrop={e => {
+                                                            e.preventDefault()
+                                                            const files = e.dataTransfer.files
+                                                            if (files && files.length > 0) {
+                                                                handleDescFileChange({ target: { files } } as any)
+                                                            }
+                                                        }}
+                                                    >
+                                                        {!jsonfilename ? (
+                                                            <>
+                                                                <input
+                                                                    id="jsonFile"
+                                                                    type="file"
+                                                                    className="file-input"
+                                                                    accept=".json,application/json"
+                                                                    onChange={handleJsonFileChange}
+                                                                />
+                                                                <div className="file-drop-content">
+                                                                    <FaCloudUploadAlt className="file-drop-cloud-icon" aria-hidden="true" />
+                                                                    <div className="file-drop-message">
+                                                                        Drag &amp; drop your JSON file here or{' '}
+                                                                        <span className="browse-text">browse</span>
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            <div className="file-preview json-file-preview">
+                                                                <span className="file-icon-wrapper" aria-hidden="true">
+                                                                    <FaRegFile className="file-outline-icon" aria-hidden="true" />
+                                                                    {getFileIcon(jsonfilename)}
+                                                                </span>
+                                                                <span className="file-name">{jsonfilename}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    className="exchange-icon"
+                                                                    onClick={() => {
+                                                                        setjsonfilename('')
+                                                                        const jsonInput = document.getElementById('jsonFile') as HTMLInputElement | null
+                                                                        if (jsonInput) jsonInput.value = ''
+                                                                    }}
+                                                                >
+                                                                    <FaExchangeAlt aria-hidden="true" />
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                )}
-                                            </div>
-                                        </div>
+                                                </div>
 
-                                        <div className="json-button-group">
-                                            <button
-                                                type="button"
-                                                className="json-submit-button"
-                                                onClick={handleJsonSubmit}
-                                                disabled={submittingJson}
-                                            >
-                                                {submittingJson ? (
-                                                    <>
-                                                        <FaCircleNotch className="spin" aria-hidden="true" />
-                                                        &nbsp;Submitting...
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <FaUpload aria-hidden="true" /> {SubmitJSON}
-                                                    </>
-                                                )}
-                                            </button>
-                                        </div>
+                                                <div className="json-button-group">
+                                                    <button
+                                                        type="button"
+                                                        className="json-submit-button"
+                                                        onClick={handleJsonSubmit}
+                                                        disabled={submittingJson}
+                                                    >
+                                                        {submittingJson ? (
+                                                            <>
+                                                                <FaCircleNotch className="spin" aria-hidden="true" />
+                                                                &nbsp;Submitting...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <FaUpload aria-hidden="true" /> {SubmitJSON}
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             )}

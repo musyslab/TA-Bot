@@ -115,6 +115,30 @@ CREATE TABLE `Projects` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `PracticeProblems`
+--
+
+DROP TABLE IF EXISTS `PracticeProblems`;
+CREATE TABLE `PracticeProblems` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `ProjectId` int NOT NULL,
+  `PracticeNumber` int NOT NULL DEFAULT 1,
+  `Enabled` tinyint(1) NOT NULL DEFAULT 1,
+  `Name` varchar(255) DEFAULT NULL,
+  `Language` varchar(45) DEFAULT NULL,
+  `solutionpath` varchar(1000) DEFAULT NULL,
+  `AsnDescriptionPath` varchar(1000) DEFAULT NULL,
+  `AdditionalFilePath` varchar(200) DEFAULT NULL,
+  `CreatedAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`Id`),
+  KEY `idx_PracticeProblems_ProjectId` (`ProjectId`),
+  KEY `idx_PracticeProblems_Project_Number` (`ProjectId`, `PracticeNumber`),
+  UNIQUE KEY `uq_PracticeProblems_Project_Number` (`ProjectId`, `PracticeNumber`),
+  CONSTRAINT `fk_PracticeProblems_Project` FOREIGN KEY (`ProjectId`)
+    REFERENCES `Projects` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
 -- Table structure for table `StudentGrades`
 --
 
@@ -229,6 +253,8 @@ CREATE TABLE `Submissions` (
   `Project` int NOT NULL,
   `CodeFilepath` varchar(256) NOT NULL,
   `IsPassing` tinyint(1) NOT NULL,
+  `IsPractice` tinyint(1) NOT NULL,
+  `PracticeProblemId` int DEFAULT NULL,
   `TestCaseResults` text,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `idSubmissions_UNIQUE` (`Id`),
@@ -236,6 +262,7 @@ CREATE TABLE `Submissions` (
   KEY `projectmap_idx` (`Project`),
   CONSTRAINT `iduser` FOREIGN KEY (`User`) REFERENCES `Users` (`Id`),
   CONSTRAINT `proect` FOREIGN KEY (`Project`) REFERENCES `Projects` (`Id`)
+  ,CONSTRAINT `sub_pp_fk` FOREIGN KEY (`PracticeProblemId`) REFERENCES `PracticeProblems` (`Id`) ON DELETE SET NULL
 ) ENGINE=InnoDB AUTO_INCREMENT=2507 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -249,15 +276,19 @@ DROP TABLE IF EXISTS `Testcases`;
 CREATE TABLE `Testcases` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `ProjectId` int DEFAULT NULL,
+  `PracticeProblemId` int DEFAULT NULL,
   `Name` text,
   `Description` text,
   `input` text,
   `Output` text,
   `Hidden` tinyint(1) NOT NULL DEFAULT 0,
+  `Practice` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Id_UNIQUE` (`Id`),
   KEY `tc_fk_idx` (`ProjectId`),
+  KEY `tc_pp_fk_idx` (`PracticeProblemId`),
   CONSTRAINT `tc_fk` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`)
+  ,CONSTRAINT `tc_pp_fk` FOREIGN KEY (`PracticeProblemId`) REFERENCES `PracticeProblems` (`Id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=192 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -285,19 +316,32 @@ CREATE TABLE `Users` (
 --
 -- Table structure for table `SubmissionManualErrors`
 --
-DROP TABLE IF EXISTS `SubmissionManualErrors`; 
+DROP TABLE IF EXISTS `SubmissionManualErrors`;
 
-CREATE TABLE `SubmissionManualErrors` ( 
-  `Id` int NOT NULL AUTO_INCREMENT, 
+CREATE TABLE `SubmissionManualErrors` (
+  `Id` int NOT NULL AUTO_INCREMENT,
   `SubmissionId` int NOT NULL,
   `StartLine` int NOT NULL,
   `EndLine` int NOT NULL,
   `ErrorId` varchar(45) NOT NULL,
   `Count` int NOT NULL DEFAULT 1,
   `Note` text,
-  PRIMARY KEY (`Id`), 
-  KEY `fk_sub_errors_idx` (`SubmissionId`), 
-  CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE 
+  PRIMARY KEY (`Id`),
+  KEY `fk_sub_errors_idx` (`SubmissionId`),
+  CONSTRAINT `fk_sub_errors` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+--
+-- Seed rows requested
+--
+
+INSERT INTO `Classes` (`Id`, `Name`, `Tid`)
+VALUES (1, 'COSC 1010', '1');
+
+INSERT INTO `Labs` (`Id`, `Name`, `ClassId`)
+VALUES (1, '401', 1);
+
+INSERT INTO `LectureSections` (`Id`, `Name`, `ClassId`)
+VALUES (1, '101', 1);
 
 SET FOREIGN_KEY_CHECKS=1;

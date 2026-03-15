@@ -21,12 +21,12 @@
         overflow-x: auto;
         background: transparent;
         margin-top: 12px;
-        /* breathing room under title */
     }
 
     .submissions-table {
         width: 100%;
-        border-collapse: collapse;
+        border-collapse: separate;
+        border-spacing: 0;
         background: #ffffff;
         border: 3px solid #e5e7eb;
         box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
@@ -36,13 +36,18 @@
             background: #f3f4f6;
 
             .header-row th {
-                border: 3px solid #e5e7eb; // add this line for visible separation
+                border-bottom: 3px solid #e5e7eb;
+                border-right: 3px solid #e5e7eb;
+
+                &:last-child {
+                    border-right: none;
+                }
             }
         }
 
         .header-row .col {
             text-align: left;
-            font-weight: 700;
+            font-weight: 800;
             font-size: 0.95rem;
             padding: 14px 16px;
             color: #111827;
@@ -53,20 +58,106 @@
             transition: background 140ms ease-in-out;
         }
 
-        .table-body .data-row:hover {
-            background: #f9fafb;
+        .table-body .data-row:hover td {
+            background: #ffffff;
+        }
+
+        .table-body .data-row.is-active:hover td {
+            background: #e6f6ed;
+        }
+
+        .table-body .data-row.practice-sub:hover td {
+            background: #e6e6e6;
         }
 
         .cell {
             padding: 14px 16px;
             font-size: 0.95rem;
-            border: 3px solid #e5e7eb;
+            border-right: 3px solid #e5e7eb;
+            border-bottom: 3px solid #e5e7eb;
             vertical-align: middle;
+
+            &:last-child {
+                border-right: none;
+            }
+        }
+
+        .data-row.is-active td {
+            background: #e6f6ed;
+        }
+
+        .data-row.is-active td:first-child {
+            border-left: 4px solid #3fbf6f;
+        }
+
+        .data-row.practice-sub td {
+            font-size: 0.92rem;
+            color: #2f2f2f;
+            background: #e6e6e6;
+            padding: 10px 16px;
+        }
+
+        .data-row.practice-sub:hover td {
+            background: #e6e6e6;
+        }
+
+        .data-row.practice-sub td:first-child {
+            border-left: 4px solid #9a9a9a;
+        }
+
+        .practice-subdir {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-weight: 700;
+        }
+
+        .practice-subdir-icon {
+            opacity: 0.7;
+            font-size: 1.6rem;
+            line-height: 1;
+            position: relative;
+            top: -7px;
         }
 
         .cell-project {
-            font-weight: 600;
+            font-weight: 700;
             color: #0f172a;
+        }
+
+        .cell-class,
+        .cell-date {
+            white-space: nowrap;
+        }
+
+        .cell-results {
+            font-weight: 900;
+            letter-spacing: 0.2px;
+            white-space: nowrap;
+
+            &.passed {
+                color: #065f46;
+                background: rgba(16, 185, 129, 0.12);
+                border-left: 3px solid #10b981;
+            }
+
+            &.failed {
+                color: #7f1d1d;
+                background: rgba(239, 68, 68, 0.12);
+                border-left: 3px solid #ef4444;
+            }
+        }
+
+        .cell-results.passed {
+            color: #065f46 !important;
+            background: rgba(16, 185, 129, 0.12) !important;
+            border-left: 3px solid #10b981 !important;
+        }
+
+        .cell-results.failed {
+            color: #7f1d1d !important;
+            background: rgba(239, 68, 68, 0.12) !important;
+            border-left: 3px solid #ef4444 !important;
         }
 
         .cell-link {
@@ -74,21 +165,31 @@
         }
 
         .view-link {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             padding: 8px 12px;
             border: 1px solid #e5e7eb;
             border-radius: 10px;
             text-decoration: none;
-            font-weight: 600;
+            font-weight: 800;
             background: #ffffff;
-            color: #111827;
+            color: #1d4ed8;
             transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+            min-height: 34px;
+            line-height: 1;
         }
 
         .view-link:hover {
             background: #f3f4f6;
             border-color: #d1d5db;
             transform: translateY(-1px);
+            text-decoration: none;
+        }
+
+        .view-link:focus-visible {
+            outline: 2px solid #93c5fd;
+            outline-offset: 2px;
         }
 
         .empty-row .cell-empty {
@@ -97,7 +198,7 @@
             color: #6b7280;
             font-style: italic;
             background: #fafafa;
+            border-bottom: none;
         }
     }
-
 }
