@@ -23,14 +23,8 @@ services:
     restart: unless-stopped
     build:
       context: backend
-    environment:
-      DB_USER: "user"
-      DB_PASSWORD: "password"
-      DB_HOST: "db"
-      DB_NAME: "autota"
-      DB_PORT: "3306"
-      FLASK_DEBUG: "True"
-      TABOT_DIR: "/tabot-files"
+    env_file:
+      - ./backend/.env.backend
     ports:
       - "5000:5000"
     volumes:

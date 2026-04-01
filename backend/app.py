@@ -4,7 +4,7 @@ This is our main file for our application, from here everything else is called
 
 from container import Container
 from datetime import timedelta
-from flask import Flask, jsonify, request
+from flask import Flask
 from flask_cors import CORS
 from src.auth import auth_api
 from src.repositories.database import db
@@ -18,6 +18,19 @@ from src.jwt_manager import jwt
 from src import classes, auth, projects, submission, upload, ai_suggestions
 from src.services import timeout_service
 import os
+
+def require_env(name: str) -> str:
+    value = (os.environ.get(name) or "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is not set.")
+    return value
+
+
+def env_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    return int(raw)
 
 def create_app():
     app = Flask(__name__)
@@ -34,19 +47,22 @@ def create_app():
         'STUDENT_FILES_DIR': STUDENT_DIR,
     })
 
-    CORS(
-        app,
-        supports_credentials=True,
-        origins=["http://localhost:3000"],
-    )
+    frontend_origin = os.environ.get("FRONTEND_ALLOWED_ORIGIN", "http://localhost:3000")
+
+    CORS(app, supports_credentials=True, origins=[frontend_origin])
         
     # App configuration
-    app.config["JWT_SECRET_KEY"] = "ob1L04WeQ1U0H5Kiybk9rMoQigVhoGJCKBxC6KxF85G89vAK3L903I073JXQ"
-    app.config["MAX_FAILED_LOGINS"] = 5
+    app.config["JWT_SECRET_KEY"] = require_env("JWT_SECRET_KEY")
+    app.config["MAX_FAILED_LOGINS"] = env_int("MAX_FAILED_LOGINS", 5)
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1000 * 1000
-    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(
+        hours=env_int("JWT_ACCESS_TOKEN_EXPIRES_HOURS", 1)
+    )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+    app.config["SQLALCHEMY_DATABASE_URI"] = (
+        f"mysql+pymysql://{require_env('DB_USER')}:{require_env('DB_PASSWORD')}"
+        f"@{require_env('DB_HOST')}:{require_env('DB_PORT')}/{require_env('DB_NAME')}"
+    )
     
     # Blueprint registration
     app.register_blueprint(auth_api, url_prefix='/api/auth')

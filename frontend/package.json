@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@azure/msal-browser": "^4.11.0",
     "@types/react-dom": "^19.2.3",
     "@types/react-helmet": "^6.1.11",
     "@vitejs/plugin-react": "^5.1.2",

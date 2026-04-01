@@ -1,6 +1,8 @@
 __pycache__/
 
-.env
+frontend/.env
+
+backend/.env.backend
 
 tabot-files/project-files
 
