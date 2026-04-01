@@ -21,6 +21,7 @@ from src.services.authentication_service import PAMAuthenticationService
 auth_api = Blueprint("auth_api", __name__)
 
 OAuthProvider = Literal["google", "microsoft"]
+LOCKED_ACCOUNT_MESSAGE = "Your account has been locked! Please contact an administrator!"
 
 
 def require_env(name: str) -> str:
@@ -58,6 +59,10 @@ def normalize_email(value: str) -> str:
     return (value or "").strip().lower()
 
 
+def is_user_locked(user: Any) -> bool:
+    return bool(getattr(user, "IsLocked", False))
+
+
 def split_display_name(name: str) -> Tuple[str, str]:
     cleaned = (name or "").strip()
     if not cleaned:
@@ -67,8 +72,10 @@ def split_display_name(name: str) -> Tuple[str, str]:
         return parts[0], ""
     return parts[0], " ".join(parts[1:])
 
+
 def oauth_signup_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(str(current_app.config["JWT_SECRET_KEY"]))
+
 
 def create_oauth_signup_token(profile: Dict[str, Any]) -> str:
     salt = os.environ.get("OAUTH_SIGNUP_TOKEN_SALT", "oauth-signup")
@@ -176,7 +183,18 @@ def user_identity_lookup(user):
 @jwt.user_lookup_loader
 def user_lookup_callback(_jwt_header, jwt_data):
     identity = jwt_data["sub"]
-    return Users.query.filter_by(Id=identity).one_or_none()
+    user = Users.query.filter_by(Id=identity).one_or_none()
+    if user is None or is_user_locked(user):
+        return None
+    return user
+
+
+@jwt.user_lookup_error_loader
+def user_lookup_error_callback(_jwt_header, _jwt_data):
+    return make_response(
+        {"message": LOCKED_ACCOUNT_MESSAGE},
+        HTTPStatus.FORBIDDEN,
+    )
 
 
 @auth_api.route("/get-role", methods=["GET"])
@@ -203,6 +221,7 @@ def oauth_config():
         HTTPStatus.OK,
     )
 
+
 @auth_api.route("/login", methods=["POST"])
 @inject
 def auth(
@@ -213,14 +232,22 @@ def auth(
     username = get_value_or_empty(input_json, "username")
     password = get_value_or_empty(input_json, "password")
 
+    exists = user_repo.doesUserExist(username)
+
+    if exists:
+        existing_user = user_repo.getUserByName(username)
+        if is_user_locked(existing_user):
+            return make_response(
+                {"message": LOCKED_ACCOUNT_MESSAGE},
+                HTTPStatus.FORBIDDEN,
+            )
+
     if user_repo.can_user_login(username) >= current_app.config["MAX_FAILED_LOGINS"]:
         user_repo.lock_user_account(username)
         return make_response(
-            {"message": "Your account has been locked! Please contact an administrator!"},
+            {"message": LOCKED_ACCOUNT_MESSAGE},
             HTTPStatus.FORBIDDEN,
         )
-
-    exists = user_repo.doesUserExist(username)
 
     try:
         authenticated = auth_service.login(username, password)
@@ -287,6 +314,12 @@ def oauth_login(user_repo: UserRepository = Provide[Container.user_repo]):
 
     if user_repo.doesUserExist(username):
         user = user_repo.getUserByName(username)
+        if is_user_locked(user):
+            return make_response(
+                {"message": LOCKED_ACCOUNT_MESSAGE},
+                HTTPStatus.FORBIDDEN,
+            )
+
         access_token = create_access_token(identity=user)
         return make_response(
             {
@@ -424,10 +457,17 @@ def create_oauth_user(
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
-    if not user_repo.doesUserExist(username):
+    if user_repo.doesUserExist(username):
+        user = user_repo.getUserByName(username)
+        if is_user_locked(user):
+            return make_response(
+                {"message": LOCKED_ACCOUNT_MESSAGE},
+                HTTPStatus.FORBIDDEN,
+            )
+    else:
         user_repo.create_user(username, first_name, last_name, email, student_number)
+        user = user_repo.getUserByName(username)
 
-    user = user_repo.getUserByName(username)
     class_repo.create_assignments(class_id, lab_id, int(user.Id), lecture_id)
 
     access_token = create_access_token(identity=user)

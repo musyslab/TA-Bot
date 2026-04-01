@@ -7,7 +7,7 @@ def env_bool(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
         return default
-    return raw.strip().strip('"').strip("'").lower() in ("1", "true", "yes", "y", "on")
+    return raw.strip().lower() in ("1", "true", "yes", "y", "on")
 
 class AuthenticationService(ABC):
     """This class is an abstract for our main class PAM AuthenticationService"""

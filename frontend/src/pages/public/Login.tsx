@@ -209,8 +209,8 @@ function Login() {
         if (res.data.message === "New OAuth User") {
           setIsNewUser(true);
           setNewUserSource("oauth");
-          setOauthSignupToken(res.data.signup_token || "");
-          setOauthProfile(res.data.oauth_profile || null);
+          setOAuthSignupToken(res.data.signup_token || "");
+          setOAuthProfile(res.data.oauth_profile || null);
           setFirstName(res.data.oauth_profile?.first_name || "");
           setLastName(res.data.oauth_profile?.last_name || "");
           setEmail(res.data.oauth_profile?.email || "");
@@ -280,8 +280,8 @@ function Login() {
       if (res.data.message === "New User") {
         setIsNewUser(true);
         setNewUserSource("pam");
-        setOauthSignupToken("");
-        setOauthProfile(null);
+        setOAuthSignupToken("");
+        setOAuthProfile(null);
         setNewUserError("");
       } else {
         persistSession(res.data.access_token, Number(res.data.role || 0));
@@ -365,6 +365,13 @@ function Login() {
       let res;
 
       if (newUserSource === "oauth") {
+
+        if (!oauthSignupToken.trim()) {
+          setNewUserError("Google sign-up token is missing. Please sign in with Google again.");
+          setIsLoading(false);
+          return;
+        }
+
         res = await axios.post(`${apiBase}/auth/oauth/create`, {
           signup_token: oauthSignupToken,
           id: studentNumber,
