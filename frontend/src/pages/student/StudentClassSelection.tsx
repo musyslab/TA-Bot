@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { Helmet } from "react-helmet"
 import axios from "axios"
 import MenuComponent from "../components/MenuComponent"
@@ -7,68 +7,61 @@ import "../../styling/Classes.scss"
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
 
 const ClassSelectionPage: React.FC = () => {
-    const [studentClassNames, setstudentClassNames] = useState<Array<string>>([])
-    const [studentClassNumbers, setstudentClassNumbers] = useState<Array<string>>([])
-    const [addClass, setaddClass] = useState<boolean>(false)
-    const [ClassId, setClassId] = useState<string>("")
-    const [LectureId, setLectureId] = useState<string>("")
-    const [LabId, setLabId] = useState<string>("")
+    const [schools, setSchools] = useState<Array<{ id: number; name: string }>>([])
+    const [studentClasses, setStudentClasses] = useState<Array<{ id: number; name: string }>>([])
+    const [selectedSchoolId, setSelectedSchoolId] = useState<number>(-1)
+    const [selectedSchoolName, setSelectedSchoolName] = useState<string>("")
+    const [errorMessage, setErrorMessage] = useState<string>("")
 
-    const handleClassSubmit = (e?: React.FormEvent | React.MouseEvent) => {
-        e?.preventDefault?.()
-
-        const formData = new FormData()
-        formData.append("class_name", ClassId.toString())
-        formData.append("lecture_name", LectureId.toString())
-        formData.append("lab_name", LabId.toString())
-
+    const loadSchools = useCallback(() => {
         axios
-            .post(import.meta.env.VITE_API_URL + `/class/add_class_student`, formData, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
-                },
-            })
-            .then(() => {
-                window.location.href = "code"
+            .get(import.meta.env.VITE_API_URL + `/schools/all`)
+            .then((res) => {
+                const rows = Array.isArray(res.data) ? res.data : []
+                rows.sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))
+                setSchools(rows)
             })
             .catch(() => {
-                window.alert("Invalid entry")
-                window.location.href = "/student/classes"
+                setErrorMessage("Could not load schools.")
             })
-    }
+    }, [])
 
-    const handleClassIdChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const value = event.target.value
-        setClassId(value)
-    }
-
-    const handleLectureIdChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const value = event.target.value
-        setLectureId(value)
-    }
-
-    const handleLabIdChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const value = event.target.value
-        setLabId(value)
-    }
-
-    useEffect(() => {
+    const loadClasses = useCallback((schoolId: number) => {
         axios
-            .get(import.meta.env.VITE_API_URL + `/class/all?filter=true`, {
+            .get(import.meta.env.VITE_API_URL + `/class/all?filter=true&school_id=${schoolId}`, {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
                 },
             })
             .then((res) => {
-                setstudentClassNames([])
-                setstudentClassNumbers([])
-
-                res.data.map((obj: { id: number; name: string }) => {
-                    setstudentClassNumbers((oldArray) => [...oldArray, obj.id + ""])
-                    setstudentClassNames((oldArray) => [...oldArray, obj.name])
-                })
+                const rows = Array.isArray(res.data) ? res.data : []
+                rows.sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))
+                setStudentClasses(rows)
+                setErrorMessage("")
+            })
+            .catch(() => {
+                setErrorMessage("Could not load classes for the selected school.")
             })
     }, [])
+
+    const handleSchoolSelect = (school: { id: number; name: string }) => {
+        setSelectedSchoolId(school.id)
+        setSelectedSchoolName(school.name)
+        setStudentClasses([])
+        setErrorMessage("")
+        loadClasses(school.id)
+    }
+
+    const handleBackToSchools = () => {
+        setSelectedSchoolId(-1)
+        setSelectedSchoolName("")
+        setStudentClasses([])
+        setErrorMessage("")
+    }
+
+    useEffect(() => {
+        loadSchools()
+    }, [loadSchools])
 
     return (
         <div id="code-page" className="admin-landing-root">
@@ -87,66 +80,80 @@ const ClassSelectionPage: React.FC = () => {
 
             <div className="main-grid">
                 <DirectoryBreadcrumbs
-                    items={[{ label: "Class Selection" }]}
+                    items={
+                        selectedSchoolId === -1
+                            ? [{ label: "School Selection" }]
+                            : [{ label: "School Selection" }, { label: "Class Selection" }]
+                    }
                     trailingSeparator={true}
                 />
 
-                <div className="pageTitle">Student Classes</div>
+                <div className="pageTitle">
+                    {selectedSchoolId === -1 ? "Select a School" : `Student Classes · ${selectedSchoolName}`}
+                </div>
 
                 <div className="main-grid">
 
                     <div className="container">
-                        <div className="classList">
-                            {studentClassNames.map((name, index) => (
-                                <a
-                                    key={index}
-                                    href={`/student/${studentClassNumbers[index]}/upload`}
-                                    className="clickableRow"
-                                >
-                                    <div>
-                                        <img src={codeimg} alt="Code" />
-                                    </div>
-                                    <div>
-                                        <h1 className="title">{name}</h1>
-                                    </div>
-                                </a>
-                            ))}
+                        <div className="selectorHeader">
+                            {selectedSchoolId === -1 ? (
+                                <p className="selectorSubtext">Choose your school before selecting a class.</p>
+                            ) : (
+                                <>
+                                    <p className="selectorSubtext">
+                                        Showing your assigned classes for {selectedSchoolName}.
+                                    </p>
+                                    <button type="button" className="secondaryButton" onClick={handleBackToSchools}>
+                                        Choose a different school
+                                    </button>
+                                </>
+                            )}
                         </div>
 
-                        {addClass && (
-                            <form>
-                                <div>
-                                    <label htmlFor="className">Class Name</label>
-                                    <input
-                                        id="className"
-                                        value={ClassId}
-                                        onChange={handleClassIdChange}
-                                    />
-                                </div>
+                        {errorMessage ? <div className="pageMessage">{errorMessage}</div> : null}
 
-                                <div>
-                                    <label htmlFor="lectureNumber">Lecture Number</label>
-                                    <input
-                                        id="lectureNumber"
-                                        value={LectureId}
-                                        onChange={handleLectureIdChange}
-                                    />
-                                </div>
+                        <div className="classList">
+                            {selectedSchoolId === -1
+                                ? schools.map((school) => (
+                                    <button
+                                        key={school.id}
+                                        type="button"
+                                        className="clickableRow schoolCardButton"
+                                        onClick={() => handleSchoolSelect(school)}
+                                    >
+                                        <div>
+                                            <img src={codeimg} alt="Code" />
+                                        </div>
+                                        <div>
+                                            <h1 className="title">{school.name}</h1>
+                                        </div>
+                                    </button>
+                                ))
+                                : studentClasses.map((classObj) => (
+                                    <a
+                                        key={classObj.id}
+                                        href={`/student/${classObj.id}/upload`}
+                                        className="clickableRow"
+                                    >
+                                        <div>
+                                            <img src={codeimg} alt="Code" />
+                                        </div>
+                                        <div>
+                                            <h1 className="title">{classObj.name}</h1>
+                                        </div>
+                                    </a>
+                                ))}
+                        </div>
 
-                                <div>
-                                    <label htmlFor="labNumber">Lab Number</label>
-                                    <input
-                                        id="labNumber"
-                                        value={LabId}
-                                        onChange={handleLabIdChange}
-                                    />
-                                </div>
+                        {selectedSchoolId === -1 && schools.length === 0 ? (
+                            <div className="emptyState">No schools are available yet.</div>
+                        ) : null}
 
-                                <button type="submit" onClick={handleClassSubmit}>
-                                    Submit
-                                </button>
-                            </form>
-                        )}
+                        {selectedSchoolId !== -1 && studentClasses.length === 0 && !errorMessage ? (
+                            <div className="emptyState">
+                                No classes are currently assigned to you for this school.
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             </div>

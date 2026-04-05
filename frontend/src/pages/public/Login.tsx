@@ -1,17 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-// Uncomment for Marquette
-import img from "../../images/MUCS-tag.png";
-
-// Uncomment for Carroll
-// import img from "../../Pioneer.png";
-
 import { FaLock, FaMicrosoft, FaUser } from "react-icons/fa";
 import axios from "axios";
 import { Helmet } from "react-helmet";
 import { Navigate } from "react-router-dom";
 import { PublicClientApplication } from "@azure/msal-browser";
 
+import MenuComponent from "../components/MenuComponent";
 import "../../styling/Login.scss";
 
 declare global {
@@ -41,6 +36,11 @@ declare global {
 }
 
 interface IdNamePair {
+  name: string;
+  id: number;
+}
+
+interface SchoolJson {
   name: string;
   id: number;
 }
@@ -129,10 +129,14 @@ function Login() {
   const [studentNumber, setStudentNumber] = useState<string>("");
   const [email, setEmail] = useState<string>("");
 
+  const [schoolId, setSchoolId] = useState<number>(-1);
   const [classId, setClassId] = useState<number>(-1);
   const [labId, setLabId] = useState<number>(-1);
   const [lectureId, setLectureId] = useState<number>(-1);
+
+  const [schools, setSchools] = useState<Array<SchoolJson>>([]);
   const [classes, setClasses] = useState<Array<ClassJson>>([]);
+  const [schoolOptions, setSchoolOptions] = useState<Array<DropDownOption>>([]);
   const [classOptions, setClassOptions] = useState<Array<DropDownOption>>([]);
   const [labOptions, setLabOptions] = useState<Array<DropDownOption>>([]);
   const [lectureOptions, setLectureOptions] = useState<Array<DropDownOption>>([]);
@@ -151,34 +155,95 @@ function Login() {
     setIsLoggedIn(true);
   }, []);
 
-  const fetchSections = useCallback(async () => {
-    try {
-      const res = await axios.get(`${apiBase}/class/sections`);
-      const sectionClasses = Array.isArray(res.data) ? (res.data as Array<ClassJson>) : [];
+  const resetNewUserSelections = useCallback(() => {
+    setSchoolId(-1);
+    setClassId(-1);
+    setLabId(-1);
+    setLectureId(-1);
+    setClasses([]);
+    setClassOptions([]);
+    setLabOptions([]);
+    setLectureOptions([]);
+    setHasClassSelected(false);
+  }, []);
 
-      setClasses(sectionClasses);
-      setClassOptions(
-        sectionClasses.map((cls) => ({
-          key: cls.id,
-          value: cls.id,
-          text: cls.name,
+  const fetchSchools = useCallback(async () => {
+    try {
+      const res = await axios.get(`${apiBase}/schools/all`);
+      const schoolRows = Array.isArray(res.data) ? (res.data as Array<SchoolJson>) : [];
+
+      setSchools(schoolRows);
+      setSchoolOptions(
+        schoolRows.map((school) => ({
+          key: school.id,
+          value: school.id,
+          text: school.name,
         }))
       );
 
-      if (sectionClasses.length === 0) {
-        setNewUserError("No classes were returned from the server.");
+      if (schoolRows.length === 0) {
+        setNewUserError("No schools were returned from the server.");
+      } else {
+        setNewUserError("");
       }
     } catch (err) {
       console.error(err);
-      setNewUserError("Could not load class, lecture, and lab options.");
+      setNewUserError("Could not load school options.");
     }
   }, [apiBase]);
 
+  const fetchSections = useCallback(
+    async (selectedSchoolId: number) => {
+      if (selectedSchoolId <= 0) {
+        setClasses([]);
+        setClassOptions([]);
+        setLabOptions([]);
+        setLectureOptions([]);
+        setHasClassSelected(false);
+        return;
+      }
+
+      try {
+        const res = await axios.get(`${apiBase}/class/sections?school_id=${selectedSchoolId}`);
+        const sectionClasses = Array.isArray(res.data) ? (res.data as Array<ClassJson>) : [];
+
+        setClasses(sectionClasses);
+        setClassOptions(
+          sectionClasses.map((cls) => ({
+            key: cls.id,
+            value: cls.id,
+            text: cls.name,
+          }))
+        );
+
+        setLabOptions([]);
+        setLectureOptions([]);
+        setHasClassSelected(false);
+
+        if (sectionClasses.length === 0) {
+          setNewUserError("No classes were returned for the selected school.");
+        } else {
+          setNewUserError("");
+        }
+      } catch (err) {
+        console.error(err);
+        setNewUserError("Could not load class, lecture, and lab options.");
+      }
+    },
+    [apiBase]
+  );
+
   useEffect(() => {
     if (isNewUser) {
-      void fetchSections();
+      void fetchSchools();
     }
-  }, [isNewUser, fetchSections]);
+  }, [isNewUser, fetchSchools]);
+
+  useEffect(() => {
+    if (isNewUser && schoolId > 0) {
+      void fetchSections(schoolId);
+    }
+  }, [isNewUser, schoolId, fetchSections]);
 
   useEffect(() => {
     axios
@@ -207,6 +272,7 @@ function Login() {
         });
 
         if (res.data.message === "New OAuth User") {
+          resetNewUserSelections();
           setIsNewUser(true);
           setNewUserSource("oauth");
           setOAuthSignupToken(res.data.signup_token || "");
@@ -225,7 +291,7 @@ function Login() {
         setIsLoading(false);
       }
     },
-    [apiBase, fetchSections, persistSession]
+    [apiBase, persistSession, resetNewUserSelections]
   );
 
   useEffect(() => {
@@ -278,6 +344,7 @@ function Login() {
       });
 
       if (res.data.message === "New User") {
+        resetNewUserSelections();
         setIsNewUser(true);
         setNewUserSource("pam");
         setOAuthSignupToken("");
@@ -334,6 +401,18 @@ function Login() {
     }
   };
 
+  const handleSchoolIdChange = (value: number) => {
+    setSchoolId(value);
+    setClassId(-1);
+    setLabId(-1);
+    setLectureId(-1);
+    setClassOptions([]);
+    setLabOptions([]);
+    setLectureOptions([]);
+    setHasClassSelected(false);
+    setNewUserError("");
+  };
+
   const handleClassIdChange = (value: number) => {
     const selectedClass = classes.find((cls) => cls.id === value);
 
@@ -364,10 +443,15 @@ function Login() {
     try {
       let res;
 
-      if (newUserSource === "oauth") {
+      if (schoolId === -1) {
+        setNewUserError("Please choose a school.");
+        setIsLoading(false);
+        return;
+      }
 
+      if (newUserSource === "oauth") {
         if (!oauthSignupToken.trim()) {
-          setNewUserError("Google sign-up token is missing. Please sign in with Google again.");
+          setNewUserError("OAuth sign-up token is missing. Please sign in again.");
           setIsLoading(false);
           return;
         }
@@ -375,6 +459,7 @@ function Login() {
         res = await axios.post(`${apiBase}/auth/oauth/create`, {
           signup_token: oauthSignupToken,
           id: studentNumber,
+          school_id: schoolId,
           class_id: classId,
           lab_id: labId,
           lecture_id: lectureId,
@@ -387,6 +472,7 @@ function Login() {
           lname: lastName,
           id: studentNumber,
           email,
+          school_id: schoolId,
           class_id: classId,
           lab_id: labId,
           lecture_id: lectureId,
@@ -413,6 +499,15 @@ function Login() {
         <title>TA-Bot</title>
       </Helmet>
 
+      <MenuComponent
+        showUpload={false}
+        showAdminUpload={false}
+        showHelp={false}
+        showCreate={false}
+        showLast={false}
+        showReviewButton={false}
+      />
+
       {isNewUser ? (
         <div className="login-modal">
           <div className="login-modal__content" role="dialog" aria-modal="true">
@@ -426,8 +521,8 @@ function Login() {
                 <div className="oauth-profile-card__name">{oauthProfile.display_name}</div>
                 <div className="oauth-profile-card__email">{oauthProfile.email}</div>
                 <div className="oauth-profile-card__hint">
-                  Your name and school email came from your identity provider. You only need to finish your student
-                  details below.
+                  Your name and school email came from your identity provider. You only need to finish your school and
+                  student details below.
                 </div>
               </div>
             ) : null}
@@ -470,7 +565,7 @@ function Login() {
                     <input
                       id="email"
                       type="email"
-                      placeholder="first.last@marquette.edu"
+                      placeholder="first.last@school.edu"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="form-input"
@@ -478,6 +573,25 @@ function Login() {
                   </div>
                 </>
               ) : null}
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="schoolSelect">
+                  School
+                </label>
+                <select
+                  id="schoolSelect"
+                  value={schoolId}
+                  onChange={(e) => handleSchoolIdChange(parseInt(e.target.value, 10) || -1)}
+                  className="form-select"
+                >
+                  <option value={-1}>School</option>
+                  {schoolOptions.map((opt) => (
+                    <option key={opt.key} value={opt.value}>
+                      {opt.text}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div className="form-group">
                 <label className="form-label" htmlFor="sid">
@@ -501,6 +615,7 @@ function Login() {
                   id="classSelect"
                   value={classId}
                   onChange={(e) => handleClassIdChange(parseInt(e.target.value, 10) || -1)}
+                  disabled={schoolId === -1}
                   className="form-select"
                 >
                   <option value={-1}>Class</option>
@@ -566,98 +681,96 @@ function Login() {
         </div>
       ) : null}
 
-      <div className="login-card">
-        <h1 className="login-title">Login to TA-Bot</h1>
-        <p className="login-subtitle">Use your campus password, Google, or Microsoft.</p>
+      <div className="login-shell">
+        <div className="login-card">
+          <h1 className="login-title">Login to TA-Bot</h1>
+          <p className="login-subtitle">Use your campus password, Google, or Microsoft.</p>
 
-        <div className="oauth-section">
-          {oauthConfig?.google_enabled ? (
-            <div className="google-button-shell">
-              <div ref={googleButtonRef} />
+          <div className="oauth-section">
+            {oauthConfig?.google_enabled ? (
+              <div className="google-button-shell">
+                <div ref={googleButtonRef} />
+              </div>
+            ) : null}
+
+            {oauthConfig?.microsoft_enabled ? (
+              <button className="btn btn--microsoft" type="button" onClick={handleMicrosoftLogin} disabled={isLoading}>
+                <FaMicrosoft aria-hidden="true" />
+                <span>{isLoading ? "Working..." : "Continue with Microsoft"}</span>
+              </button>
+            ) : null}
+          </div>
+
+          {oauthConfig?.google_enabled || oauthConfig?.microsoft_enabled ? (
+            <div className="login-divider">
+              <span>or use your campus account</span>
             </div>
           ) : null}
 
-          {oauthConfig?.microsoft_enabled ? (
-            <button className="btn btn--microsoft" type="button" onClick={handleMicrosoftLogin} disabled={isLoading}>
-              <FaMicrosoft aria-hidden="true" />
-              <span>{isLoading ? "Working..." : "Continue with Microsoft"}</span>
+          <form className="login-form" onSubmit={handlePasswordSubmit}>
+            <div className="form-group">
+              <label className="form-label" htmlFor="username">
+                Username
+              </label>
+              <div className="input-with-icon">
+                <FaUser className="input-with-icon__icon" aria-hidden="true" />
+                <input
+                  id="username"
+                  name="username"
+                  type="text"
+                  required
+                  placeholder="Username"
+                  autoComplete="username"
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="form-input"
+                  value={username}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="password">
+                Password
+              </label>
+              <div className="input-with-icon">
+                <FaLock className="input-with-icon__icon" aria-hidden="true" />
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  required
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="form-input"
+                  value={password}
+                />
+              </div>
+            </div>
+
+            <button className="btn btn--primary login-form__submit" type="submit" disabled={isLoading}>
+              {isLoading ? "Logging in..." : "Login"}
             </button>
+          </form>
+
+          {errorMessage ? (
+            <div className="alert alert--error" role="alert" aria-live="assertive">
+              {errorMessage}
+            </div>
           ) : null}
-        </div>
 
-        {(oauthConfig?.google_enabled || oauthConfig?.microsoft_enabled) ? (
-          <div className="login-divider">
-            <span>or use your campus account</span>
+          <div className="login-links">
+            Create a manual account{" "}
+            <a
+              className="login-links__link"
+              href="https://docs.google.com/document/d/1QT--iGWE-y1Ix8GknsMAoiIKyZJcO_yEOhMBg0WFpyU/edit?usp=sharing"
+              target="_blank"
+              rel="noreferrer"
+            >
+              here
+            </a>
+            .
           </div>
-        ) : null}
-
-        <form className="login-form" onSubmit={handlePasswordSubmit}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="username">
-              Username
-            </label>
-            <div className="input-with-icon">
-              <FaUser className="input-with-icon__icon" aria-hidden="true" />
-              <input
-                id="username"
-                name="username"
-                type="text"
-                required
-                placeholder="Username"
-                autoComplete="username"
-                onChange={(e) => setUsername(e.target.value)}
-                className="form-input"
-                value={username}
-              />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="password">
-              Password
-            </label>
-            <div className="input-with-icon">
-              <FaLock className="input-with-icon__icon" aria-hidden="true" />
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                placeholder="Password"
-                autoComplete="current-password"
-                onChange={(e) => setPassword(e.target.value)}
-                className="form-input"
-                value={password}
-              />
-            </div>
-          </div>
-
-          <button className="btn btn--primary login-form__submit" type="submit" disabled={isLoading}>
-            {isLoading ? "Logging in..." : "Login"}
-          </button>
-        </form>
-
-        {errorMessage ? (
-          <div className="alert alert--error" role="alert" aria-live="assertive">
-            {errorMessage}
-          </div>
-        ) : null}
-
-        <div className="login-links">
-          Create a manual account{" "}
-          <a
-            className="login-links__link"
-            href="https://docs.google.com/document/d/1QT--iGWE-y1Ix8GknsMAoiIKyZJcO_yEOhMBg0WFpyU/edit?usp=sharing"
-            target="_blank"
-            rel="noreferrer"
-          >
-            here
-          </a>
-          .
-        </div>
-
-        <div className="login-logo">
-          <img className="login-logo__img" src={img} alt="School logo" />
         </div>
       </div>
     </div>

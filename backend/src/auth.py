@@ -13,7 +13,7 @@ from jwt import PyJWKClient
 from container import Container
 from src.api_utils import get_value_or_empty
 from src.jwt_manager import jwt
-from src.repositories.models import Users
+from src.repositories.models import Classes, Labs, LectureSections, Schools, Users
 from src.repositories.class_repository import ClassRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authentication_service import PAMAuthenticationService
@@ -62,6 +62,25 @@ def normalize_email(value: str) -> str:
 def is_user_locked(user: Any) -> bool:
     return bool(getattr(user, "IsLocked", False))
 
+def is_valid_school_selection(school_id: int, class_id: int, lab_id: int, lecture_id: int) -> bool:
+    if school_id <= 0 or class_id <= 0 or lab_id <= 0 or lecture_id <= 0:
+        return False
+
+    school = Schools.query.filter(Schools.Id == school_id).first()
+    school_class = Classes.query.filter(
+        Classes.Id == class_id,
+        Classes.SchoolId == school_id,
+    ).first()
+    lab = Labs.query.filter(
+        Labs.Id == lab_id,
+        Labs.ClassId == class_id,
+    ).first()
+    lecture = LectureSections.query.filter(
+        LectureSections.Id == lecture_id,
+        LectureSections.ClassId == class_id,
+    ).first()
+
+    return all([school, school_class, lab, lecture])    
 
 def split_display_name(name: str) -> Tuple[str, str]:
     cleaned = (name or "").strip()
@@ -371,19 +390,27 @@ def create_user(
     last_name = get_value_or_empty(input_json, "lname")
     student_number = get_value_or_empty(input_json, "id")
     email = normalize_email(get_value_or_empty(input_json, "email"))
+    school_id = parse_int(get_value_or_empty(input_json, "school_id"))
     class_id = parse_int(get_value_or_empty(input_json, "class_id"))
     lab_id = parse_int(get_value_or_empty(input_json, "lab_id"))
     lecture_id = parse_int(get_value_or_empty(input_json, "lecture_id"))
 
-    if not (first_name and last_name and student_number and email and class_id and lab_id and lecture_id):
+    if not (first_name and last_name and student_number and email and school_id and class_id and lab_id and lecture_id):
         return make_response(
             {"message": "Missing required data. All fields are required."},
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
-    if class_id == -1 or lab_id == -1 or lecture_id == -1:
+    if school_id == -1 or class_id == -1 or lab_id == -1 or lecture_id == -1:
         return make_response(
-            {"message": "Please fill in valid class data."},
+            {"message": "Please fill in valid school, class, lecture, and lab data."},
+            HTTPStatus.NOT_ACCEPTABLE,
+        )
+
+    if not is_valid_school_selection(school_id, class_id, lab_id, lecture_id):
+        return make_response(
+            {"message": "The selected school, class, lecture, and lab combination is invalid."},
+
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
@@ -411,6 +438,7 @@ def create_oauth_user(
     input_json = request.get_json() or {}
     signup_token = get_value_or_empty(input_json, "signup_token").strip()
     student_number = get_value_or_empty(input_json, "id")
+    school_id = parse_int(get_value_or_empty(input_json, "school_id"))
     class_id = parse_int(get_value_or_empty(input_json, "class_id"))
     lab_id = parse_int(get_value_or_empty(input_json, "lab_id"))
     lecture_id = parse_int(get_value_or_empty(input_json, "lecture_id"))
@@ -421,7 +449,7 @@ def create_oauth_user(
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
-    if not (student_number and class_id and lab_id and lecture_id):
+    if not (student_number and school_id and class_id and lab_id and lecture_id):
         return make_response(
             {"message": "Missing required data. School ID, class, lab, and lecture are required."},
             HTTPStatus.NOT_ACCEPTABLE,

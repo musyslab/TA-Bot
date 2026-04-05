@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import axios from 'axios';
 
 import LoginPage from './pages/public/Login';
-import LandingPage from './pages/public/Landing';
+import HomePage from './pages/public/HomePage';
 import NotFound from './pages/public/NotFound';
 
 import StudentUpload from './pages/student/StudentUpload';
@@ -45,7 +45,9 @@ class App extends Component {
             <BrowserRouter>
                 <Routes>
                     <Route path="/login" element={<LoginPage />} />
-                    <Route path="/" element={<LandingPage />} />
+
+                    <Route path="/" element={<HomePage />} />
+
                     <Route path="/admin/classes" element={
                         <ProtectedRoute>
                             <AdminClassSelection />

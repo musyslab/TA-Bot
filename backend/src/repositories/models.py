@@ -6,6 +6,11 @@ from sqlalchemy.types import Date
 
 from src.repositories.database import db
 
+class Schools(db.Model):
+    __tablename__ = "Schools"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    Name = Column(String)
+    Classes = relationship('Classes', back_populates='School')
 
 class Projects(db.Model):
     __tablename__ = "Projects"
@@ -74,7 +79,9 @@ class Classes(db.Model):
     __tablename__ = "Classes"
     Id = Column(Integer, primary_key=True)
     Name = Column(String)
+    SchoolId = Column(Integer, ForeignKey('Schools.Id'))
     Tid = Column(String)
+    School = relationship('Schools', back_populates='Classes')
 
 class Labs(db.Model):
     __tablename__ = "Labs"

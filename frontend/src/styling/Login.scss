@@ -6,10 +6,18 @@ body {
 
 .login-page {
   min-height: 100vh;
+  padding: 0 0 32px;
+  box-sizing: border-box;
+}
+
+.login-shell {
+  width: 95%;
+  margin: 0 auto;
+  min-height: 100vh;
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 32px 16px;
+  padding: 110px 0 32px;
   box-sizing: border-box;
 }
 
@@ -228,19 +236,6 @@ body {
   }
 }
 
-.login-logo {
-  width: 100%;
-  margin-top: 18px;
-  display: flex;
-  justify-content: center;
-
-  .login-logo__img {
-    max-width: 260px;
-    width: 100%;
-    height: auto;
-  }
-}
-
 /* Modal */
 .login-modal {
   position: fixed;
@@ -373,6 +368,10 @@ body {
 }
 
 @media (min-width: 720px) {
+  .login-shell {
+    padding-top: 118px;
+  }
+
   .login-modal {
     padding: 28px 22px;
 
