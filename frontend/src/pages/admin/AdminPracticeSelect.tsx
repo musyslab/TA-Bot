@@ -135,7 +135,7 @@ export default function AdminPracticeSelect() {
     return (
         <div>
             <Helmet>
-                <title>[Admin] TA-Bot</title>
+                <title>[Admin] MAAT</title>
             </Helmet>
 
             <MenuComponent

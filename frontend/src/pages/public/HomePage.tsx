@@ -18,7 +18,7 @@ function HomePage() {
   return (
     <div className="home-page">
       <Helmet>
-        <title>TA-Bot</title>
+        <title>MAAT</title>
       </Helmet>
 
       <MenuComponent
@@ -40,7 +40,7 @@ function HomePage() {
               </h1>
 
               <p className="home-hero__text home-hero__text--lead">
-                TA-Bot helps programming courses collect submissions,
+                The Marquette Automated Assessment Tool or MAAT (formerly known as TA-Bot) helps programming courses collect submissions,
                 run automated testcase checks, and organize grading in one place.
               </p>
 
@@ -58,7 +58,7 @@ function HomePage() {
         <section className="home-section" id="features">
           <div className="home-section__header">
             <div className="home-section__eyebrow">Features</div>
-            <h2 className="home-section__title">What TA-Bot helps you do</h2>
+            <h2 className="home-section__title">What MAAT helps you do</h2>
           </div>
 
           <div className="home-feature-grid">
@@ -161,7 +161,7 @@ function HomePage() {
           <div className="home-cta__content">
             <div>
               <div className="home-section__eyebrow">Get started</div>
-              <h2 className="home-cta__title">Use TA-Bot to streamline programming course assessment</h2>
+              <h2 className="home-cta__title">Use MAAT to streamline programming course assessment</h2>
               <p className="home-cta__text">
                 Log in to access submissions, projects, and grading tools.
               </p>

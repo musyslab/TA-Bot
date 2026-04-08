@@ -131,7 +131,7 @@ const StudentPracticeSelect: React.FC = () => {
   return (
     <div className="student-practice-select-page">
       <Helmet>
-        <title>TA-Bot</title>
+        <title>MAAT</title>
       </Helmet>
 
       <MenuComponent

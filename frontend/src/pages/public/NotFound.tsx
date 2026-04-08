@@ -7,7 +7,7 @@ class NotFound extends Component {
         return (
             <div className="notfound">
                 <Helmet>
-                    <title>404 Error | TA-Bot</title>
+                    <title>404 Error | MAAT</title>
                 </Helmet>
 
                 <MenuComponent

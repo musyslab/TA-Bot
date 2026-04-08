@@ -829,7 +829,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         return (
             <div>
                 <Helmet>
-                    <title>[Admin] TA-Bot</title>
+                    <title>[Admin] MAAT</title>
                 </Helmet>
 
                 <MenuComponent

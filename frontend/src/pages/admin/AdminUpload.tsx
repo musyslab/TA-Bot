@@ -66,7 +66,7 @@ class AdminUpload extends Component<{}, {}> {
         return (
             <div className="admin-upload-root">
                 <Helmet>
-                    <title>[Admin] TA-Bot</title>
+                    <title>[Admin] MAAT</title>
                 </Helmet>
 
                 <MenuComponent

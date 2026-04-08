@@ -35,6 +35,11 @@ type PracticeProblemLite = {
   enabled?: boolean
 }
 
+type AssignedClassLite = {
+  id: number
+  school_id?: number
+}
+
 const StudentUpload = () => {
   const { class_id, practice_problem_id } = useParams()
   let cid = -1
@@ -89,11 +94,10 @@ const StudentUpload = () => {
   const [checkedPassedAll, setCheckedPassedAll] = useState<boolean>(false)
 
   const [practiceProblemLabel, setPracticeProblemLabel] = useState<string>('')
+  const [hideClassSelectionCrumb, setHideClassSelectionCrumb] = useState<boolean>(false)
 
-  // Practice-bonus mechanism (UI only for now)
-  // In the future this should come from an API (ex: /practice/progress?class_id=...)
-  const [practiceSolvedCount, setPracticeSolvedCount] = useState<number>(0) // solved practice problems
-  const [practiceTotalCount, setPracticeTotalCount] = useState<number>(0) // total enabled practice problems for this project
+  const [practiceSolvedCount, setPracticeSolvedCount] = useState<number>(0) 
+  const [practiceTotalCount, setPracticeTotalCount] = useState<number>(0)
 
   const practiceProgress = useMemo(() => {
     const solved = Math.max(0, practiceSolvedCount)
@@ -164,6 +168,35 @@ const StudentUpload = () => {
   useEffect(() => {
     autoGrowTextarea(feedbackRef.current)
   }, [suggestions])
+
+  useEffect(() => {
+    const token = localStorage.getItem('AUTOTA_AUTH_TOKEN')
+
+    if (!token || !Number.isFinite(cid) || cid <= 0) {
+      setHideClassSelectionCrumb(false)
+      return
+    }
+
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/class/all?filter=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((res) => {
+        const rows = Array.isArray(res.data) ? (res.data as AssignedClassLite[]) : []
+        const uniqueSchoolIds = new Set(
+          rows
+            .map((row) => Number(row.school_id))
+            .filter((schoolId) => Number.isFinite(schoolId) && schoolId > 0)
+        )
+
+        setHideClassSelectionCrumb(
+          rows.length === 1 && uniqueSchoolIds.size === 1 && Number(rows[0]?.id) === cid
+        )
+      })
+      .catch(() => {
+        setHideClassSelectionCrumb(false)
+      })
+  }, [cid])
 
   const activeDay = project_name !== '' ? Math.min(Math.max(DaysSinceProjectStarted, 1), 6) : 0
 
@@ -567,15 +600,23 @@ const StudentUpload = () => {
 
   const breadcrumbsItems = useMemo(() => {
     if (isPractice) {
-      return [
-        { label: 'Class Selection', to: '/student/classes' },
-        { label: 'Project Upload', to: `/student/${class_id}/upload` },
-        { label: 'Practice Select', to: `/student/${class_id}/practice` },
-        { label: 'Practice Upload' },
-      ]
+      return hideClassSelectionCrumb
+        ? [
+          { label: 'Project Upload', to: `/student/${class_id}/upload` },
+          { label: 'Practice Select', to: `/student/${class_id}/practice` },
+          { label: 'Practice Upload' },
+        ]
+        : [
+          { label: 'Class Selection', to: '/student/classes' },
+          { label: 'Project Upload', to: `/student/${class_id}/upload` },
+          { label: 'Practice Select', to: `/student/${class_id}/practice` },
+          { label: 'Practice Upload' },
+        ]
     }
-    return [{ label: 'Class Selection', to: '/student/classes' }, { label: 'Project Upload' }]
-  }, [class_id, isPractice])
+    return hideClassSelectionCrumb
+      ? [{ label: 'Project Upload' }]
+      : [{ label: 'Class Selection', to: '/student/classes' }, { label: 'Project Upload' }]
+  }, [class_id, hideClassSelectionCrumb, isPractice])
 
   const pageTitle = useMemo(() => {
     if (isPractice) {
@@ -610,7 +651,7 @@ const StudentUpload = () => {
     <div className="student-upload-page">
       <LoadingAnimation show={isLoading} message="Uploading..." />
       <Helmet>
-        <title>TA-Bot</title>
+        <title>MAAT</title>
       </Helmet>
 
       <MenuComponent
@@ -863,8 +904,8 @@ const StudentUpload = () => {
               }}
             >
               <p className="feedback-paragraph">
-                TA-Bot is an assessment system developed by Marquette students. We welcome constructive feedback
-                throughout the semester. The TA-Bot team will strive to implement your suggestions. For more
+                MAAT is an assessment system developed by Marquette students. We welcome constructive feedback
+                throughout the semester. The MAAT team will strive to implement your suggestions. For more
                 information, please see our{' '}
                 <a
                   href="https://docs.google.com/document/d/1af1NU6K24drPaiJXFFo4gLD4dqNVivKQ9ZijDMAWyd4/edit?usp=sharing"
@@ -877,7 +918,7 @@ const StudentUpload = () => {
               <textarea
                 ref={feedbackRef}
                 rows={1}
-                placeholder="example: TA-Bot struggles when dealing with small issues in test cases"
+                placeholder="example: MAAT struggles when dealing with small issues in test cases"
                 value={suggestions}
                 onChange={(e) => {
                   setSuggestions(e.target.value)

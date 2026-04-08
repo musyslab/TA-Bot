@@ -176,7 +176,7 @@ export default function AdminProjectList() {
     return (
         <div className="projects-page">
             <Helmet>
-                <title>[Admin] TA-Bot</title>
+                <title>[Admin] MAAT</title>
             </Helmet>
 
             <MenuComponent

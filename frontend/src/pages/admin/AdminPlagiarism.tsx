@@ -181,7 +181,7 @@ export default function AdminPlagiarism() {
         <div className="plagiarism-container">
 
             <Helmet>
-                <title>[Admin] TA-Bot</title>
+                <title>[Admin] MAAT</title>
             </Helmet>
             
             <MenuComponent

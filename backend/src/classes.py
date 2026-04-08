@@ -9,14 +9,13 @@ from src.services import class_service
 
 class_api = Blueprint('class_api', __name__)
 
-def _parse_optional_int(value):
+def parse_optional_int(value):
     try:
         return int(value)
     except (TypeError, ValueError):
         return None
 
-
-def _extract_class_id(item) -> int:
+def extract_class_id(item) -> int:
     try:
         if isinstance(item, dict):
             return int(item.get("id") or item.get("Id") or 0)
@@ -24,13 +23,40 @@ def _extract_class_id(item) -> int:
     except (TypeError, ValueError):
         return 0
 
+def serialize_class(item):
+    class_id = extract_class_id(item)
+    cls = Classes.query.filter(Classes.Id == class_id).first()
+
+    if cls is not None:
+        return {
+            "id": cls.Id,
+            "name": cls.Name,
+            "school_id": cls.SchoolId,
+            "school_name": cls.School.Name if cls.School else "",
+        }
+
+    if isinstance(item, dict):
+        return {
+            "id": class_id,
+            "name": item.get("name") or item.get("Name") or "",
+            "school_id": parse_optional_int(item.get("school_id") or item.get("SchoolId")),
+            "school_name": item.get("school_name") or item.get("SchoolName") or "",
+        }
+
+    return {
+        "id": class_id,
+        "name": getattr(item, "name", None) or getattr(item, "Name", "") or "",
+        "school_id": parse_optional_int(getattr(item, "school_id", None) or getattr(item, "SchoolId", None)),
+        "school_name": getattr(item, "school_name", None) or getattr(item, "SchoolName", "") or "",
+    }
+
 @class_api.route('/all', methods=['GET'])
 @jwt_required()
 @inject
 def get_classes_and_ids(class_repo: ClassRepository = Provide[Container.class_repo],
                         class_service: class_service = Provide[Container.class_service]):
     classes_list = []
-    school_id = _parse_optional_int(request.args.get("school_id"))
+    school_id = parse_optional_int(request.args.get("school_id"))
     is_filtered = request.args.get('filter') == "true"
     if is_filtered:
         classes_list = class_service.get_assigned_classes(current_user, class_repo)
@@ -44,14 +70,14 @@ def get_classes_and_ids(class_repo: ClassRepository = Provide[Container.class_re
         classes_list = [
             class_item
             for class_item in classes_list
-            if _extract_class_id(class_item) in allowed_class_ids
+            if extract_class_id(class_item) in allowed_class_ids
         ]
 
-    return jsonify(classes_list)
+    return jsonify([serialize_class(class_item) for class_item in classes_list])
 
 @class_api.route('/sections', methods=['GET'])
 def get_class_labs():
-    school_id = _parse_optional_int(request.args.get("school_id"))
+    school_id = parse_optional_int(request.args.get("school_id"))
 
     classes_query = Classes.query.order_by(Classes.Name.asc())
     if school_id and school_id > 0:
@@ -79,7 +105,7 @@ def get_class_labs():
 
     return jsonify(holder)
 
-@class_api.route('/id/<class_id>', methods = ['GET'])
+@class_api.route('/id/<class_id>', methods=['GET'])
 @inject
 def get_class_name_from_id(class_id, class_repository: ClassRepository = Provide[Container.class_repo]):
     class_name = [{

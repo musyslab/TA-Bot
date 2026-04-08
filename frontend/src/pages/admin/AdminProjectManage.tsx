@@ -1510,7 +1510,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     return (
         <div>
             <Helmet>
-                <title>[Admin] TA-Bot</title>
+                <title>[Admin] MAAT</title>
             </Helmet>
 
             <MenuComponent

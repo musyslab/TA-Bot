@@ -7,7 +7,7 @@ class CriticalErrorPage extends Component {
         return (
             <div className="critical-error-page">
                 <Helmet>
-                    <title>500 Error | TA-Bot</title>
+                    <title>500 Error | MAAT</title>
                 </Helmet>
 
                 <MenuComponent

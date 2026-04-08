@@ -132,7 +132,7 @@ export function StudentOutputDiff() {
     return (
         <div className="page-container" id="student-output-diff">
             <Helmet>
-                <title>TA-Bot</title>
+                <title>MAAT</title>
             </Helmet>
 
             <MenuComponent

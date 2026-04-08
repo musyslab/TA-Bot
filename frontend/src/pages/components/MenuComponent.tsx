@@ -8,6 +8,7 @@ import {
     FaSignInAlt,
     FaSignOutAlt,
 } from "react-icons/fa";
+import maatLogo from "../../images/MAAT.png";
 import "../../styling/MenuComponent.scss";
 
 interface MenuComponentProps {
@@ -97,7 +98,7 @@ class MenuComponent extends Component<MenuComponentProps> {
             <nav className="menu menu--top menu--inverted menu--borderless menu--huge">
                 <div className="menu__container">
                     <button type="button" className="menu__item menu__item--header" onClick={this.handleHome}>
-                        TA-Bot
+                        <img src={maatLogo} alt="MAAT" className="menu__logo" />
                     </button>
 
                     {this.props.showAdminUpload && (

@@ -103,7 +103,7 @@ export function AdminViewStudentCode() {
     return (
         <div className="page-container" id="admin-view-student-code">
             <Helmet>
-                <title>TA-Bot</title>
+                <title>MAAT</title>
             </Helmet>
 
             <MenuComponent

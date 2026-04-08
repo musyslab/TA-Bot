@@ -144,7 +144,7 @@ class StudentPastSubmissions extends Component<{}, ProjectsState> {
         return (
             <div className="past-submissions">
                 <Helmet>
-                    <title>TA-Bot</title>
+                    <title>MAAT</title>
                 </Helmet>
 
                 <MenuComponent

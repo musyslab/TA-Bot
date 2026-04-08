@@ -7,6 +7,7 @@ import { Navigate } from "react-router-dom";
 import { PublicClientApplication } from "@azure/msal-browser";
 
 import MenuComponent from "../components/MenuComponent";
+import maatLogo from "../../images/MAAT.png";
 import "../../styling/Login.scss";
 
 declare global {
@@ -496,7 +497,7 @@ function Login() {
   return (
     <div className="login-page">
       <Helmet>
-        <title>TA-Bot</title>
+        <title>MAAT</title>
       </Helmet>
 
       <MenuComponent
@@ -512,7 +513,7 @@ function Login() {
         <div className="login-modal">
           <div className="login-modal__content" role="dialog" aria-modal="true">
             <h2 className="login-modal__title">
-              {newUserSource === "oauth" ? "Finish creating your TA-Bot account" : "New User Registration"}
+              {newUserSource === "oauth" ? "Finish creating your MAAT account" : "New User Registration"}
             </h2>
 
             {newUserSource === "oauth" && oauthProfile ? (
@@ -683,7 +684,7 @@ function Login() {
 
       <div className="login-shell">
         <div className="login-card">
-          <h1 className="login-title">Login to TA-Bot</h1>
+          <h1 className="login-title">Login to MAAT</h1>
           <p className="login-subtitle">Use your campus password, Google, or Microsoft.</p>
 
           <div className="oauth-section">
@@ -770,6 +771,9 @@ function Login() {
               here
             </a>
             .
+            <div className="login-links__logo-wrap">
+              <img src={maatLogo} alt="MAAT" className="login-links__logo" />
+            </div>
           </div>
         </div>
       </div>

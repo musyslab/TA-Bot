@@ -108,7 +108,7 @@ class AdminClassSelection extends Component<{}, ClassState> {
         return (
             <div className="admin-landing-root">
                 <Helmet>
-                    <title>[Admin] TA-Bot</title>
+                    <title>[Admin] MAAT</title>
                 </Helmet>
 
                 <MenuComponent

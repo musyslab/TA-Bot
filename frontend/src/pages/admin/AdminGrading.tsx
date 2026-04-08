@@ -858,7 +858,7 @@ export function AdminGrading() {
         <div className="page-container" id="admin-output-diff">
             <LoadingAnimation show={showLoadingOverlay} message={isInitialPageLoading ? 'Loading grading page...' : 'Saving grade...'} />
             <Helmet>
-                <title>TA-Bot</title>
+                <title>MAAT</title>
             </Helmet>
             <MenuComponent showUpload={false} showAdminUpload={false} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} />
 
