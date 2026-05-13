@@ -640,11 +640,40 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
             dst = os.path.join(path, orig_name)
             add_up.save(dst)
             add_names.append(orig_name)
+
     selected_path = path
     new_project_id = project_repo.create_project(
-        name, start_date, end_date, language, class_id,
-        selected_path, assignmentdesc_path, json.dumps(add_names), practice_enabled
+        name,
+        start_date,
+        end_date,
+        language,
+        class_id,
+        selected_path,
+        assignmentdesc_path,
+        json.dumps(add_names),
+        practice_enabled
     )
+
+    try:
+        new_project_id_int = int(new_project_id)
+    except Exception:
+        new_project_id_int = 0
+
+    # Automatically create the first practice problem for every newly-created project.
+    # The admin detail page will show this alongside the main project.
+    if new_project_id_int > 0:
+        try:
+            existing_practice = project_repo.list_practice_problems(new_project_id_int)
+            if not existing_practice:
+                project_repo.create_practice_problem(
+                    new_project_id_int,
+                    name="Practice Problem 1"
+                )
+        except Exception as e:
+            print(
+                f"[create_project] project created, but default practice problem creation failed: {e}",
+                flush=True
+            )
 
     return make_response(str(new_project_id), HTTPStatus.OK)
 

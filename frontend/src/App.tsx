@@ -19,6 +19,7 @@ import AdminGrading from './pages/admin/AdminGrading';
 import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
 import AdminProjectList from './pages/admin/AdminProjectList';
+import AdminProjectDetails from './pages/admin/AdminProjectDetails';
 import AdminProjectManage from './pages/admin/AdminProjectManage';
 import AdminPracticeSelect from './pages/admin/AdminPracticeSelect';
 import AdminStudentRoster from './pages/admin/AdminStudentRoster';
@@ -62,6 +63,11 @@ class App extends Component {
                     <Route path="/admin/:id/projects/*" element={
                         <ProtectedRoute>
                             <AdminProjectList />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:id/overview" element={
+                        <ProtectedRoute>
+                            <AdminProjectDetails />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/:class_id/project/:id" element={
@@ -147,7 +153,6 @@ class App extends Component {
                             <StudentOfficeHours />
                         </ProtectedRoute>
                     } />
-                    {/* Catch-all for 404 */}
                     <Route path="*" element={<NotFound />} />
                 </Routes>
             </BrowserRouter>
