@@ -5,6 +5,7 @@ import "../../styling/Directory.scss"
 export type DirectoryCrumb = {
     label: string
     to?: string
+    onClick?: () => void
 }
 
 interface DirectoryBreadcrumbsProps {
@@ -22,11 +23,20 @@ const DirectoryBreadcrumbs: React.FC<DirectoryBreadcrumbsProps> = ({
     confirmOnNavigate = false,
     confirmMessage = "You have unsaved changes. Leave this page?",
 }) => {
-    const handleLinkClick = (e: React.MouseEvent) => {
-        if (!confirmOnNavigate) return
-        const ok = window.confirm(confirmMessage)
-        if (!ok) e.preventDefault()
+    const shouldNavigate = () => {
+        if (!confirmOnNavigate) return true
+        return window.confirm(confirmMessage)
     }
+
+    const handleCrumbClick = (e: React.MouseEvent, onClick?: () => void) => {
+        if (!shouldNavigate()) {
+            e.preventDefault()
+            return
+        }
+
+        onClick?.()
+    }
+
     return (
         <nav className={`directory ${className}`.trim()} aria-label="Directory">
             <ol className="directory__list">
@@ -35,10 +45,22 @@ const DirectoryBreadcrumbs: React.FC<DirectoryBreadcrumbsProps> = ({
                     const showSeparator = !isLast || trailingSeparator
 
                     const content =
-                        item.to && !isLast ? (
-                            <Link className="directory__link" to={item.to} onClick={handleLinkClick}>
+                        item.to ? (
+                            <Link
+                                className="directory__link"
+                                to={item.to}
+                                onClick={(e) => handleCrumbClick(e, item.onClick)}
+                            >
                                 {item.label}
                             </Link>
+                        ) : item.onClick ? (
+                            <button
+                                type="button"
+                                className="directory__link"
+                                onClick={(e) => handleCrumbClick(e, item.onClick)}
+                            >
+                                {item.label}
+                            </button>
                         ) : (
                             <span className="directory__current">{item.label}</span>
                         )

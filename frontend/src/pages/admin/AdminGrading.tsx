@@ -864,6 +864,7 @@ export function AdminGrading() {
 
             <DirectoryBreadcrumbs
                 items={[
+                    { label: 'School Selection', to: '/admin/classes' },
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${cid}/projects` },
                     { label: 'Student List', to: `/admin/${cid}/project/${pid}` },

@@ -469,6 +469,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
 
                 <DirectoryBreadcrumbs
                     items={[
+                        { label: 'School Selection', to: '/admin/classes' },
                         { label: 'Class Selection', to: '/admin/classes' },
                         { label: 'Admin Upload' },
                     ]}

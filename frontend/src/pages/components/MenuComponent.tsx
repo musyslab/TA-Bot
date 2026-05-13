@@ -48,7 +48,7 @@ class MenuComponent extends Component<MenuComponentProps> {
             return null;
         }
 
-        return role === 1 ? "/admin/classes" : "/student/classes";
+        return role === 1 ? "/admin/schools" : "/student/schools";
     }
 
     handleDashboard = () => {
@@ -74,7 +74,7 @@ class MenuComponent extends Component<MenuComponentProps> {
             .then((res) => {
                 const role = parseInt(res.data, 10);
                 localStorage.setItem("AUTOTA_USER_ROLE", String(role));
-                const path = role === 1 ? "/admin/classes" : "/student/classes";
+                const path = role === 1 ? "/admin/schools" : "/student/schools";
                 window.location.replace(path);
             })
             .catch(() => {
@@ -91,7 +91,7 @@ class MenuComponent extends Component<MenuComponentProps> {
 
     render() {
         const classId = this.getClassIdFromUrl();
-        const officeHoursPath = classId ? `/student/${classId}/OfficeHours` : "/student/classes";
+        const officeHoursPath = classId ? `/student/${classId}/OfficeHours` : "/student/schools";
         const isLoggedIn = Boolean(localStorage.getItem("AUTOTA_AUTH_TOKEN"));
 
         return (

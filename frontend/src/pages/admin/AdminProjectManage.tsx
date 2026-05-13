@@ -1524,9 +1524,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
             <DirectoryBreadcrumbs
                 items={[
+                    { label: 'School Selection', to: '/admin/classes' },
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${classId}/projects/` },
-                    { label: 'Project Manage', to: `/admin/${classId}/project/${project_id}/manage/` },
+                    { label: 'Project Manage'},
                     ...(isPractice
                         ? [
                             {

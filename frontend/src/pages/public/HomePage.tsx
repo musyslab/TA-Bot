@@ -15,6 +15,10 @@ import MenuComponent from "../components/MenuComponent";
 import "../../styling/HomePage.scss";
 
 function HomePage() {
+  const isLoggedIn = Boolean(localStorage.getItem("AUTOTA_AUTH_TOKEN"));
+  const storedRole = localStorage.getItem("AUTOTA_USER_ROLE");
+  const dashboardPath = storedRole === "1" ? "/admin/schools" : "/student/schools";
+
   return (
     <div className="home-page">
       <Helmet>
@@ -34,7 +38,6 @@ function HomePage() {
         <section className="home-hero">
           <div className="home-hero__grid">
             <div className="home-hero__content">
-
               <h1 className="home-hero__title">
                 Faster assignment workflows for CS students and teachers
               </h1>
@@ -45,11 +48,17 @@ function HomePage() {
               </p>
 
               <div className="home-hero__actions">
-                <Link className="home-button home-button--primary" to="/login">
-                  Login
-                  <FaArrowRight />
-                </Link>
-
+                {isLoggedIn ? (
+                  <Link className="home-button home-button--primary" to={dashboardPath}>
+                    Go to dashboard
+                    <FaArrowRight />
+                  </Link>
+                ) : (
+                  <Link className="home-button home-button--primary" to="/login">
+                    Login
+                    <FaArrowRight />
+                  </Link>
+                )}
               </div>
             </div>
           </div>
@@ -163,15 +172,24 @@ function HomePage() {
               <div className="home-section__eyebrow">Get started</div>
               <h2 className="home-cta__title">Use MAAT to streamline programming course assessment</h2>
               <p className="home-cta__text">
-                Log in to access submissions, projects, and grading tools.
+                {isLoggedIn
+                  ? "Open your dashboard to access submissions, projects, and grading tools."
+                  : "Log in to access submissions, projects, and grading tools."}
               </p>
             </div>
 
             <div className="home-cta__actions">
-              <Link className="home-button home-button--primary" to="/login">
-                Go to login
-                <FaArrowRight />
-              </Link>
+              {isLoggedIn ? (
+                <Link className="home-button home-button--primary" to={dashboardPath}>
+                  Go to dashboard
+                  <FaArrowRight />
+                </Link>
+              ) : (
+                <Link className="home-button home-button--primary" to="/login">
+                  Go to login
+                  <FaArrowRight />
+                </Link>
+              )}
             </div>
           </div>
         </section>

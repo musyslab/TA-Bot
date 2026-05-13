@@ -13,7 +13,8 @@ import StudentOfficeHours from './pages/student/StudentOfficeHours';
 import StudentPastSubmissions from "./pages/student/StudentPastSubmissions";
 import StudentPracticeSelect from './pages/student/StudentPracticeSelect';
 
-import AdminClassSelection from './pages/admin/AdminClassSelection';
+import AdminSchoolSelect from './pages/admin/AdminSchoolSelect';
+import AdminClassSelect from './pages/admin/AdminClassSelect';
 import AdminGrading from './pages/admin/AdminGrading';
 import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
@@ -48,9 +49,14 @@ class App extends Component {
 
                     <Route path="/" element={<HomePage />} />
 
+                    <Route path="/admin/schools" element={
+                        <ProtectedRoute>
+                            <AdminSchoolSelect />
+                        </ProtectedRoute>
+                    } />
                     <Route path="/admin/classes" element={
                         <ProtectedRoute>
-                            <AdminClassSelection />
+                            <AdminClassSelect />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/:id/projects/*" element={

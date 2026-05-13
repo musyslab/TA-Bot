@@ -190,6 +190,7 @@ export default function AdminProjectList() {
 
             <DirectoryBreadcrumbs
                 items={[
+                    { label: 'School Selection', to: '/admin/classes' },
                     { label: "Class Selection", to: "/admin/classes" },
                     { label: "Project List" },
                 ]}
