@@ -1,5 +1,6 @@
+
 import React, { Component } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import axios from 'axios';
 
 import LoginPage from './pages/public/Login';
@@ -18,8 +19,8 @@ import AdminClassSelect from './pages/admin/AdminClassSelect';
 import AdminGrading from './pages/admin/AdminGrading';
 import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
-import AdminProjectList from './pages/admin/AdminProjectList';
-import AdminProjectDetails from './pages/admin/AdminProjectDetails';
+import AdminModuleCalendar from './pages/admin/AdminModuleCalendar';
+import AdminModuleDetails from './pages/admin/AdminModuleDetails';
 import AdminProjectManage from './pages/admin/AdminProjectManage';
 import AdminPracticeSelect from './pages/admin/AdminPracticeSelect';
 import AdminStudentRoster from './pages/admin/AdminStudentRoster';
@@ -60,46 +61,94 @@ class App extends Component {
                             <AdminClassSelect />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:id/projects/*" element={
+                    <Route path="/admin/:id/modules/*" element={
                         <ProtectedRoute>
-                            <AdminProjectList />
+                            <AdminModuleCalendar />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:id/overview" element={
+
+                    <Route path="/admin/:class_id/module/:module_id/overview" element={
                         <ProtectedRoute>
-                            <AdminProjectDetails />
+                            <AdminModuleDetails />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:id" element={
+
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/overview" element={
+                        <ProtectedRoute>
+                            <Navigate to="../../overview" replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/submissions" element={
                         <ProtectedRoute>
                             <AdminStudentRoster />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:id/manage" element={
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/manage" element={
                         <ProtectedRoute>
                             <AdminProjectManage />
                         </ProtectedRoute>
                     } />
 
-                    <Route path="/admin/:class_id/project/:id/practice/:practice_problem_id" element={
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/practice/:practice_problem_id/submissions" element={
+                        <ProtectedRoute>
+                            <AdminStudentRoster />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/practice/:practice_problem_id/manage" element={
                         <ProtectedRoute>
                             <AdminProjectManage practiceMode />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:id/practice/select" element={
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/practice/select" element={
                         <ProtectedRoute>
                             <AdminPracticeSelect />
                         </ProtectedRoute>
                     } />
 
-                    <Route path="/admin/:class_id/project/:project_id/grade/:id" element={
+                    <Route path="/admin/:class_id/module/:module_id/project/:project_id/grade/:id" element={
                         <ProtectedRoute>
                             <AdminGrading />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:project_id/codeview/:id" element={
+                    <Route path="/admin/:class_id/module/:module_id/project/:project_id/codeview/:id" element={
                         <ProtectedRoute>
                             <AdminViewStudentCode />
+                        </ProtectedRoute>
+                    } />
+
+                    <Route path="/admin/:class_id/project/:id/overview" element={
+                        <ProtectedRoute>
+                            <Navigate to={`/admin/${window.location.pathname.split('/')[2]}/modules`} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:id" element={
+                        <ProtectedRoute>
+                            <Navigate to={`/admin/${window.location.pathname.split('/')[2]}/modules`} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:id/manage" element={
+                        <ProtectedRoute>
+                            <Navigate to={`/admin/${window.location.pathname.split('/')[2]}/modules`} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:id/practice/:practice_problem_id" element={
+                        <ProtectedRoute>
+                            <Navigate to={`/admin/${window.location.pathname.split('/')[2]}/modules`} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:id/practice/select" element={
+                        <ProtectedRoute>
+                            <Navigate to={`/admin/${window.location.pathname.split('/')[2]}/modules`} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:project_id/grade/:id" element={
+                        <ProtectedRoute>
+                            <Navigate to={`/admin/${window.location.pathname.split('/')[2]}/modules`} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:project_id/codeview/:id" element={
+                        <ProtectedRoute>
+                            <Navigate to={`/admin/${window.location.pathname.split('/')[2]}/modules`} replace />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/plagiarism" element={

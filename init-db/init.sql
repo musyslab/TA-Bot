@@ -91,6 +91,22 @@ CREATE TABLE `LectureSections` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `Modules`
+--
+
+DROP TABLE IF EXISTS `Modules`;
+CREATE TABLE `Modules` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `ClassId` int NOT NULL,
+  `Name` varchar(1000) NOT NULL,
+  `Start` datetime NOT NULL,
+  `End` datetime NOT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `idx_Modules_ClassId` (`ClassId`),
+  CONSTRAINT `fk_Modules_Class` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
 -- Table structure for table `Projects`
 --
 
@@ -100,17 +116,18 @@ DROP TABLE IF EXISTS `Projects`;
 CREATE TABLE `Projects` (
   `Id` int NOT NULL AUTO_INCREMENT COMMENT 'Table to keep track of projects',
   `Name` varchar(1000) NOT NULL,
-  `Start` datetime NOT NULL,
-  `End` datetime NOT NULL,
   `Language` varchar(45) NOT NULL,
   `ClassId` int NOT NULL,
+  `ModuleId` int DEFAULT NULL,
   `solutionpath` varchar(1000) DEFAULT NULL,
   `AsnDescriptionPath` varchar(1000) DEFAULT NULL,
   `AdditionalFilePath` varchar(200) DEFAULT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `idProjects_UNIQUE` (`Id`),
   KEY `fk_Projects_1_idx` (`ClassId`),
-  CONSTRAINT `fk_Projects_1` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`)
+  KEY `idx_Projects_ModuleId` (`ModuleId`),
+  CONSTRAINT `fk_Projects_1` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`),
+  CONSTRAINT `fk_Projects_Module` FOREIGN KEY (`ModuleId`) REFERENCES `Modules` (`Id`) ON DELETE SET NULL
 ) ENGINE=InnoDB AUTO_INCREMENT=41 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

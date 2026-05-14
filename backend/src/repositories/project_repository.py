@@ -6,7 +6,7 @@ import subprocess
 from typing import Optional, Dict
 from flask import send_file
 from sqlalchemy.sql.expression import asc
-from .models import Projects, PracticeProblems, StudentGrades, Submissions, Testcases, Classes
+from .models import Projects, PracticeProblems, StudentGrades, Submissions, Testcases, Classes, Modules
 from src.repositories.database import db
 from sqlalchemy import desc, and_, func
 from datetime import datetime
@@ -48,6 +48,105 @@ class ProjectRepository():
             return json.dumps(abs_list)
         except Exception:
             return add_path or ""
+
+
+    def _coerce_datetime(self, value):
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value))
+
+    def create_module(self, class_id: int, name: str, start: datetime, end: datetime) -> int:
+        module = Modules(
+            ClassId=int(class_id),
+            Name=name,
+            Start=self._coerce_datetime(start),
+            End=self._coerce_datetime(end),
+        )
+        db.session.add(module)
+        db.session.commit()
+
+        project = Projects(
+            ClassId=int(class_id),
+            ModuleId=module.Id,
+            Name=name,
+            Language="",
+            solutionpath=None,
+            AsnDescriptionPath=None,
+            AdditionalFilePath="[]",
+        )
+        db.session.add(project)
+        db.session.commit()
+
+        self.create_practice_problem(project.Id, name="Practice Problem 1")
+        return int(module.Id)
+
+    def get_modules_by_class_id(self, class_id: int):
+        return (
+            Modules.query
+            .filter(Modules.ClassId == int(class_id))
+            .order_by(Modules.Start.asc(), Modules.Id.asc())
+            .all()
+        )
+
+    def get_module(self, module_id: int):
+        return Modules.query.filter(Modules.Id == int(module_id)).first()
+
+    def get_module_by_project_id(self, project_id: int):
+        project = Projects.query.filter(Projects.Id == int(project_id)).first()
+        if not project:
+            return None
+        if getattr(project, "ModuleId", None):
+            return Modules.query.filter(Modules.Id == int(project.ModuleId)).first()
+
+        now = datetime.now()
+        module = Modules(
+            ClassId=project.ClassId,
+            Name=project.Name,
+            Start=now,
+            End=now,
+        )
+        db.session.add(module)
+        db.session.commit()
+        project.ModuleId = module.Id
+        db.session.commit()
+        return module
+
+    def get_main_project_for_module(self, module_id: int):
+        return (
+            Projects.query
+            .filter(Projects.ModuleId == int(module_id))
+            .order_by(Projects.Id.asc())
+            .first()
+        )
+
+    def update_module(self, module_id: int, name: str, start: datetime, end: datetime):
+        module = Modules.query.filter(Modules.Id == int(module_id)).first()
+        if not module:
+            return None
+
+        module.Name = name
+        module.Start = self._coerce_datetime(start)
+        module.End = self._coerce_datetime(end)
+
+        db.session.commit()
+        return module
+
+    def update_project_name(self, project_id: int, name: str):
+        project = Projects.query.filter(Projects.Id == int(project_id)).first()
+        if not project:
+            return None
+        project.Name = name
+        db.session.commit()
+        return project
+
+    def update_practice_problem_name(self, practice_problem_id: int, name: str):
+        pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+        if not pp:
+            return None
+        pp.Name = name
+        db.session.commit()
+        return pp
+
 
     def list_practice_problems(self, project_id: int):
         return (
@@ -92,8 +191,13 @@ class ProjectRepository():
             Project: [this should be the currently assigned project object]
         """
         now = datetime.now()
-        project = Projects.query.filter(Projects.End >= now, Projects.Start < now).first()
-        return project
+        return (
+            Projects.query
+            .join(Modules, Projects.ModuleId == Modules.Id)
+            .filter(Modules.End >= now, Modules.Start < now)
+            .order_by(Modules.Start.asc(), Projects.Id.asc())
+            .first()
+        )
 
     def get_current_project_by_class(self, class_id: int) -> Optional[Projects]:
         """Identifies the current project based on the start and end date.
@@ -105,9 +209,17 @@ class ProjectRepository():
             Optional[Projects]: The currently assigned project object.
         """
         now = datetime.now()
-        project = Projects.query.filter(Projects.ClassId==class_id,Projects.End >= now, Projects.Start < now).first()
-        #Start and end time format: 2023-05-31 14:33:00
-        return project
+        return (
+            Projects.query
+            .join(Modules, Projects.ModuleId == Modules.Id)
+            .filter(
+                Projects.ClassId == class_id,
+                Modules.End >= now,
+                Modules.Start < now,
+            )
+            .order_by(Modules.Start.asc(), Projects.Id.asc())
+            .first()
+        )
 
     def get_all_projects(self) -> Projects:
         """Get all projects from the mySQL database and return a project object sorted by end date.
@@ -115,8 +227,12 @@ class ProjectRepository():
         Returns:
             Projects: A project object sorted by end date.
         """
-        project = Projects.query.order_by(asc(Projects.End)).all()
-        return project
+        return (
+            Projects.query
+            .outerjoin(Modules, Projects.ModuleId == Modules.Id)
+            .order_by(Modules.End.asc(), Projects.Id.asc())
+            .all()
+        )
 
     def get_selected_project(self, project_id: int) -> Projects:
         """[summary]
@@ -143,13 +259,12 @@ class ProjectRepository():
         class_projects = Projects.query.filter(Projects.ClassId==class_id)
         return class_projects
     
-    def create_project(self, name: str, start: datetime, end: datetime, language:str, class_id:int, file_path:str, description_path:str, additional_file_path:str, practice_problems_enabled: bool = False):
+    def create_project(self, name: str, language: str, class_id: int, file_path: str, description_path: str, additional_file_path: str, practice_problems_enabled: bool = False, module_id: Optional[int] = None):
         project = Projects(
             Name=name,
-            Start=start,
-            End=end,
             Language=language,
             ClassId=class_id,
+            ModuleId=int(module_id) if module_id else None,
             solutionpath=file_path,
             AsnDescriptionPath=description_path,
             AdditionalFilePath=additional_file_path,
@@ -198,11 +313,12 @@ class ProjectRepository():
         pp = None
         if practice_problem_id:
             pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
-        project ={}
-        now=project_data.Start
-        start_string = now.strftime("%Y-%m-%dT%H:%M:%S")
-        now = project_data.End
-        end_string = now.strftime("%Y-%m-%dT%H:%M:%S")
+        project = {}
+        module = self.get_module_by_project_id(project_id)
+        start_value = module.Start if module and module.Start else datetime.now()
+        end_value = module.End if module and module.End else start_value
+        start_string = start_value.strftime("%Y-%m-%dT%H:%M:%S")
+        end_string = end_value.strftime("%Y-%m-%dT%H:%M:%S")
 
         if practice_problem_id:
             project_solutionFile = self.basename_or_empty(pp.solutionpath if (pp and pp.solutionpath) else "")
@@ -236,11 +352,9 @@ class ProjectRepository():
         ]
         return project
 
-    def edit_project(self, name: str, start: datetime, end: datetime, language:str, project_id:int, path:str, description_path:str, additional_file_path:str, practice_problems_enabled: bool = False):
+    def edit_project(self, name: str, language: str, project_id: int, path: str, description_path: str, additional_file_path: str, practice_problems_enabled: bool = False):
         project = Projects.query.filter(Projects.Id == project_id).first()
         project.Name = name
-        project.Start = start
-        project.End = end
         project.Language = language
         project.solutionpath = path
         project.AsnDescriptionPath = description_path

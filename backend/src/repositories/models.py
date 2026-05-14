@@ -12,13 +12,23 @@ class Schools(db.Model):
     Name = Column(String)
     Classes = relationship('Classes', back_populates='School')
 
+
+class Modules(db.Model):
+    __tablename__ = "Modules"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    ClassId = Column(Integer, ForeignKey('Classes.Id'))
+    Name = Column(String)
+    Start = Column(DateTime)
+    End = Column(DateTime)
+    Projects = relationship('Projects', back_populates='Module')
+
 class Projects(db.Model):
     __tablename__ = "Projects"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     ClassId = Column(Integer, ForeignKey('Classes.Id'))
+    ModuleId = Column(Integer, ForeignKey('Modules.Id'), nullable=True)
+    Module = relationship('Modules', back_populates='Projects')
     Name = Column(String)
-    Start = Column(Date)
-    End = Column(Date)
     Language = Column(String)
     Submissions=relationship('Submissions') 
     StudentUnlocks=relationship('StudentUnlocks') 

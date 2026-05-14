@@ -1,3 +1,4 @@
+
 // AdminStudentRoster.tsx
 import React, { Component } from 'react'
 import axios from 'axios'
@@ -10,11 +11,11 @@ import '../../styling/AdminStudentRoster.scss'
 import { FaClone, FaFileExport, FaDownload, FaEye, FaHandPaper } from 'react-icons/fa'
 
 const AdminStudentRoster = () => {
-    const { class_id, id } = useParams<{ class_id: string; id: string }>()
+    const { class_id, module_id, id, practice_problem_id: route_practice_problem_id } = useParams<{ class_id: string; module_id: string; id: string; practice_problem_id?: string }>()
     const { search } = useLocation()
 
-    if (!class_id || !id) {
-        return <div>Error: project id missing or invalid</div>
+    if (!class_id || !module_id || !id) {
+        return <div>Error: class, module, or project id missing or invalid</div>
     }
 
     const project_id = parseInt(id, 10)
@@ -22,10 +23,11 @@ const AdminStudentRoster = () => {
         return <div>Error: project id missing or invalid</div>
     }
 
-    const practiceParam = (new URLSearchParams(search).get('practice') || '').toLowerCase()
-    const isPractice = ['1', 'true', 'yes', 'y', 'on'].includes(practiceParam)
+    const params = new URLSearchParams(search)
+    const practiceParam = (params.get('practice') || '').toLowerCase()
+    const isPractice = !!route_practice_problem_id || ['1', 'true', 'yes', 'y', 'on'].includes(practiceParam)
 
-    const ppidParam = (new URLSearchParams(search).get('practice_problem_id') || '').trim()
+    const ppidParam = (route_practice_problem_id || params.get('practice_problem_id') || '').trim()
     const parsedPpid = parseInt(ppidParam, 10)
     const practice_problem_id =
         isPractice && !Number.isNaN(parsedPpid) && parsedPpid > 0 ? parsedPpid : undefined
@@ -34,6 +36,7 @@ const AdminStudentRoster = () => {
         <StudentListInternal
             project_id={project_id}
             class_id={class_id}
+            module_id={module_id}
             isPractice={isPractice}
             practice_problem_id={practice_problem_id}
         />
@@ -45,6 +48,7 @@ export default AdminStudentRoster
 interface StudentListProps {
     project_id: number
     class_id: string
+    module_id: string
     isPractice: boolean
     practice_problem_id?: number
 }
@@ -591,6 +595,8 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             return [...visible].sort((a, b) => a.Lname.localeCompare(b.Lname) || a.Fname.localeCompare(b.Fname))
         })()
 
+        const moduleOverviewUrl = `/admin/${this.props.class_id}/module/${this.props.module_id}/overview`
+        const projectBaseUrl = `/admin/${this.props.class_id}/module/${this.props.module_id}/project/${this.props.project_id}`
         const practiceQuery =
             this.props.isPractice
                 ? `?practice=true${this.props.practice_problem_id ? `&practice_problem_id=${this.props.practice_problem_id}` : ''}`
@@ -845,7 +851,8 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                     items={[
                         { label: 'School Selection', to: '/admin/classes' },
                         { label: 'Class Selection', to: '/admin/classes' },
-                        { label: 'Project List', to: `/admin/${this.props.class_id}/projects/` },
+                        { label: 'Module Calendar', to: `/admin/${this.props.class_id}/modules` },
+                        { label: 'Module Details', to: moduleOverviewUrl },
                         { label: this.props.isPractice ? 'Practice Submissions' : 'Student List' },
                     ]}
                 />
@@ -1003,7 +1010,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                         disabled
                                                                     />
                                                                     <Link
-                                                                        to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
+                                                                        to={`${projectBaseUrl}/grade/${row.subid}`}
                                                                         className="btn grade-btn"
                                                                         rel="noreferrer"
                                                                     >
@@ -1028,7 +1035,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                         <td className="view-cell">
                                                             <Link
                                                                 className="view-link"
-                                                                to={`/admin/${row.classId}/project/${this.props.project_id}/codeview/${row.subid}${practiceQuery}`}
+                                                                to={`${projectBaseUrl}/codeview/${row.subid}${practiceQuery}`}
                                                                 rel="noreferrer"
                                                             >
                                                                 <FaEye aria-hidden="true" /> View
@@ -1055,7 +1062,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                                     disabled
                                                                 />
                                                                 <Link
-                                                                    to={`/admin/${row.classId}/project/${this.props.project_id}/grade/${row.subid}`}
+                                                                    to={`${projectBaseUrl}/grade/${row.subid}`}
                                                                     className="btn grade-btn"
                                                                     rel="noreferrer"
                                                                 >

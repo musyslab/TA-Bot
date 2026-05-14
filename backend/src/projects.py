@@ -17,7 +17,7 @@ from subprocess import Popen
 from src.repositories.class_repository import ClassRepository
 from src.repositories.user_repository import UserRepository
 from src.repositories.submission_repository import SubmissionRepository, PracticeBonusAwards
-from src.repositories.models import Submissions, Projects, PracticeProblems, Classes
+from src.repositories.models import Submissions, Projects, PracticeProblems, Classes, Modules
 from flask import Blueprint, Response, send_file, current_app
 from flask import make_response
 from http import HTTPStatus
@@ -76,6 +76,26 @@ def json_list_field(raw: str) -> list[str]:
         return [os.path.basename(v) for v in (vals or []) if v]
     except Exception:
         return []
+
+
+def _project_module(project):
+    if not project:
+        return None
+    module = getattr(project, "Module", None)
+    if module:
+        return module
+    module_id = getattr(project, "ModuleId", None)
+    if module_id:
+        return Modules.query.filter(Modules.Id == int(module_id)).first()
+    return None
+
+def _project_start(project):
+    module = _project_module(project)
+    return getattr(module, "Start", None) if module else None
+
+def _project_end(project):
+    module = _project_module(project)
+    return getattr(module, "End", None) if module else None
 
 def count_practice_unique_users(project_id: int) -> int:
     try:
@@ -170,11 +190,12 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
         new_projects.append(json.dumps({
             "Id": proj.Id,
             "Name": proj.Name,
-            "Start": proj.Start.strftime("%x %X"),
-            "End": proj.End.strftime("%x %X"),
+            "Start": _project_start(proj).strftime("%x %X") if _project_start(proj) else "",
+            "End": _project_end(proj).strftime("%x %X") if _project_end(proj) else "",
             "TotalSubmissions": int(thisdic.get(proj.Id, 0) or 0),
             "PracticeTotalSubmissions": int(practice_total),
-            "PracticeProblemsEnabled": project_repo.get_practice_problems_enabled(proj.Id),
+            "PracticeProblemsEnabled": True,
+            "ModuleId": getattr(proj, "ModuleId", None),
         }))
     return jsonify(new_projects)
 
@@ -187,14 +208,14 @@ def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Cont
 
     data = request.get_json(silent=True) or {}
     pid = parse_int(data.get("project_id", 0), 0)
-    enabled = parse_bool(data.get("enabled", False))
+    enabled = True
 
     if pid <= 0:
         return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
 
     try:
-        project_repo.set_practice_problems_enabled(pid, enabled)
-        return jsonify({'ok': True, 'enabled': enabled})
+        project_repo.set_practice_problems_enabled(pid, True)
+        return jsonify({'ok': True, 'enabled': True})
     except Exception:
         return make_response({'ok': False}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
@@ -226,16 +247,10 @@ def list_practice_problems(project_repo: ProjectRepository = Provide[Container.p
 def list_practice_problems_student(project_repo: ProjectRepository = Provide[Container.project_repo]):
     """
     Student-safe practice problem list.
-    Returns only enabled practice problems, and only if practice problems are enabled for the project.
+    Returns only enabled practice problems. Practice problems are always enabled at the project level.
     """
     project_id = parse_int(request.args.get("project_id", ""), 0)
     if project_id <= 0:
-        return jsonify({'problems': []})
-
-    try:
-        if not bool(project_repo.get_practice_problems_enabled(project_id)):
-            return jsonify({'problems': []})
-    except Exception:
         return jsonify({'problems': []})
 
     rows = project_repo.list_practice_problems(project_id)
@@ -376,19 +391,24 @@ def check_time_conflict(project_repo: ProjectRepository = Provide[Container.proj
 
     conflicts = []
     try:
-        projects = project_repo.get_projects_by_class_id(class_id)
-        for p in projects:
-            if getattr(p, 'Id', None) == pid:
+        current_module_id = None
+        if pid > 0:
+            current_project = project_repo.get_selected_project(pid)
+            current_module_id = getattr(current_project, "ModuleId", None) if current_project else None
+
+        modules = project_repo.get_modules_by_class_id(class_id)
+        for module in modules:
+            if current_module_id and int(getattr(module, "Id", 0) or 0) == int(current_module_id):
                 continue
-            p_start = getattr(p, 'Start', None)
-            p_end = getattr(p, 'End', None)
+            p_start = getattr(module, 'Start', None)
+            p_end = getattr(module, 'End', None)
             if not p_start or not p_end:
                 continue
             # strict overlap: allows back-to-back intervals without conflict
             if (start_dt < p_end) and (p_start < end_dt):
                 conflicts.append({
-                    'id': getattr(p, 'Id', None),
-                    'name': getattr(p, 'Name', ''),
+                    'id': getattr(module, 'Id', None),
+                    'name': getattr(module, 'Name', ''),
                     'start': p_start.isoformat(),
                     'end': p_end.isoformat(),
                 })
@@ -468,8 +488,9 @@ def past_submissions():
 
     projects = (
         Projects.query
+        .outerjoin(Modules, Projects.ModuleId == Modules.Id)
         .filter(Projects.Id.in_(proj_ids))
-        .order_by(Projects.Start.asc(), Projects.Id.asc())
+        .order_by(Modules.Start.asc(), Projects.Id.asc())
         .all()
     )
 
@@ -565,8 +586,8 @@ def past_submissions():
             "projectName": str(getattr(p, "Name", "") or ""),
             "classId": str(cid),
             "className": class_name_by_id.get(cid, ""),
-            "start": iso(getattr(p, "Start", "")),
-            "end": iso(getattr(p, "End", "")),
+            "start": iso(_project_start(p)),
+            "end": iso(_project_end(p)),
             "main": None if not main_s else {
                 "submissionId": int(getattr(main_s, "Id", 0) or 0),
                 "time": iso(getattr(main_s, "Time", "")),
@@ -602,13 +623,12 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
 
     # Read form
     name = request.form.get('name', '')
-    start_date = request.form.get('start_date', '')
-    end_date = request.form.get('end_date', '')
     language = request.form.get('language', '')
     class_id = request.form.get('class_id', '')
-    practice_enabled = parse_bool(request.form.get("practice_problems_enabled", ""))
+    practice_enabled = True
+    module_id = request.form.get('module_id', '').strip()
 
-    if name == '' or start_date == '' or end_date == '' or language == '':
+    if name == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
     base_proj = safe_name(name)
@@ -644,14 +664,13 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     selected_path = path
     new_project_id = project_repo.create_project(
         name,
-        start_date,
-        end_date,
         language,
         class_id,
         selected_path,
         assignmentdesc_path,
         json.dumps(add_names),
-        practice_enabled
+        practice_enabled,
+        int(module_id) if module_id.isdigit() else None
     )
 
     try:
@@ -697,12 +716,11 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     pid = int(pid_str)
 
     name = request.form.get('name', '')
-    start_date = request.form.get('start_date', '')
-    end_date = request.form.get('end_date', '')
     language = request.form.get('language', '')
-    practice_enabled = parse_bool(request.form.get("practice_problems_enabled", ""))
+    practice_enabled = True
+    module_id = request.form.get('module_id', '').strip()
 
-    if name == '' or start_date == '' or end_date == '' or language == '':
+    if name == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
     # Ensure base_proj exists before any use (fix NameError) and compute project folder
@@ -858,8 +876,8 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
         path = latest_version
 
     project_repo.edit_project(
-        name, start_date, end_date, language, pid,
-        path, assignmentdesc_path, json.dumps(add_names), practice_enabled   
+        name, language, pid,
+        path, assignmentdesc_path, json.dumps(add_names), practice_enabled
     )
 
     # Recompute testcase outputs **against the path we just wrote**, so we don't depend on
@@ -1297,6 +1315,227 @@ def remove_testcase(project_repo: ProjectRepository = Provide[Container.project_
     project_repo.remove_testcase(id_val)
     return make_response("Testcase Removed", HTTPStatus.OK)
     
+
+def _module_payload(module, project_repo: ProjectRepository, submission_repo: SubmissionRepository):
+    project = project_repo.get_main_project_for_module(int(module.Id)) if module else None
+    total_submissions = 0
+    practice_total = 0
+    if project:
+        try:
+            totals = submission_repo.get_total_submission_for_all_projects()
+            total_submissions = int(totals.get(project.Id, 0) or 0)
+        except Exception:
+            total_submissions = 0
+
+        try:
+            practice_total = count_practice_unique_users(int(project.Id))
+        except Exception:
+            practice_total = 0
+
+    return {
+        "Id": module.Id,
+        "ClassId": module.ClassId,
+        "Name": module.Name,
+        "Start": module.Start.strftime("%x %X") if module.Start else "",
+        "End": module.End.strftime("%x %X") if module.End else "",
+        "MainProjectId": getattr(project, "Id", None),
+        "TotalSubmissions": total_submissions,
+        "PracticeTotalSubmissions": int(practice_total),
+        "PracticeProblemsEnabled": True,
+    }
+
+def _project_payload(project, submission_repo: SubmissionRepository, project_repo: ProjectRepository):
+    if not project:
+        return None
+
+    try:
+        totals = submission_repo.get_total_submission_for_all_projects()
+        total_submissions = int(totals.get(project.Id, 0) or 0)
+    except Exception:
+        total_submissions = 0
+
+    try:
+        practice_total = count_practice_unique_users(int(project.Id))
+    except Exception:
+        practice_total = 0
+
+    return {
+        "Id": project.Id,
+        "Name": project.Name,
+        "Start": _project_start(project).strftime("%x %X") if _project_start(project) else "",
+        "End": _project_end(project).strftime("%x %X") if _project_end(project) else "",
+        "TotalSubmissions": total_submissions,
+        "PracticeTotalSubmissions": int(practice_total),
+        "PracticeProblemsEnabled": True,
+    }
+
+@projects_api.route('/get_modules_by_class_id', methods=['GET'])
+@jwt_required()
+@inject
+def get_modules_by_class_id(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    class_id = request.args.get('id')
+    modules = project_repo.get_modules_by_class_id(class_id)
+
+
+    return jsonify([_module_payload(module, project_repo, submission_repo) for module in modules])
+
+@projects_api.route('/create_module', methods=['POST'])
+@jwt_required()
+@inject
+def create_module(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    data = request.get_json(silent=True) or {}
+    name = str(data.get('name', '')).strip()
+    class_id = str(data.get('class_id', '')).strip()
+    start_date = str(data.get('start_date', '')).strip()
+    end_date = str(data.get('end_date', '')).strip()
+
+    if not name or not class_id or not start_date or not end_date:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+
+    try:
+        module_id = project_repo.create_module(
+            int(class_id),
+            name,
+            datetime.fromisoformat(start_date),
+            datetime.fromisoformat(end_date),
+        )
+    except Exception as exc:
+        return make_response({'message': f'Could not create module: {exc}'}, HTTPStatus.BAD_REQUEST)
+
+    return jsonify({'module_id': int(module_id)})
+
+@projects_api.route('/update_module', methods=['POST'])
+@jwt_required()
+@inject
+def update_module(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    data = request.get_json(silent=True) or {}
+    module_id = int(str(data.get('module_id', 0)) or 0)
+    name = str(data.get('name', '')).strip()
+    start_date = str(data.get('start_date', '')).strip()
+    end_date = str(data.get('end_date', '')).strip()
+
+    if module_id <= 0 or not name or not start_date or not end_date:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+
+    module = project_repo.update_module(
+        module_id,
+        name,
+        datetime.fromisoformat(start_date),
+        datetime.fromisoformat(end_date),
+    )
+
+    if not module:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+
+    return jsonify({'message': 'Module updated'})
+
+@projects_api.route('/get_module_overview', methods=['GET'])
+@jwt_required()
+@inject
+def get_module_overview(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    module_id = int(str(request.args.get('module_id', 0)) or 0)
+    project_id = int(str(request.args.get('project_id', 0)) or 0)
+
+    module = project_repo.get_module(module_id) if module_id > 0 else None
+    if not module and project_id > 0:
+        module = project_repo.get_module_by_project_id(project_id)
+
+    if not module:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+
+    project = project_repo.get_main_project_for_module(module.Id)
+    if not project:
+        return make_response({'message': 'Main project not found'}, HTTPStatus.NOT_FOUND)
+
+    practice_rows = []
+    try:
+        problems = project_repo.list_practice_problems(int(project.Id))
+        counts = {}
+        try:
+            if hasattr(Submissions, "PracticeProblemId"):
+                rows = (
+                    db.session.query(
+                        Submissions.PracticeProblemId,
+                        func.count(func.distinct(Submissions.User))
+                    )
+                    .filter(Submissions.Project == int(project.Id), Submissions.IsPractice == True)
+                    .group_by(Submissions.PracticeProblemId)
+                    .all()
+                )
+                counts = {str(int(ppid)): int(cnt or 0) for ppid, cnt in rows if ppid is not None}
+        except Exception:
+            counts = {}
+
+        for idx, pp in enumerate(problems):
+            practice_rows.append({
+                "id": int(pp.Id),
+                "number": int(getattr(pp, "PracticeNumber", idx + 1) or idx + 1),
+                "name": str(getattr(pp, "Name", "") or f"Practice Problem {idx + 1}"),
+                "enabled": bool(getattr(pp, "Enabled", True)),
+                "submissions": int(counts.get(str(pp.Id), 0)),
+            })
+    except Exception:
+        practice_rows = []
+
+    return jsonify({
+        "module": _module_payload(module, project_repo, submission_repo),
+        "project": _project_payload(project, submission_repo, project_repo),
+        "practiceProblems": practice_rows,
+    })
+
+@projects_api.route('/update_project_name', methods=['POST'])
+@jwt_required()
+@inject
+def update_project_name(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    data = request.get_json(silent=True) or {}
+    project_id = int(str(data.get('project_id', 0)) or 0)
+    name = str(data.get('name', '')).strip()
+
+    if project_id <= 0 or not name:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+
+    project = project_repo.update_project_name(project_id, name)
+    if not project:
+        return make_response({'message': 'Project not found'}, HTTPStatus.NOT_FOUND)
+
+    return jsonify({'message': 'Project name updated'})
+
+@projects_api.route('/update_practice_problem_name', methods=['POST'])
+@jwt_required()
+@inject
+def update_practice_problem_name(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    data = request.get_json(silent=True) or {}
+    practice_problem_id = int(str(data.get('practice_problem_id', 0)) or 0)
+    name = str(data.get('name', '')).strip()
+
+    if practice_problem_id <= 0 or not name:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+
+    pp = project_repo.update_practice_problem_name(practice_problem_id, name)
+    if not pp:
+        return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+
+    return jsonify({'message': 'Practice problem name updated'})
+
+
 @projects_api.route('/get_projects_by_class_id', methods=['GET'])
 @jwt_required()
 @inject
@@ -1312,11 +1551,12 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
         new_projects.append(json.dumps({
             "Id": proj.Id,
             "Name": proj.Name,
-            "Start": proj.Start.strftime("%x %X"),
-            "End": proj.End.strftime("%x %X"),
+            "Start": _project_start(proj).strftime("%x %X") if _project_start(proj) else "",
+            "End": _project_end(proj).strftime("%x %X") if _project_end(proj) else "",
             "TotalSubmissions": int(thisdic.get(proj.Id, 0) or 0),
             "PracticeTotalSubmissions": int(practice_total),
-            "PracticeProblemsEnabled": project_repo.get_practice_problems_enabled(proj.Id),
+            "PracticeProblemsEnabled": True,
+            "ModuleId": getattr(proj, "ModuleId", None),
         }))
     return jsonify(new_projects)
 
