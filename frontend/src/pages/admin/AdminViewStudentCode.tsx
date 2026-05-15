@@ -12,7 +12,13 @@ const defaultpagenumber = -1
 export function AdminViewStudentCode() {
 
     const { search } = useLocation()
-    const { id, class_id, project_id } = useParams<{ id: string; class_id: string; project_id: string }>()
+    const { id, school_id, class_id, module_id, project_id } = useParams<{
+        id: string
+        school_id: string
+        class_id: string
+        module_id: string
+        project_id: string
+    }>()
 
     const submissionId = id !== undefined ? parseInt(id, 10) : defaultpagenumber
     const cid = class_id !== undefined ? parseInt(class_id, 10) : -1
@@ -32,11 +38,17 @@ export function AdminViewStudentCode() {
     const practiceProblemId =
         isPractice && !Number.isNaN(parsedPpid) && parsedPpid > 0 ? parsedPpid : undefined
 
+    const schoolIdStr = school_id ?? ''
     const classIdStr = class_id ?? ''
+    const moduleIdStr = module_id ?? ''
     const projectIdStr = project_id ?? ''
 
-    const practiceQuery =
-        isPractice ? `?practice=true${practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''}` : ''
+    const classSelectionUrl = `/admin/school/${schoolIdStr}/classes`
+    const moduleListUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/modules`
+    const moduleDetailsUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/overview`
+    const studentListUrl = isPractice && practiceProblemId
+        ? `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/project/${projectIdStr}/practice/${practiceProblemId}/submissions`
+        : `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/project/${projectIdStr}/submissions`
 
     useEffect(() => {
         if (submissionId < 0 || pid < 0) return
@@ -117,15 +129,16 @@ export function AdminViewStudentCode() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: 'School Selection', to: '/admin/classes' },
-                    { label: 'Class Selection', to: '/admin/classes' },
+                    { label: 'School Selection', to: '/admin/schools' },
+                    { label: 'Class Selection', to: classSelectionUrl },
                     ...(fromOfficeHours
                         ? [{ label: 'Office Hours', to: '/admin/OfficeHours' }]
                         : [
-                            { label: 'Project List', to: `/admin/${classIdStr}/projects` },
+                            { label: 'Module List', to: moduleListUrl },
+                            { label: 'Module Details', to: moduleDetailsUrl },
                             {
                                 label: isPractice ? 'Practice Submissions' : 'Student List',
-                                to: `/admin/${classIdStr}/project/${projectIdStr}${practiceQuery}`,
+                                to: studentListUrl,
                             },
                         ]),
                     { label: 'Code View' },

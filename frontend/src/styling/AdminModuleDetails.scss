@@ -349,7 +349,7 @@
 
     .practice-board {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        grid-template-columns: 1fr;
         gap: 1rem;
     }
 
@@ -544,6 +544,10 @@
         gap: 0.65rem;
         padding-top: 0.95rem;
         border-top: 1px solid #e5e7eb;
+
+        &.project-tile-footer-single {
+            justify-content: stretch;
+        }
     }
 
     .project-action {
@@ -623,6 +627,16 @@
         font-size: 0.82rem;
     }
 
+    .review-submissions-action {
+        width: 100%;
+        min-height: 54px;
+        padding: 0.9rem 1.15rem;
+        border-radius: 18px;
+        font-size: 0.98rem;
+        letter-spacing: 0.01em;
+        box-shadow: 0 14px 26px rgba(37, 99, 235, 0.22);
+    }
+
     .project-setup-indicators {
         min-width: 0;
         display: grid;
@@ -640,6 +654,19 @@
         background: #ffffff;
         border: 1px solid #e5e7eb;
         box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+        color: inherit;
+        text-decoration: none;
+        cursor: pointer;
+        transition:
+            transform 0.15s ease,
+            box-shadow 0.15s ease,
+            border-color 0.15s ease,
+            background 0.15s ease;
+
+        &:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.09);
+        }
 
         &.is-complete {
             border-color: #bbf7d0;
@@ -670,6 +697,74 @@
                 color: #b91c1c;
             }
         }
+
+        &.is-testcases {
+            border-width: 2px;
+            align-items: stretch;
+
+            .setup-indicator-icon {
+                width: 42px;
+                height: 42px;
+                border-radius: 15px;
+                font-size: 1.1rem;
+            }
+
+            .setup-indicator-label {
+                color: #0f172a;
+                font-size: 0.82rem;
+            }
+
+            &.is-complete {
+                border-color: #bbf7d0;
+                background: #f0fdf4;
+
+                .setup-indicator-icon {
+                    color: #15803d;
+                    background: #dcfce7;
+                    border-color: #bbf7d0;
+                }
+
+                .setup-indicator-count-badge {
+                    background: #15803d;
+                    border-color: #15803d;
+                    color: #ffffff;
+                }
+
+                .setup-indicator-status {
+                    color: #15803d;
+                }
+            }
+
+            &.is-missing {
+                border-color: #fecaca;
+                background: #fff7f7;
+
+                .setup-indicator-icon {
+                    color: #b91c1c;
+                    background: #fee2e2;
+                    border-color: #fecaca;
+                }
+
+                .setup-indicator-count-badge {
+                    background: #b91c1c;
+                    border-color: #b91c1c;
+                    color: #ffffff;
+                }
+
+                .setup-indicator-status {
+                    color: #b91c1c;
+                }
+            }
+        }
+    }
+
+    .setup-indicator-link {
+        position: relative;
+
+        &:focus-visible {
+            outline: 3px solid rgba(37, 99, 235, 0.35);
+            outline-offset: 3px;
+        }
     }
 
     .setup-indicator-icon {
@@ -688,7 +783,16 @@
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 0.15rem;
+        gap: 0.2rem;
+        flex: 1;
+    }
+
+    .setup-indicator-label-row {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        flex-wrap: wrap;
     }
 
     .setup-indicator-label {
@@ -698,12 +802,52 @@
         font-weight: 950;
     }
 
+    .setup-indicator-count-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: fit-content;
+        padding: 0.22rem 0.5rem;
+        border-radius: 999px;
+        background: #dcfce7;
+        border: 1px solid #bbf7d0;
+        color: #15803d;
+        font-size: 0.68rem;
+        line-height: 1;
+        font-weight: 950;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+    }
+
     .setup-indicator-status {
         font-size: 0.72rem;
         line-height: 1.15;
         font-weight: 950;
         letter-spacing: 0.04em;
         text-transform: uppercase;
+    }
+
+    .setup-indicator-detail {
+        color: #64748b;
+        font-size: 0.72rem;
+        line-height: 1.2;
+        font-weight: 800;
+    }
+
+    .setup-indicator-action {
+        margin-left: auto;
+        padding: 0.3rem 0.5rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.75);
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        color: #334155;
+        font-size: 0.68rem;
+        line-height: 1;
+        font-weight: 950;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+        align-self: center;
     }
 
     .manage-practice-link {
@@ -736,7 +880,7 @@
         }
 
         .practice-board {
-            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            grid-template-columns: 1fr;
         }
     }
 

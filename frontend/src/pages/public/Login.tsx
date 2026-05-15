@@ -490,7 +490,7 @@ function Login() {
   };
 
   if (isLoggedIn) {
-    const redirectPath = role === 0 ? "/student/classes" : "/admin/classes";
+    const redirectPath = role === 0 ? "/student/schools" : "/admin/schools";
     return <Navigate to={redirectPath} replace />;
   }
 

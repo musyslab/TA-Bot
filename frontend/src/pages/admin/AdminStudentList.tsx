@@ -1,21 +1,32 @@
-
-// AdminStudentRoster.tsx
 import React, { Component } from 'react'
 import axios from 'axios'
 import { Helmet } from 'react-helmet'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import MenuComponent from '../components/MenuComponent'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
-import '../../styling/AdminStudentRoster.scss'
+import '../../styling/AdminStudentList.scss'
 
 import { FaClone, FaFileExport, FaDownload, FaEye, FaHandPaper } from 'react-icons/fa'
 
 const AdminStudentRoster = () => {
-    const { class_id, module_id, id, practice_problem_id: route_practice_problem_id } = useParams<{ class_id: string; module_id: string; id: string; practice_problem_id?: string }>()
+    const {
+        school_id,
+        class_id,
+        module_id,
+        id,
+        practice_problem_id: route_practice_problem_id,
+    } = useParams<{
+        school_id: string;
+        class_id: string;
+        module_id: string;
+        id: string;
+        practice_problem_id?: string;
+    }>()
+
     const { search } = useLocation()
 
-    if (!class_id || !module_id || !id) {
-        return <div>Error: class, module, or project id missing or invalid</div>
+    if (!school_id || !class_id || !module_id || !id) {
+        return <div>Error: school, class, module, or project id missing or invalid</div>
     }
 
     const project_id = parseInt(id, 10)
@@ -35,6 +46,7 @@ const AdminStudentRoster = () => {
     return (
         <StudentListInternal
             project_id={project_id}
+            school_id={school_id}
             class_id={class_id}
             module_id={module_id}
             isPractice={isPractice}
@@ -47,6 +59,7 @@ export default AdminStudentRoster
 
 interface StudentListProps {
     project_id: number
+    school_id: string
     class_id: string
     module_id: string
     isPractice: boolean
@@ -252,7 +265,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             {
                 project_id: this.props.project_id,
                 practice: this.props.isPractice,
-                // When viewing practice submissions, scope to the specific practice problem if provided.
                 practice_problem_id: this.props.practice_problem_id ?? null,
             },
             {
@@ -367,7 +379,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             })
     }
 
-    // Run plagiarism detector
     handleClick = () => {
         this.setState({ isLoading: true })
         axios
@@ -386,9 +397,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                 this.setState({
                     plagiarismResults: pairs,
                     plagiarismModalIsOpen: true,
-                    /* Marks Code */
                     plagiarismPage: 1,
-                    /* End Of Code */
                     isLoading: false,
                 })
             })
@@ -431,7 +440,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
         }
     }
 
-    // Unlock a student account
     handleUnlockClick = (UserId: number) => {
         axios
             .post(
@@ -595,20 +603,26 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             return [...visible].sort((a, b) => a.Lname.localeCompare(b.Lname) || a.Fname.localeCompare(b.Fname))
         })()
 
-        const moduleOverviewUrl = `/admin/${this.props.class_id}/module/${this.props.module_id}/overview`
-        const projectBaseUrl = `/admin/${this.props.class_id}/module/${this.props.module_id}/project/${this.props.project_id}`
+        const totalStudents = rowsForView.length
+        const submittedStudents = rowsForView.filter((row) => row.subid !== -1).length
+        const passingStudents = rowsForView.filter((row) => row.subid !== -1 && row.isPassing).length
+
+        const submittedPercent = totalStudents > 0 ? Math.round((submittedStudents / totalStudents) * 100) : 0
+        const passingPercent = totalStudents > 0 ? Math.round((passingStudents / totalStudents) * 100) : 0
+
+        const moduleListUrl = `/admin/school/${this.props.school_id}/class/${this.props.class_id}/modules`
+        const moduleOverviewUrl = `/admin/school/${this.props.school_id}/class/${this.props.class_id}/module/${this.props.module_id}/overview`
+        const projectBaseUrl = `/admin/school/${this.props.school_id}/class/${this.props.class_id}/module/${this.props.module_id}/project/${this.props.project_id}`
+
         const practiceQuery =
             this.props.isPractice
                 ? `?practice=true${this.props.practice_problem_id ? `&practice_problem_id=${this.props.practice_problem_id}` : ''}`
                 : ''
 
-        // ===== Helpers for modal "CodePage-like" UI =====
         const code = this.state.selectedStudentCode || ''
 
-        // --- Pagination for plagiarism modal (10 per page) ---
         const pageSize = this.state.plagiarismPageSize ?? 10
 
-        // --- Thresholds (easy to tune) ---
         const SIM_THRESHOLD = 0.75
         const MIN_OVERLAP_CHARS = 150
 
@@ -649,7 +663,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             const clamped = Math.max(1, Math.min(p, totalPages))
             this.setState({ plagiarismPage: clamped })
         }
-        // End of Changes
 
         function parseOutputs(raw: string): { expected: string; actual: string; hadDiff: boolean } {
             if (raw.includes('~~~diff~~~')) {
@@ -849,20 +862,36 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: 'School Selection', to: '/admin/classes' },
-                        { label: 'Class Selection', to: '/admin/classes' },
-                        { label: 'Module Calendar', to: `/admin/${this.props.class_id}/modules` },
+                        { label: 'School Selection', to: '/admin/schools' },
+                        { label: 'Class Selection', to: `/admin/school/${this.props.school_id}/classes` },
+                        { label: 'Module List', to: moduleListUrl },
                         { label: 'Module Details', to: moduleOverviewUrl },
                         { label: this.props.isPractice ? 'Practice Submissions' : 'Student List' },
                     ]}
                 />
 
                 <div className="pageTitle">
-
                     {this.state.projectName
-                        ? `Student List: ${this.state.projectName}`
+                        ? `${this.state.projectName}`
                         : 'Student List'}
+                </div>
 
+                <div className="student-stats-panel" aria-label="Student submission statistics">
+                    <div className="student-stat-card">
+                        <div className="student-stat-label">Students Submitted</div>
+                        <div className="student-stat-value">
+                            {submittedStudents} / {totalStudents}
+                        </div>
+                        <div className="student-stat-subtext">{submittedPercent}% submitted</div>
+                    </div>
+
+                    <div className="student-stat-card">
+                        <div className="student-stat-label">Passing All Testcases</div>
+                        <div className="student-stat-value">
+                            {passingStudents} / {totalStudents}
+                        </div>
+                        <div className="student-stat-subtext">{passingPercent}% passing</div>
+                    </div>
                 </div>
 
                 <div className="main-grid">
@@ -886,7 +915,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                             </option>
                                         ))}
                                     </select>
-
 
                                     <label className="filter-label" htmlFor="labFilter">
                                         Lab:
@@ -929,7 +957,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                 <FaFileExport aria-hidden="true" />
                                                 Export Grades to D2L
                                             </button>
-
                                         </>
                                     )}
 
@@ -1098,18 +1125,15 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                                     <div className="modal-body">
                                         <div className="modal-header">
-                                            {/* Marks Code */}
                                             <div className="modal-title" id="plagiarism-modal-title">
                                                 Potentially Similar Submissions ({totalResults} pairs)
                                             </div>
-                                            {/* End of Marks Code */}
                                         </div>
 
                                         <div className="tab-content">
                                             <section className="tests-section">
                                                 <div className="similar-modal-scroll">
                                                     <table className="results-table">
-
                                                         <thead>
                                                             <tr>
                                                                 <th>Student A</th>
@@ -1184,7 +1208,6 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                         Next
                                                     </button>
                                                 </div>
-
                                             </section>
                                         </div>
                                     </div>

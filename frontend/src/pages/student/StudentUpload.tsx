@@ -21,10 +21,7 @@ import {
   FaHandshake,
   FaRegFile,
   FaTimesCircle,
-  FaBolt,
-  FaGift,
   FaExternalLinkAlt,
-  FaFlask,
   FaCheckCircle,
 } from 'react-icons/fa'
 
@@ -33,6 +30,8 @@ type PracticeProblemLite = {
   number?: number
   name?: string
   enabled?: boolean
+  solved?: boolean
+  rewarded?: boolean
 }
 
 type AssignedClassLite = {
@@ -40,18 +39,58 @@ type AssignedClassLite = {
   school_id?: number
 }
 
-const StudentUpload = () => {
-  const { class_id, practice_problem_id } = useParams()
-  let cid = -1
-  if (class_id !== undefined) {
-    cid = parseInt(class_id, 10)
+type ModuleObjectLite = {
+  Id: number
+  ClassId: number
+  Name: string
+  Start: string
+  End: string
+  MainProjectId?: number
+}
+
+const authHeader = () => ({
+  Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+})
+
+const parsePositiveInt = (value: string | undefined): number | null => {
+  if (value === undefined || !/^\d+$/.test(value)) return null
+
+  const parsed = parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const normalizeMaybeJson = <T,>(item: unknown): T => {
+  if (typeof item === 'string') {
+    return JSON.parse(item) as T
   }
 
-  const practiceProblemId =
-    practice_problem_id !== undefined && /^\d+$/.test(practice_problem_id)
-      ? parseInt(practice_problem_id, 10)
-      : null
+  return item as T
+}
+
+const StudentUpload = () => {
+  const {
+    school_id,
+    class_id,
+    module_id,
+    project_id: route_project_id,
+    practice_problem_id,
+  } = useParams<{
+    school_id?: string
+    class_id?: string
+    module_id?: string
+    project_id?: string
+    practice_problem_id?: string
+  }>()
+
+  const cid = parsePositiveInt(class_id) ?? -1
+  const schoolId = parsePositiveInt(school_id)
+  const moduleId = parsePositiveInt(module_id)
+  const routeProjectId = parsePositiveInt(route_project_id)
+
+  const practiceProblemId = parsePositiveInt(practice_problem_id)
   const isPractice = practiceProblemId !== null
+
+  const hasModuleRoute = schoolId !== null && moduleId !== null && routeProjectId !== null
 
   const [files, setFiles] = useState<File[]>([])
   const [mainJavaFileName, setMainJavaFileName] = useState<string>('')
@@ -60,7 +99,7 @@ const StudentUpload = () => {
   const [error_message, setError_Message] = useState<string>('')
   const [isErrorMessageHidden, setIsErrorMessageHidden] = useState<boolean>(true)
 
-  const [project_id, setProject_id] = useState<number>(0)
+  const [project_id, setProject_id] = useState<number>(routeProjectId ?? 0)
   const [is_allowed_to_submit] = useState<boolean>(true)
 
   const [hasTbsEnabled] = useState<boolean>(false)
@@ -70,21 +109,10 @@ const StudentUpload = () => {
   const [suggestions, setSuggestions] = useState<string>('')
   const feedbackRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const autoGrowTextarea = (el: HTMLTextAreaElement | null) => {
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }
-
   const [baseCharge, setBaseCharge] = useState<number>(0)
   const [RewardCharge, setRewardCharge] = useState<number>(0)
 
-  const [HoursUntilRecharge, setHoursUntilRecharge] = useState<number>(0)
-  const [MinutesUntilRecharge, setMinutesUntilRecharge] = useState<number>(0)
-  const [SecondsUntilRecharge, setSecondsUntilRecharge] = useState<number>(0)
-
   const [RewardState, setRewardState] = useState<boolean>(false)
-  const [displayClock, setDisplayClock] = useState<boolean>(false)
   const [inOfficeHours, setInOfficeHours] = useState<boolean>(false)
 
   const [project_name, setProject_name] = useState<string>('')
@@ -92,26 +120,33 @@ const StudentUpload = () => {
 
   const [passedAllTests, setPassedAllTests] = useState<boolean>(false)
   const [checkedPassedAll, setCheckedPassedAll] = useState<boolean>(false)
+  const [testcasesPassedCount, setTestcasesPassedCount] = useState<number>(0)
+  const [testcasesTotalCount, setTestcasesTotalCount] = useState<number>(0)
 
+  const [moduleName, setModuleName] = useState<string>('')
   const [practiceProblemLabel, setPracticeProblemLabel] = useState<string>('')
   const [hideClassSelectionCrumb, setHideClassSelectionCrumb] = useState<boolean>(false)
 
-  const [practiceSolvedCount, setPracticeSolvedCount] = useState<number>(0) 
-  const [practiceTotalCount, setPracticeTotalCount] = useState<number>(0)
 
-  const practiceProgress = useMemo(() => {
-    const solved = Math.max(0, practiceSolvedCount)
-    const total = Math.max(0, practiceTotalCount)
-    const clampedSolved = total > 0 ? Math.min(solved, total) : solved
-    const earned = clampedSolved // 1 solved practice problem => 1 bonus FastPass
-    const pct = total === 0 ? 0 : Math.round((clampedSolved / total) * 100)
-    return { total, solved: clampedSolved, earned, pct }
-  }, [practiceSolvedCount, practiceTotalCount])
+  const autoGrowTextarea = (el: HTMLTextAreaElement | null) => {
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }
 
-  // you can submit if you are in office hours OR you have base energy OR you used a FastPass charge
+  const testcaseProgress = useMemo(() => {
+    const total = Math.max(0, testcasesTotalCount)
+    const passed = Math.max(0, Math.min(testcasesPassedCount, total))
+    const pct = total === 0 ? 0 : Math.round((passed / total) * 100)
+    const radius = 44
+    const circumference = 2 * Math.PI * radius
+    const strokeDashoffset = circumference - (pct / 100) * circumference
+
+    return { total, passed, pct, radius, circumference, strokeDashoffset }
+  }, [testcasesPassedCount, testcasesTotalCount])
+
   const canSubmit = isPractice || inOfficeHours || baseCharge > 0 || RewardState
 
-  // Allowed upload file extensions (frontend gate)
   const ALLOWED_EXTS = ['.py', '.java', '.c', '.rkt']
   const isJavaFile = (f: File) => f.name.toLowerCase().endsWith('.java')
   const isJavaFileName = (n: string) => /\.java$/i.test(n)
@@ -121,41 +156,48 @@ const StudentUpload = () => {
     return ALLOWED_EXTS.includes(ext)
   }
 
-  // Detect entry point when multiple .java files are uploaded
   const JAVA_MAIN_RE = /\bpublic\s+static\s+void\s+main\s*\(/
+
   function pickMainJavaFile(allJavaNames: string[], namesWithMain: string[]): string {
     if (namesWithMain.length === 1) return namesWithMain[0]
+
     const mainDotJava = allJavaNames.find((n) => n.toLowerCase() === 'main.java')
     if (mainDotJava) return mainDotJava
+
     return namesWithMain[0] || ''
   }
 
   async function computeMainJavaFromLocal(localFiles: File[]) {
     const javaFiles = localFiles.filter((f) => isJavaFileName(f.name))
+
     if (javaFiles.length <= 1) {
       setMainJavaFileName('')
       return
     }
 
     const withMain: string[] = []
+
     for (const f of javaFiles) {
       try {
         const txt = await f.text()
         if (JAVA_MAIN_RE.test(txt)) withMain.push(f.name)
       } catch {
-        // ignore read failures
+        // Ignore read failures.
       }
     }
+
     setMainJavaFileName(pickMainJavaFile(javaFiles.map((f) => f.name), withMain))
   }
 
   useEffect(() => {
     let cancelled = false
+
       ; (async () => {
         if (!(files.length > 1 && files.every(isJavaFile))) {
           if (!cancelled) setMainJavaFileName('')
           return
         }
+
         await computeMainJavaFromLocal(files)
       })()
 
@@ -186,7 +228,7 @@ const StudentUpload = () => {
         const uniqueSchoolIds = new Set(
           rows
             .map((row) => Number(row.school_id))
-            .filter((schoolId) => Number.isFinite(schoolId) && schoolId > 0)
+            .filter((rowSchoolId) => Number.isFinite(rowSchoolId) && rowSchoolId > 0)
         )
 
         setHideClassSelectionCrumb(
@@ -201,27 +243,23 @@ const StudentUpload = () => {
   const activeDay = project_name !== '' ? Math.min(Math.max(DaysSinceProjectStarted, 1), 6) : 0
 
   useEffect(() => {
-    // First: load submission details (including project_name)
     getSubmissionDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Once project_name has been set, then fetch charges
-  useEffect(() => {
-    if (project_name) getCharges()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project_name])
+  }, [cid, routeProjectId, moduleId])
 
   useEffect(() => {
-    // Reset if there's no active project
-    if (!project_id || project_id <= 0) {
-      setPassedAllTests(false)
-      setCheckedPassedAll(true)
-      return
+    if (project_id && project_id > 0) {
+      getCharges()
     }
-    if (project_id === -1) {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project_id])
+
+  useEffect(() => {
+    if (!project_id || project_id <= 0 || project_id === -1) {
       setPassedAllTests(false)
       setCheckedPassedAll(true)
+      setTestcasesPassedCount(0)
+      setTestcasesTotalCount(0)
       return
     }
 
@@ -235,10 +273,11 @@ const StudentUpload = () => {
     axios
       .get(
         `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?class_id=${cid}&id=${project_id}${qs}`,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+        { headers: authHeader() }
       )
       .then((res) => {
         let payload: any = res?.data
+
         if (typeof payload === 'string') {
           try {
             payload = JSON.parse(payload)
@@ -248,22 +287,24 @@ const StudentUpload = () => {
         }
 
         const results = Array.isArray(payload?.results) ? payload.results : []
-        const allPassed =
-          results.length > 0 &&
-          results.every((r: any) => {
-            const v = r?.passed ?? r?.ok ?? r?.State
-            return v === true
-          })
+        const passedCount = results.filter((r: any) => {
+          const v = r?.passed ?? r?.ok ?? r?.State
+          return v === true
+        }).length
+        const allPassed = results.length > 0 && passedCount === results.length
 
+        setTestcasesPassedCount(passedCount)
+        setTestcasesTotalCount(results.length)
         setPassedAllTests(allPassed)
         setCheckedPassedAll(true)
       })
       .catch(() => {
+        setTestcasesPassedCount(0)
+        setTestcasesTotalCount(0)
         setPassedAllTests(false)
         setCheckedPassedAll(true)
       })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project_id, isPractice, practiceProblemId])
+  }, [project_id, isPractice, practiceProblemId, cid])
 
   useEffect(() => {
     if (passedAllTests) {
@@ -282,7 +323,7 @@ const StudentUpload = () => {
     axios
       .get(
         `${import.meta.env.VITE_API_URL}/projects/list_practice_problems_student?project_id=${project_id}`,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+        { headers: authHeader() }
       )
       .then((res) => {
         const probs = (res?.data?.problems ?? []) as PracticeProblemLite[]
@@ -293,50 +334,36 @@ const StudentUpload = () => {
         const n = Number(found?.number ?? practiceProblemId)
         const left = n ? `Practice ${n}` : 'Practice'
         const name = String(found?.name || (n ? `Practice Problem ${n}` : 'Practice Problem'))
+
         setPracticeProblemLabel(`${left}: ${name}`)
       })
       .catch(() => {
         setPracticeProblemLabel(`Practice ${practiceProblemId}: Practice Problem ${practiceProblemId}`)
       })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPractice, practiceProblemId, project_id])
 
+
   useEffect(() => {
-    if (!project_id || project_id <= 0) {
-      setPracticeTotalCount(0)
-      setPracticeSolvedCount(0)
+    checkOfficeHours()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cid])
+
+  function checkOfficeHours() {
+    if (!Number.isFinite(cid) || cid <= 0) {
+      setInOfficeHours(false)
       return
     }
 
     axios
-      .get(
-        `${import.meta.env.VITE_API_URL}/projects/list_practice_problems_student?project_id=${project_id}`,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
-      )
-      .then((res) => {
-        const probs = (res?.data?.problems ?? []) as (PracticeProblemLite & { solved?: boolean; rewarded?: boolean })[]
-        const arr = Array.isArray(probs) ? probs : []
-        setPracticeTotalCount(arr.length)
-        // progress bar tracks awarded bonuses (fallback to solved if needed)
-        setPracticeSolvedCount(arr.filter((p) => Boolean(p?.rewarded ?? p?.solved)).length)
-      })
-      .catch(() => {
-        setPracticeTotalCount(0)
-        setPracticeSolvedCount(0)
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project_id])
-
-  function checkOfficeHours() {
-    axios
-      .get(`${import.meta.env.VITE_API_URL}/submissions/getAcceptedOHForClass?class_id=${class_id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+      .get(`${import.meta.env.VITE_API_URL}/submissions/getAcceptedOHForClass?class_id=${cid}`, {
+        headers: authHeader(),
       })
       .then((res) => {
         const raw =
           typeof res.data === 'object' && res.data !== null
-            ? (res.data.id ?? res.data.qid ?? res.data.value ?? res.data)
+            ? res.data.id ?? res.data.qid ?? res.data.value ?? res.data
             : res.data
+
         const id = Number(raw)
         setInOfficeHours(Number.isFinite(id) && id > 0)
       })
@@ -346,16 +373,12 @@ const StudentUpload = () => {
       })
   }
 
-  useEffect(() => {
-    checkOfficeHours()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     if (passedAllTests) {
       setFiles([])
       setError_Message('')
       setIsErrorMessageHidden(true)
+      event.currentTarget.value = ''
       return
     }
 
@@ -365,13 +388,22 @@ const StudentUpload = () => {
     if (selected.length && valid.length === 0) {
       setError_Message('Only .py, .java, .c, or .rkt files are allowed.')
       setIsErrorMessageHidden(false)
+      event.currentTarget.value = ''
+      return
     }
 
-    // Multi-file is only allowed for Java (.java)
+    if (selected.length !== valid.length) {
+      setError_Message('Only .py, .java, .c, or .rkt files are allowed.')
+      setIsErrorMessageHidden(false)
+      event.currentTarget.value = ''
+      return
+    }
+
     if (valid.length > 1 && !valid.every(isJavaFile)) {
       setFiles([])
       setError_Message('Multi-file upload is only available for Java (.java) files.')
       setIsErrorMessageHidden(false)
+      event.currentTarget.value = ''
       return
     }
 
@@ -380,33 +412,20 @@ const StudentUpload = () => {
   }
 
   function getCharges() {
+    if (!Number.isFinite(cid) || cid <= 0) return
+
     axios
-      .get(`${import.meta.env.VITE_API_URL}/submissions/GetCharges?class_id=${class_id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+      .get(`${import.meta.env.VITE_API_URL}/submissions/GetCharges?class_id=${cid}`, {
+        headers: authHeader(),
       })
       .then((res) => {
-        setBaseCharge(res.data.baseCharge)
-        setRewardCharge(res.data.rewardCharge)
-        setHoursUntilRecharge(+res.data.HoursUntilRecharge)
-        setMinutesUntilRecharge(+res.data.MinutesUntilRecharge)
-        setSecondsUntilRecharge(+res.data.SecondsUntilRecharge)
-        setDisplayClock(
-          !(
-            +res.data.HoursUntilRecharge === 0 &&
-            +res.data.MinutesUntilRecharge === 0 &&
-            +res.data.SecondsUntilRecharge === 0
-          )
-        )
+        setBaseCharge(Number(res.data.baseCharge ?? 0))
+        setRewardCharge(Number(res.data.rewardCharge ?? 0))
       })
       .catch((err) => {
         if (err.response?.status === 404) {
-          // no active project
           setBaseCharge(0)
           setRewardCharge(0)
-          setHoursUntilRecharge(0)
-          setMinutesUntilRecharge(0)
-          setSecondsUntilRecharge(0)
-          setDisplayClock(false)
         } else {
           console.error('Error fetching charges:', err)
         }
@@ -414,9 +433,68 @@ const StudentUpload = () => {
   }
 
   function getSubmissionDetails() {
+    if (!Number.isFinite(cid) || cid <= 0) {
+      setProject_name('')
+      setProject_id(-1)
+      return
+    }
+
+    if (hasModuleRoute && routeProjectId) {
+      setProject_id(routeProjectId)
+
+      axios
+        .get(`${import.meta.env.VITE_API_URL}/projects/get_modules_by_class_id_student?id=${cid}`, {
+          headers: authHeader(),
+        })
+        .then((res) => {
+          const modules: ModuleObjectLite[] = Array.isArray(res.data)
+            ? res.data.map((item: unknown) => normalizeMaybeJson<ModuleObjectLite>(item))
+            : []
+
+          const selectedModule =
+            modules.find((item) => Number(item.Id) === Number(moduleId)) || null
+
+          if (selectedModule) {
+            setModuleName(selectedModule.Name || '')
+          }
+        })
+        .catch(() => {
+          setModuleName('')
+        })
+
+      axios
+        .get(`${import.meta.env.VITE_API_URL}/submissions/GetSubmissionDetails?class_id=${cid}`, {
+          headers: authHeader(),
+        })
+        .then((res) => {
+          const activeProjectId = Number(res.data?.[5] || 0)
+
+          if (activeProjectId === routeProjectId) {
+            setDaysSinceProjectStarted(parseInt(res.data?.[1], 10) + 1)
+            setTimeUntilNextSubmission(res.data?.[2] || '')
+            setProject_name(res.data?.[3] || '')
+            setDueDate(res.data?.[4] || '')
+            return
+          }
+
+          setDaysSinceProjectStarted(1)
+          setTimeUntilNextSubmission('')
+          setProject_name('')
+          setDueDate('')
+        })
+        .catch(() => {
+          setDaysSinceProjectStarted(1)
+          setTimeUntilNextSubmission('')
+          setProject_name('')
+          setDueDate('')
+        })
+
+      return
+    }
+
     axios
-      .get(`${import.meta.env.VITE_API_URL}/submissions/GetSubmissionDetails?class_id=${class_id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+      .get(`${import.meta.env.VITE_API_URL}/submissions/GetSubmissionDetails?class_id=${cid}`, {
+        headers: authHeader(),
       })
       .then((res) => {
         setDaysSinceProjectStarted(parseInt(res.data[1], 10) + 1)
@@ -425,27 +503,36 @@ const StudentUpload = () => {
         setDueDate(res.data[4])
         setProject_id(Number(res.data[5] || 0))
       })
+      .catch(() => {
+        setProject_name('')
+        setProject_id(-1)
+      })
   }
 
   const downloadAssignment = (pid: number) => {
     if (!pid || pid <= 0) return
+
     const qs = isPractice && practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''
+
     axios
       .get(`${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${pid}${qs}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+        headers: authHeader(),
         responseType: 'blob',
       })
       .then((res) => {
         const type = (res.headers as any)['content-type'] || 'application/octet-stream'
         const blob = new Blob([res.data], { type })
-        let name = (res.headers as any)['x-filename'] || 'assignment_description'
+        const name = (res.headers as any)['x-filename'] || 'assignment_description'
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
+
         a.href = url
         a.download = name
+
         document.body.appendChild(a)
         a.click()
         a.remove()
+
         URL.revokeObjectURL(url)
       })
       .catch((err) => console.error('Download failed:', err))
@@ -456,7 +543,7 @@ const StudentUpload = () => {
       .post(
         `${import.meta.env.VITE_API_URL}/submissions/submit_suggestion`,
         { suggestion: suggestions },
-        { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+        { headers: authHeader() }
       )
       .then(
         () => {
@@ -474,14 +561,28 @@ const StudentUpload = () => {
     window.location.reload()
   }
 
+  function getResultsHref(submissionId?: number | string) {
+    const qs =
+      isPractice && practiceProblemId
+        ? `?practice=1&practice_problem_id=${practiceProblemId}`
+        : ''
+
+    if (submissionId !== undefined && class_id !== undefined) {
+      return `/student/${class_id}/code/${submissionId}${qs}`
+    }
+
+    if (class_id !== undefined) {
+      return `/student/${class_id}/code${qs}`
+    }
+
+    return `code${qs}`
+  }
+
   function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault()
 
-    if (passedAllTests) {
-      return
-    }
+    if (passedAllTests) return
 
-    // Block submits when there are no usable charges
     if (!canSubmit) {
       alert(
         'You’re out of charges.\n\n' +
@@ -491,21 +592,30 @@ const StudentUpload = () => {
       return
     }
 
-    // Make sure at least one file is selected
+    if (!Number.isFinite(cid) || cid <= 0) {
+      setError_Message('Missing class id.')
+      setIsErrorMessageHidden(false)
+      return
+    }
+
+    if (!project_id || project_id <= 0 || project_id === -1) {
+      setError_Message('No active project was found for this upload.')
+      setIsErrorMessageHidden(false)
+      return
+    }
+
     if (files.length === 0) {
       setError_Message('Please select a file to upload.')
       setIsErrorMessageHidden(false)
       return
     }
 
-    // Enforce multi-file restriction at submit time too
     if (files.length > 1 && !files.every(isJavaFile)) {
       setError_Message('Multi-file upload is only available for Java (.java) files.')
       setIsErrorMessageHidden(false)
       return
     }
 
-    // Validate extensions again at submit time
     if (files.some((f) => !isAllowedFileName(f.name))) {
       setError_Message('Only .py, .java, .c, or .rkt files are allowed.')
       setIsErrorMessageHidden(false)
@@ -516,8 +626,14 @@ const StudentUpload = () => {
     setIsLoading(true)
 
     const formData = new FormData()
+
     files.forEach((f) => formData.append('files', f, f.name))
     formData.append('class_id', cid.toString())
+    formData.append('project_id', project_id.toString())
+
+    if (hasModuleRoute && moduleId) {
+      formData.append('module_id', moduleId.toString())
+    }
 
     if (isPractice) {
       if (!practiceProblemId) {
@@ -526,13 +642,14 @@ const StudentUpload = () => {
         setIsLoading(false)
         return
       }
+
       formData.append('practice', 'true')
       formData.append('practice_problem_id', String(practiceProblemId))
     }
 
     axios
       .post(`${import.meta.env.VITE_API_URL}/upload/`, formData, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+        headers: authHeader(),
       })
       .then((res) => {
         const sid = (res?.data && (res.data.sid ?? res.data.Sid ?? res.data.id)) as
@@ -540,17 +657,7 @@ const StudentUpload = () => {
           | string
           | undefined
 
-        const qs =
-          isPractice && practiceProblemId ? `?practice=1&practice_problem_id=${practiceProblemId}` : ''
-
-
-        if (sid !== undefined && class_id !== undefined) {
-          window.location.href = `/student/${class_id}/code/${sid}${qs}`
-        } else if (class_id !== undefined) {
-          window.location.href = `/student/${class_id}/code`
-        } else {
-          window.location.href = 'code'
-        }
+        window.location.href = getResultsHref(sid)
       })
       .catch((err) => {
         setError_Message(err.response?.data?.message || 'Upload failed.')
@@ -560,63 +667,38 @@ const StudentUpload = () => {
   }
 
   function consumeRewardCharge() {
+    if (passedAllTests) return
 
-    if (passedAllTests) {
-      return
-    }
-
-    if (isPractice) {
-      // Practice submissions are free; don't allow reserving a FastPass here.
-      return
-    }
+    if (isPractice) return
 
     if (RewardCharge === 0) {
       alert("You don't have any reward charges to use")
       return
     }
 
+    if (!Number.isFinite(cid) || cid <= 0) return
+
     axios
-      .get(`${import.meta.env.VITE_API_URL}/submissions/ConsumeCharge?class_id=${class_id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+      .get(`${import.meta.env.VITE_API_URL}/submissions/ConsumeCharge?class_id=${cid}`, {
+        headers: authHeader(),
       })
       .then(() => setRewardState(true))
       .catch(() => {
-        // ignore
+        // Ignore.
       })
   }
 
-  // code => code icon, text => two-line text icon, otherwise => alternate icon
   const CODE_ICON_RE = /\.(py|java|c|h|rkt|scm|cpp)$/i
   const TEXT_ICON_RE = /\.(txt|md|pdf|doc|docx)$/i
 
   const getFileIcon = (filename: string) => {
     if (CODE_ICON_RE.test(filename)) return <FaCode className="file-language-icon" aria-hidden="true" />
-    if (TEXT_ICON_RE.test(filename))
+    if (TEXT_ICON_RE.test(filename)) {
       return <FaAlignJustify className="file-language-icon" aria-hidden="true" />
+    }
+
     return <FaTimesCircle className="file-language-icon" aria-hidden="true" />
   }
-
-  const practiceHref = `/student/${class_id}/practice`
-
-  const breadcrumbsItems = useMemo(() => {
-    if (isPractice) {
-      return hideClassSelectionCrumb
-        ? [
-          { label: 'Project Upload', to: `/student/${class_id}/upload` },
-          { label: 'Practice Select', to: `/student/${class_id}/practice` },
-          { label: 'Practice Upload' },
-        ]
-        : [
-          { label: 'Class Selection', to: '/student/classes' },
-          { label: 'Project Upload', to: `/student/${class_id}/upload` },
-          { label: 'Practice Select', to: `/student/${class_id}/practice` },
-          { label: 'Practice Upload' },
-        ]
-    }
-    return hideClassSelectionCrumb
-      ? [{ label: 'Project Upload' }]
-      : [{ label: 'Class Selection', to: '/student/classes' }, { label: 'Project Upload' }]
-  }, [class_id, hideClassSelectionCrumb, isPractice])
 
   const pageTitle = useMemo(() => {
     if (isPractice) {
@@ -625,11 +707,61 @@ const StudentUpload = () => {
         (practiceProblemId ? `Practice ${practiceProblemId}: Practice Problem ${practiceProblemId}` : '')
       )
     }
-    return project_name ? project_name.replace(/_/g, ' ') : ''
-  }, [isPractice, practiceProblemLabel, practiceProblemId, project_name])
+
+    if (project_name) return project_name.replace(/_/g, ' ')
+    if (moduleName) return `${moduleName} Main Assignment`
+
+    return ''
+  }, [isPractice, practiceProblemLabel, practiceProblemId, project_name, moduleName])
+
+  const breadcrumbsItems = useMemo(() => {
+    const titleLabel = pageTitle || (isPractice ? 'Practice Upload' : 'Project Upload')
+
+    if (hasModuleRoute && schoolId && moduleId) {
+      return [
+        { label: 'School Selection', to: '/student/schools' },
+        { label: 'Class Selection', to: `/student/school/${schoolId}/classes` },
+        { label: 'Module List', to: `/student/school/${schoolId}/class/${cid}/modules` },
+        {
+          label: 'Module Details',
+          to: `/student/school/${schoolId}/class/${cid}/module/${moduleId}`,
+        },
+        { label: titleLabel },
+      ]
+    }
+
+    if (isPractice) {
+      return hideClassSelectionCrumb
+        ? [
+          { label: 'Project Upload', to: `/student/${class_id}/upload` },
+          { label: 'Practice Select', to: `/student/${class_id}/practice` },
+          { label: titleLabel },
+        ]
+        : [
+          { label: 'Class Selection', to: '/student/classes' },
+          { label: 'Project Upload', to: `/student/${class_id}/upload` },
+          { label: 'Practice Select', to: `/student/${class_id}/practice` },
+          { label: titleLabel },
+        ]
+    }
+
+    return hideClassSelectionCrumb
+      ? [{ label: titleLabel }]
+      : [{ label: 'Class Selection', to: '/student/classes' }, { label: titleLabel }]
+  }, [
+    pageTitle,
+    hasModuleRoute,
+    schoolId,
+    moduleId,
+    cid,
+    isPractice,
+    hideClassSelectionCrumb,
+    class_id,
+  ])
 
   const formattedDue = useMemo(() => {
     if (!dueDate) return ''
+
     try {
       return new Date(dueDate).toLocaleString(undefined, {
         year: 'numeric',
@@ -643,13 +775,12 @@ const StudentUpload = () => {
     }
   }, [dueDate])
 
-  const resultsQs =
-    isPractice && practiceProblemId ? `?practice=1&practice_problem_id=${practiceProblemId}` : ''
-  const resultsHref = `/student/${class_id}/code/${project_id}${resultsQs}`
+  const resultsHref = getResultsHref(project_id)
 
   return (
     <div className="student-upload-page">
       <LoadingAnimation show={isLoading} message="Uploading..." />
+
       <Helmet>
         <title>MAAT</title>
       </Helmet>
@@ -663,32 +794,42 @@ const StudentUpload = () => {
         showReviewButton={false}
       />
 
-      <DirectoryBreadcrumbs
-        items={breadcrumbsItems}
-      />
+      <DirectoryBreadcrumbs items={breadcrumbsItems} />
+
+      <div className="pageTitle">Student Upload</div>
 
       <div className="student-upload-shell">
-        {/* LEFT: Upload panel */}
         <section className="panel panel-upload" aria-label="Upload Assignment">
           <header className="panel-header">
             {pageTitle ? (
               <>
                 <div className="panel-header__titleCol">
-                  <h1 className="panel-title panel-title--project">
-                    {pageTitle}
-                  </h1>
+                  <h1 className="panel-title panel-title--project">{pageTitle}</h1>
 
-                  <button
-                    type="button"
-                    className="assignment-download"
-                    onClick={() => downloadAssignment(project_id)}
-                    disabled={!project_id || project_id <= 0}
-                    aria-label="Download assignment description"
-                    title="Download assignment instructions"
-                  >
-                    <FaDownload aria-hidden="true" />
-                    <span>Instructions</span>
-                  </button>
+                  <div className="assignment-actions">
+                    <button
+                      type="button"
+                      className="assignment-download"
+                      onClick={() => downloadAssignment(project_id)}
+                      disabled={!project_id || project_id <= 0}
+                      aria-label="Download assignment description"
+                      title="Download assignment instructions"
+                    >
+                      <FaDownload aria-hidden="true" />
+                      <span>Instructions</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="presentation-download"
+                      onClick={() => undefined}
+                      aria-label="Download presentation"
+                      title="Presentation download coming soon"
+                    >
+                      <FaDownload aria-hidden="true" />
+                      <span>Presentation</span>
+                    </button>
+                  </div>
                 </div>
 
                 {formattedDue && (
@@ -703,6 +844,45 @@ const StudentUpload = () => {
               </div>
             )}
           </header>
+
+          <div className="testcase-summary-card" aria-label="Testcase pass summary">
+            <div
+              className="testcase-circle"
+              style={{ '--testcase-progress': testcaseProgress.pct } as React.CSSProperties}
+              role="img"
+              aria-label={`${testcaseProgress.passed} of ${testcaseProgress.total} testcases passing`}
+            >
+              <svg className="testcase-circle__svg" viewBox="0 0 112 112" aria-hidden="true">
+                <circle className="testcase-circle__track" cx="56" cy="56" r={testcaseProgress.radius} />
+                <circle
+                  className="testcase-circle__fill"
+                  cx="56"
+                  cy="56"
+                  r={testcaseProgress.radius}
+                  strokeDasharray={testcaseProgress.circumference}
+                  strokeDashoffset={testcaseProgress.strokeDashoffset}
+                />
+              </svg>
+              <div className="testcase-circle__center">
+                <span className="testcase-circle__count">
+                  {testcaseProgress.passed}/{testcaseProgress.total}
+                </span>
+                <span className="testcase-circle__label">passed</span>
+              </div>
+            </div>
+
+            <div className="testcase-summary-card__content">
+              <div className="testcase-summary-card__eyebrow">Testcase Progress</div>
+              <h2 className="testcase-summary-card__title">{testcaseProgress.pct}% passing</h2>
+              <p className="testcase-summary-card__text">
+                {!checkedPassedAll
+                  ? 'Checking testcase results...'
+                  : testcaseProgress.total > 0
+                    ? `${testcaseProgress.passed} out of ${testcaseProgress.total} testcases are currently passing.`
+                    : 'No testcase results are available yet. Upload a solution to see your progress.'}
+              </p>
+            </div>
+          </div>
 
           {inOfficeHours && (
             <div className="oh-banner" role="status" aria-live="polite">
@@ -723,11 +903,19 @@ const StudentUpload = () => {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault()
+
                   if (passedAllTests) return
+
                   const dropped = Array.from(e.dataTransfer.files || [])
                   const valid = dropped.filter((f) => isAllowedFileName(f.name))
 
                   if (dropped.length && valid.length === 0) {
+                    setError_Message('Only .py, .java, .c, or .rkt files are allowed.')
+                    setIsErrorMessageHidden(false)
+                    return
+                  }
+
+                  if (dropped.length !== valid.length) {
                     setError_Message('Only .py, .java, .c, or .rkt files are allowed.')
                     setIsErrorMessageHidden(false)
                     return
@@ -870,6 +1058,7 @@ const StudentUpload = () => {
                       </td>
                       {['15 mins', '45 mins', '2.25 hrs', '3 hrs', '4.5 hrs', '6 hrs'].map((time, idx) => {
                         const day = idx + 1
+
                         return (
                           <td key={time} className={`recharge-cell${day === activeDay ? ' active-day' : ''}`}>
                             {time}
@@ -881,7 +1070,6 @@ const StudentUpload = () => {
                 </table>
               </div>
             )}
-
           </form>
 
           <div className="below-upload">
@@ -932,149 +1120,7 @@ const StudentUpload = () => {
               </button>
             </form>
           )}
-
         </section>
-
-        {/* RIGHT: Energy + explanations panel */}
-        <aside className="panel panel-status" aria-label="Energy and FastPass status">
-          <div className="status-cards">
-            <div className="status-card">
-              <div className="status-card__top">
-                <div className="status-card__label">
-                  <FaBolt aria-hidden="true" /> Energy
-                </div>
-                <div className="status-card__value">
-                  {isPractice ? (
-                    <span className="big unlimited-pill" title="Practice submissions do not consume Energy">
-                      Unlimited
-                    </span>
-                  ) : (
-                    <>
-                      <span className="big">{baseCharge}</span>
-                      <span className="muted"> / 3</span>
-                    </>
-                  )}
-                </div>
-              </div>
-              {!isPractice && (
-                <div className="dots-row" aria-label="Energy charge dots">
-                  {[1, 2, 3].map((level) => (
-                    <div
-                      key={level}
-                      className={`dot ${baseCharge >= level ? 'filled' : ''} ${baseCharge === level - 1 ? 'breathing' : ''
-                        }`}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {isPractice && (
-                <div className="explain">
-                  <p>Practice submissions do not consume Energy. Submit as many times as you like.</p>
-                </div>
-              )}
-
-              {!isPractice && displayClock && (
-                <div className="timer-block" aria-live="polite">
-                  <div className="timer-title">Recharge countdown</div>
-                  <Countdown
-                    date={
-                      new Date(
-                        new Date().getTime() +
-                        HoursUntilRecharge * 3600000 +
-                        MinutesUntilRecharge * 60000 +
-                        SecondsUntilRecharge * 1000
-                      )
-                    }
-                    intervalDelay={1000}
-                    precision={2}
-                    renderer={({ hours, minutes, seconds, completed }) => (
-                      <div className={`timer-value ${completed ? 'completed' : ''}`}>
-                        {completed ? (
-                          <span>Full recharge ready</span>
-                        ) : (
-                          <span>
-                            {hours}h {minutes}m {seconds}s
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  />
-                  <div className="timer-subtle">When it hits zero, your energy refills to 3 all at once.</div>
-                </div>
-              )}
-
-              {!isPractice && (
-                <ul className="rules rules--compact">
-                  <li>
-                    <b>Energy</b> is consumed on submit unless you are in office hours.
-                  </li>
-                  <li>
-                    When the recharge timer finishes, Energy refills to <b>3</b> all at once.
-                  </li>
-                </ul>
-              )}
-            </div>
-
-            <div className="status-card">
-              <div className="status-card__top">
-                <div className="status-card__label">
-                  <FaGift aria-hidden="true" /> FastPass charges
-                </div>
-                <div className="status-card__value">
-                  <span className="big">{RewardCharge}</span>
-                </div>
-              </div>
-
-              <div className="dots-row" aria-label="FastPass charge dots">
-                {[1, 2, 3, 4, 5].map((level) => (
-                  <div key={level} className={`dot purple ${RewardCharge >= level ? 'filled' : ''}`} />
-                ))}
-              </div>
-
-              <div className="explain">
-                <p>
-                  FastPass lets you submit even when Energy is 0. Tap <b>Use FastPass</b> on the left to spend
-                  one.
-                </p>
-                <p>
-                  You can earn FastPass by attending office hours, and by solving practice problems.
-                </p>
-              </div>
-            </div>
-
-            <div className="status-card">
-              <div className="status-card__top">
-                <div className="status-card__label">
-                  <FaFlask aria-hidden="true" /> Practice Completed
-                </div>
-                <div className="status-card__value">
-                  <span className="big">{practiceProgress.earned}</span>
-                  <span className="muted"> / {practiceProgress.total}</span>
-                </div>
-              </div>
-
-              <div className="progress">
-                <div className="progress-bar" role="progressbar" aria-valuenow={practiceProgress.pct} aria-valuemin={0} aria-valuemax={100}>
-                  <div className="progress-bar__fill" style={{ width: `${practiceProgress.pct}%` }} />
-                </div>
-                <div className="progress-subtle">
-                  Each practice problem you solve earns 1 bonus FastPass Charge.
-                </div>
-              </div>
-
-              <div className="practice-row">
-                <div className="practice-metrics">
-                  <div className="practice-link">
-                    <Link to={practiceHref} className="linklike">
-                      Practice Problems <FaExternalLinkAlt aria-hidden="true" />
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </aside>
       </div>
     </div>
   )

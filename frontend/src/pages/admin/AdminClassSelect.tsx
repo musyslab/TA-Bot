@@ -1,10 +1,9 @@
-import { Component } from 'react'
+import { Component, KeyboardEvent } from 'react'
 import axios from 'axios'
-import { Link } from 'react-router-dom'
+import { Link, NavigateFunction, useNavigate, useParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet'
 import MenuComponent from '../components/MenuComponent'
-import codeimg from '../../images/codeex.png'
-import '../../styling/Classes.scss'
+import '../../styling/Selection.scss'
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
 
 interface ClassObject {
@@ -25,10 +24,15 @@ interface ClassState {
     isLoading: boolean
 }
 
+interface AdminClassSelectProps {
+    schoolIdFromUrl: string
+    navigate: NavigateFunction
+}
+
 const ADMIN_SELECTED_SCHOOL_STORAGE_KEY = "ADMIN_SELECTED_SCHOOL"
 
-class AdminClassSelect extends Component<{}, ClassState> {
-    constructor(props: {}) {
+class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState> {
+    constructor(props: AdminClassSelectProps) {
         super(props)
         this.state = {
             classes: [],
@@ -40,9 +44,9 @@ class AdminClassSelect extends Component<{}, ClassState> {
     }
 
     componentDidMount() {
-        const storedSchool = this.getStoredSelectedSchool()
+        const schoolId = Number(this.props.schoolIdFromUrl)
 
-        if (!storedSchool) {
+        if (!schoolId || Number.isNaN(schoolId)) {
             this.setState({
                 classes: [],
                 selectedSchoolId: -1,
@@ -53,7 +57,33 @@ class AdminClassSelect extends Component<{}, ClassState> {
             return
         }
 
-        this.loadClassesForSchool(storedSchool)
+        const storedSchool = this.getStoredSelectedSchool()
+
+        if (storedSchool && storedSchool.Id === schoolId) {
+            this.loadClassesForSchool(storedSchool)
+            return
+        }
+
+        this.loadSchoolAndClasses(schoolId)
+    }
+
+    componentDidUpdate(prevProps: AdminClassSelectProps) {
+        if (prevProps.schoolIdFromUrl === this.props.schoolIdFromUrl) return
+
+        const schoolId = Number(this.props.schoolIdFromUrl)
+
+        if (!schoolId || Number.isNaN(schoolId)) {
+            this.setState({
+                classes: [],
+                selectedSchoolId: -1,
+                selectedSchoolName: "",
+                errorMessage: "Please select a school first.",
+                isLoading: false
+            })
+            return
+        }
+
+        this.loadSchoolAndClasses(schoolId)
     }
 
     getStoredSelectedSchool = (): SchoolObject | null => {
@@ -71,6 +101,53 @@ class AdminClassSelect extends Component<{}, ClassState> {
         } catch {
             return null
         }
+    }
+
+    loadSchoolAndClasses = (schoolId: number) => {
+        this.setState({
+            classes: [],
+            selectedSchoolId: schoolId,
+            selectedSchoolName: "",
+            errorMessage: "",
+            isLoading: true
+        })
+
+        axios
+            .get(import.meta.env.VITE_API_URL + `/schools/all`)
+            .then(res => {
+                const schools: SchoolObject[] = res.data.map(
+                    (obj: { id: number; name: string }) => ({
+                        Id: obj.id,
+                        Name: obj.name
+                    })
+                )
+
+                const matchingSchool = schools.find((schoolObj: SchoolObject) => schoolObj.Id === schoolId)
+
+                if (!matchingSchool) {
+                    this.setState({
+                        classes: [],
+                        selectedSchoolId: schoolId,
+                        selectedSchoolName: "",
+                        errorMessage: "The selected school could not be found.",
+                        isLoading: false
+                    })
+                    return
+                }
+
+                localStorage.setItem(ADMIN_SELECTED_SCHOOL_STORAGE_KEY, JSON.stringify(matchingSchool))
+                this.loadClassesForSchool(matchingSchool)
+            })
+            .catch(err => {
+                console.error(err)
+                this.setState({
+                    classes: [],
+                    selectedSchoolId: schoolId,
+                    selectedSchoolName: "",
+                    errorMessage: "Could not load the selected school.",
+                    isLoading: false
+                })
+            })
     }
 
     loadClassesForSchool = (schoolObj: SchoolObject) => {
@@ -120,12 +197,23 @@ class AdminClassSelect extends Component<{}, ClassState> {
             })
     }
 
+    handleClassCardKeyDown = (event: KeyboardEvent<HTMLElement>, classObj: ClassObject) => {
+        if (event.key !== "Enter" && event.key !== " ") return
+
+        event.preventDefault()
+        this.props.navigate(this.getClassModulesUrl(classObj.Id))
+    }
+
+    getClassModulesUrl = (classId: number): string => {
+        return `/admin/school/${this.state.selectedSchoolId}/class/${classId}/modules`
+    }
+
     render() {
         const { classes, selectedSchoolId, selectedSchoolName, errorMessage, isLoading } = this.state
         const hasSelectedSchool = selectedSchoolId !== -1
 
         return (
-            <div className="admin-landing-root">
+            <div className="projects-page admin-landing-root">
                 <Helmet>
                     <title>[Admin] MAAT</title>
                 </Helmet>
@@ -148,55 +236,81 @@ class AdminClassSelect extends Component<{}, ClassState> {
                 />
 
                 <div className="pageTitle">
-                    {hasSelectedSchool ? `Admin · ${selectedSchoolName}` : "Admin Class Selection"}
+                    {hasSelectedSchool && selectedSchoolName ? `Admin · ${selectedSchoolName}` : "Admin Class Selection"}
                 </div>
 
-                <div className="main-grid">
-                    <div className="container">
-                        {errorMessage ? <div className="pageMessage">{errorMessage}</div> : null}
+                <p className="projects-subtitle">
+                    Select a class to view its modules.
+                </p>
 
-                        {!hasSelectedSchool ? (
-                            <Link
-                                to="/admin/schools"
-                                className="secondaryButton"
-                            >
-                                Go to School Selection
-                            </Link>
-                        ) : null}
-
-                        {isLoading && hasSelectedSchool ? (
-                            <div className="emptyState">Loading classes...</div>
-                        ) : null}
-
-                        {!isLoading && hasSelectedSchool ? (
-                            <div className="classList">
-                                {classes.map((classObj: ClassObject) => (
-                                    <Link
-                                        key={classObj.Id}
-                                        to={`/admin/${classObj.Id}/modules`}
-                                        className="clickableRow"
-                                    >
-                                        <div>
-                                            <img src={codeimg} alt="Code" />
-                                        </div>
-                                        <div>
-                                            <h1 className="title">{classObj.Name}</h1>
-                                        </div>
-                                    </Link>
-                                ))}
-                            </div>
-                        ) : null}
-
-                        {!isLoading && hasSelectedSchool && classes.length === 0 && !errorMessage ? (
-                            <div className="emptyState">
-                                No classes are currently available for this school.
-                            </div>
-                        ) : null}
+                <section className="module-list-shell" aria-label="Class list">
+                    <div className="module-list-header-row">
+                        <div>
+                            <h2>{selectedSchoolName} Classes</h2>
+                        </div>
                     </div>
-                </div>
+
+                    {errorMessage ? <div className="pageMessage">{errorMessage}</div> : null}
+
+                    {!hasSelectedSchool ? (
+                        <Link
+                            to="/admin/schools"
+                            className="project-action project-action-secondary"
+                        >
+                            Go to School Selection
+                        </Link>
+                    ) : null}
+
+                    {isLoading && hasSelectedSchool ? (
+                        <div className="empty-projects">Loading classes...</div>
+                    ) : null}
+
+                    {!isLoading && hasSelectedSchool && classes.length > 0 ? (
+                        <div className="module-list-grid">
+                            {classes.map((classObj: ClassObject) => (
+                                <article
+                                    className="module-list-card"
+                                    key={classObj.Id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => this.props.navigate(this.getClassModulesUrl(classObj.Id))}
+                                    onKeyDown={(event) => this.handleClassCardKeyDown(event, classObj)}
+                                    aria-label={`Open ${classObj.Name}`}
+                                >
+                                    <div className="module-list-card-main">
+                                        <div className="module-list-card-title-row">
+                                            <h3>{classObj.Name}</h3>
+                                        </div>
+                                    </div>
+
+                                    <div className="module-list-card-actions">
+                                        <Link
+                                            to={this.getClassModulesUrl(classObj.Id)}
+                                            className="project-action project-action-primary"
+                                            onClick={(event) => event.stopPropagation()}
+                                        >
+                                            Open Class
+                                        </Link>
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    ) : null}
+
+                    {!isLoading && hasSelectedSchool && classes.length === 0 && !errorMessage ? (
+                        <div className="empty-projects">
+                            No classes are currently available for this school.
+                        </div>
+                    ) : null}
+                </section>
             </div>
         )
     }
 }
 
-export default AdminClassSelect
+export default function AdminClassSelect() {
+    const navigate = useNavigate()
+    const { school_id } = useParams<{ school_id: string }>()
+
+    return <AdminClassSelectInner navigate={navigate} schoolIdFromUrl={school_id || ""} />
+}

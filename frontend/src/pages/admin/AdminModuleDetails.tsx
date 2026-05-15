@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import DatePicker from "react-datepicker";
@@ -39,6 +38,7 @@ interface ProjectObject {
     PracticeProblemsEnabled?: boolean;
     HasSolutionProgram?: boolean;
     HasTestcases?: boolean;
+    TestcaseCount?: number;
 }
 
 type PracticeProblemRow = {
@@ -49,11 +49,13 @@ type PracticeProblemRow = {
     submissions?: number;
     hasSolutionProgram?: boolean;
     hasTestcases?: boolean;
+    testcaseCount?: number;
 };
 
 type ProjectSetupStatus = {
     hasSolutionProgram: boolean;
     hasTestcases: boolean;
+    testcaseCount: number;
 };
 
 type ModuleOverviewResponse = {
@@ -232,7 +234,14 @@ function DateTimeField({
 }
 
 export default function AdminModuleDetails() {
-    const { class_id, id, module_id } = useParams<{ class_id: string; id?: string; module_id: string }>();
+    const { school_id, class_id, id, module_id } = useParams<{
+        school_id: string;
+        class_id: string;
+        id?: string;
+        module_id: string;
+    }>();
+
+    const schoolId = school_id || "";
     const classId = class_id || "";
     const routeProjectId = Number(id || 0);
     const routeModuleId = Number(module_id || 0);
@@ -303,15 +312,19 @@ export default function AdminModuleDetails() {
                 ),
             ]);
 
+            const testcaseCount = parseTestcasePayloadCount(testcaseRes.data);
+
             return {
                 hasSolutionProgram: Array.isArray(solutionRes.data) && solutionRes.data.length > 0,
-                hasTestcases: parseTestcasePayloadCount(testcaseRes.data) > 0,
+                hasTestcases: testcaseCount > 0,
+                testcaseCount,
             };
         } catch (err) {
             console.log(err);
             return {
                 hasSolutionProgram: false,
                 hasTestcases: false,
+                testcaseCount: 0,
             };
         }
     };
@@ -373,11 +386,13 @@ export default function AdminModuleDetails() {
                         ...nextProject,
                         HasSolutionProgram: mainStatus.hasSolutionProgram,
                         HasTestcases: mainStatus.hasTestcases,
+                        TestcaseCount: mainStatus.testcaseCount,
                     },
                     rows.map((pp, index) => ({
                         ...pp,
                         hasSolutionProgram: practiceStatuses[index]?.hasSolutionProgram || false,
                         hasTestcases: practiceStatuses[index]?.hasTestcases || false,
+                        testcaseCount: practiceStatuses[index]?.testcaseCount || 0,
                     }))
                 );
                 setLoading(false);
@@ -628,7 +643,13 @@ export default function AdminModuleDetails() {
         }
     };
 
-    const renderSetupIndicators = (status: ProjectSetupStatus) => {
+    const formatTestcaseCount = (count: number): string => (
+        `${count} testcase${count === 1 ? "" : "s"}`
+    );
+
+    const renderSetupIndicators = (status: ProjectSetupStatus, manageUrl: string) => {
+        const testcasesReady = status.testcaseCount > 1;
+
         const items = [
             {
                 key: "solution",
@@ -636,33 +657,52 @@ export default function AdminModuleDetails() {
                 complete: status.hasSolutionProgram,
                 completeText: "Ready",
                 missingText: "Missing",
+                countBadgeText: undefined,
+                to: `${manageUrl}?step=files`,
+                icon: status.hasSolutionProgram ? <FaCheckCircle /> : <FaExclamationCircle />,
+                actionText: "Open Menu",
             },
             {
                 key: "testcases",
                 label: "Test Cases",
-                complete: status.hasTestcases,
+                complete: testcasesReady,
                 completeText: "Ready",
                 missingText: "Missing",
+                countBadgeText: formatTestcaseCount(status.testcaseCount),
+                to: `${manageUrl}?step=testcases`,
+                icon: testcasesReady ? <FaCheckCircle /> : <FaExclamationCircle />,
+                actionText: "Open Menu",
             },
         ];
 
         return (
             <div className="project-setup-indicators" aria-label="Project setup status">
                 {items.map((item) => (
-                    <div
+                    <Link
                         key={item.key}
-                        className={`setup-indicator-card${item.complete ? " is-complete" : " is-missing"}`}
+                        className={`setup-indicator-card setup-indicator-link is-${item.key}${item.complete ? " is-complete" : " is-missing"}`}
+                        to={item.to}
                     >
                         <span className="setup-indicator-icon" aria-hidden="true">
-                            {item.complete ? <FaCheckCircle /> : <FaExclamationCircle />}
+                            {item.icon}
                         </span>
                         <span className="setup-indicator-copy">
-                            <span className="setup-indicator-label">{item.label}</span>
+                            <span className="setup-indicator-label-row">
+                                <span className="setup-indicator-label">{item.label}</span>
+                                {item.countBadgeText && (
+                                    <span className="setup-indicator-count-badge">
+                                        {item.countBadgeText}
+                                    </span>
+                                )}
+                            </span>
                             <span className="setup-indicator-status">
                                 {item.complete ? item.completeText : item.missingText}
                             </span>
                         </span>
-                    </div>
+                        <span className="setup-indicator-action" aria-hidden="true">
+                            {item.actionText}
+                        </span>
+                    </Link>
                 ))}
             </div>
         );
@@ -707,9 +747,9 @@ export default function AdminModuleDetails() {
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: "School Selection", to: "/admin/classes" },
-                        { label: "Class Selection", to: "/admin/classes" },
-                        { label: "Module Calendar", to: `/admin/${classId}/modules` },
+                        { label: "School Selection", to: "/admin/schools" },
+                        { label: "Class Selection", to: `/admin/school/${schoolId}/classes` },
+                        { label: "Module List", to: `/admin/school/${schoolId}/class/${classId}/modules` },
                         { label: "Module Details" },
                     ]}
                 />
@@ -728,7 +768,7 @@ export default function AdminModuleDetails() {
         || moduleEndDraft !== formatDateTimeLocal(module.End);
 
     const mainProjectNameChanged = mainProjectNameDraft.trim() !== project.Name.trim();
-    const moduleBaseUrl = `/admin/${classId}/module/${module.Id}`;
+    const moduleBaseUrl = `/admin/school/${schoolId}/class/${classId}/module/${module.Id}`;
     const projectBaseUrl = `${moduleBaseUrl}/project/${project.Id}`;
 
     return (
@@ -748,14 +788,14 @@ export default function AdminModuleDetails() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: "School Selection", to: "/admin/classes" },
-                    { label: "Class Selection", to: "/admin/classes" },
-                    { label: "Module Calendar", to: `/admin/${classId}/modules` },
-                    { label: module.Name },
+                    { label: "School Selection", to: "/admin/schools" },
+                    { label: "Class Selection", to: `/admin/school/${schoolId}/classes` },
+                    { label: "Module List", to: `/admin/school/${schoolId}/class/${classId}/modules` },
+                    { label: "Module Details" },
                 ]}
             />
 
-            <div className="pageTitle">Module Details</div>
+            <div className="pageTitle">Admin Module Details</div>
 
             <div className={`project-detail-hero${editingModule ? " is-editing-module" : ""}`}>
                 <div className="project-detail-hero-copy">
@@ -856,7 +896,6 @@ export default function AdminModuleDetails() {
                     <div className="work-section-header">
                         <div>
                             <h2>Main Project</h2>
-                            <p>Edit the project name here. File and testcase setup stays in Project Manage.</p>
                         </div>
                     </div>
 
@@ -885,7 +924,7 @@ export default function AdminModuleDetails() {
                                                     }}
                                                 >
                                                     <FaEdit aria-hidden="true" />
-                                                    Edit
+                                                    Edit Name
                                                 </button>
                                             </div>
                                         ) : (
@@ -934,23 +973,16 @@ export default function AdminModuleDetails() {
                             {renderSetupIndicators({
                                 hasSolutionProgram: !!project.HasSolutionProgram,
                                 hasTestcases: !!project.HasTestcases,
-                            })}
+                                testcaseCount: project.TestcaseCount || 0,
+                            }, `${projectBaseUrl}/manage`)}
 
-                            <div className="project-tile-footer">
+                            <div className="project-tile-footer project-tile-footer-single">
                                 <Link
-                                    className="project-action project-action-primary"
+                                    className="project-action project-action-primary review-submissions-action"
                                     to={`${projectBaseUrl}/submissions`}
                                 >
                                     <FaEye aria-hidden="true" />
-                                    Review Submissions
-                                </Link>
-
-                                <Link
-                                    className="project-action project-action-secondary"
-                                    to={`${projectBaseUrl}/manage`}
-                                >
-                                    <FaEdit aria-hidden="true" />
-                                    Manage Files and Tests
+                                    Review Student Submissions
                                 </Link>
                             </div>
                         </article>
@@ -961,9 +993,6 @@ export default function AdminModuleDetails() {
                     <div className="work-section-header">
                         <div>
                             <h2>Practice Problems</h2>
-                            <p>
-                                {enabledPracticeCount} enabled, {totalPracticeSubmissions} total practice submission{totalPracticeSubmissions === 1 ? "" : "s"}.
-                            </p>
                         </div>
 
                         <Link
@@ -1020,7 +1049,7 @@ export default function AdminModuleDetails() {
                                                                 onClick={() => beginPracticeNameEdit(pp.id, pp.name)}
                                                             >
                                                                 <FaEdit aria-hidden="true" />
-                                                                Edit
+                                                                Edit Name
                                                             </button>
                                                         </div>
                                                     ) : (
@@ -1075,23 +1104,16 @@ export default function AdminModuleDetails() {
                                         {renderSetupIndicators({
                                             hasSolutionProgram: !!pp.hasSolutionProgram,
                                             hasTestcases: !!pp.hasTestcases,
-                                        })}
+                                            testcaseCount: pp.testcaseCount || 0,
+                                        }, `${projectBaseUrl}/practice/${pp.id}/manage`)}
 
-                                        <div className="project-tile-footer">
+                                        <div className="project-tile-footer project-tile-footer-single">
                                             <Link
-                                                className="project-action project-action-primary"
+                                                className="project-action project-action-primary review-submissions-action"
                                                 to={`${projectBaseUrl}/practice/${pp.id}/submissions`}
                                             >
                                                 <FaEye aria-hidden="true" />
-                                                Review
-                                            </Link>
-
-                                            <Link
-                                                className="project-action project-action-secondary"
-                                                to={`${projectBaseUrl}/practice/${pp.id}/manage`}
-                                            >
-                                                <FaEdit aria-hidden="true" />
-                                                Manage Files and Tests
+                                                Review Student Submissions
                                             </Link>
                                         </div>
                                     </article>

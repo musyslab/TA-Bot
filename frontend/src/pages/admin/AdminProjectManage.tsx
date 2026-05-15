@@ -1,11 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { eachDayOfInterval } from 'date-fns'
 import axios from 'axios'
-import DatePicker from 'react-datepicker'
-import 'react-datepicker/dist/react-datepicker.css'
 import '../../styling/AdminProjectManage.scss'
 import '../../styling/FileUploadCommon.scss'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
@@ -51,18 +49,22 @@ type AdminProjectManageProps = {
 
 const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) => {
 
-    const { id, class_id, module_id, practice_problem_id } = useParams()
+    const { id, school_id, class_id, module_id, practice_problem_id } = useParams()
 
+    const [searchParams] = useSearchParams()
+
+    const schoolId = Number(school_id)
     const project_id = Number(id)
     const classId = Number(class_id)
     const moduleId = Number(module_id)
 
-    if (Number.isNaN(project_id) || Number.isNaN(classId) || Number.isNaN(moduleId)) {
-        return <div>Error: Missing or invalid class, module, or project ID.</div>
+    if (Number.isNaN(project_id) || Number.isNaN(schoolId) || Number.isNaN(classId) || Number.isNaN(moduleId)) {
+        return <div>Error: Missing or invalid school, class, module, or project ID.</div>
     }
 
-    const moduleOverviewUrl = `/admin/${classId}/module/${moduleId}/overview`
-    const projectBaseUrl = `/admin/${classId}/module/${moduleId}/project/${project_id}`
+    const moduleListUrl = `/admin/school/${schoolId}/class/${classId}/modules`
+    const moduleOverviewUrl = `/admin/school/${schoolId}/class/${classId}/module/${moduleId}/overview`
+    const projectBaseUrl = `/admin/school/${schoolId}/class/${classId}/module/${moduleId}/project/${project_id}`
 
     const [testcases, setTestcases] = useState<Array<Testcase>>([])
     const [ProjectName, setProjectName] = useState<string>('')
@@ -105,6 +107,13 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const [mainJavaFileName, setMainJavaFileName] = useState<string>('')
     const [practiceProblemNumber, setPracticeProblemNumber] = useState<number | null>(null)
 
+    useEffect(() => {
+        const requestedStep = searchParams.get('step')
+
+        if (requestedStep === 'testcases' || requestedStep === 'files') {
+            setActiveStep(requestedStep)
+        }
+    }, [searchParams])
 
     useEffect(() => {
         document.body.style.overflow = ''
@@ -138,12 +147,15 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         SolutionFiles.length > 0 || serverSolutionFileNames.length > 0
     const hasTestcases = testcases.some((tc) => tc.id > 0)
 
+    const filesNeedSetup = !hasSolution
+    const testcasesNeedSetup = !hasTestcases
+
     const pageTitleText =
         ProjectName.trim()
-            || serverProjectNameSnapshot.trim()
-            || (isPractice
-                ? `Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
-                : 'Project')
+        || serverProjectNameSnapshot.trim()
+        || (isPractice
+            ? `Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
+            : 'Project')
 
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i
     const SOLUTION_ALLOWED_RE = /\.(py|java|c|h|rkt|scm)$/i
@@ -911,7 +923,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             const newId = res.data
 
             window.alert('Your project has been created! Next, open the "Test Cases" tab to add test cases.')
-            window.location.href = `/admin/${classId}/module/${moduleId}/project/${newId}/manage`
+            window.location.href = `/admin/school/${schoolId}/class/${classId}/module/${moduleId}/project/${newId}/manage`
         } catch (error) {
             console.log(error)
         }
@@ -1493,12 +1505,12 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: 'School Selection', to: '/admin/classes' },
-                    { label: 'Class Selection', to: '/admin/classes' },
-                    { label: 'Module Calendar', to: `/admin/${classId}/modules` },
+                    { label: 'School Selection', to: '/admin/schools' },
+                    { label: 'Class Selection', to: `/admin/school/${schoolId}/classes` },
+                    { label: 'Module List', to: moduleListUrl },
                     {
                         label: 'Module Details',
-                        to: project_id > 0 ? moduleOverviewUrl : `/admin/${classId}/modules`,
+                        to: project_id > 0 ? moduleOverviewUrl : moduleListUrl,
                     },
                     { label: pageTitleText },
                 ]}
@@ -1509,48 +1521,55 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                     <div className={`admin-project-config-container${modalOpen ? ' blurred' : ''}`}>
                         <div className="pageTitle">{pageTitleText}</div>
 
-                        <div className="step-menu" aria-label="Project manage steps">
-                            <button
-                                type="button"
-                                className={`step-menu-item ${activeStep === 'files' ? 'active' : ''} ${hasSolution ? 'complete' : 'missing'}`}
-                                onClick={() => setActiveStep('files')}
-                            >
-                                <span className="step-number">1</span>
-                                <span className="step-copy">
-                                    <span className="step-title">Files</span>
-                                    <span className="step-description">Upload the solution file and description file.</span>
-                                </span>
-                                <span className="step-status-pill">
-                                    {hasSolution ? 'Solution ready' : 'Solution missing'}
-                                </span>
-                            </button>
-                            <button
-                                type="button"
-                                className={`step-menu-item ${activeStep === 'testcases' ? 'active' : ''} ${hasTestcases ? 'complete' : 'missing'}`}
-                                onClick={() => setActiveStep('testcases')}
-                                title={!hasSolution ? 'Upload solution file(s) first, then create or upload test cases.' : undefined}
-                            >
-                                <span className="step-number">2</span>
-                                <span className="step-copy">
-                                    <span className="step-title">Test Cases</span>
-                                    <span className="step-description">Create test cases or import them from JSON.</span>
-                                </span>
-                                <span className="step-status-pill">
-                                    {hasTestcases ? 'Tests ready' : 'Tests missing'}
-                                </span>
-                            </button>
+                        <div className="step-menu-shell">
+                            <div className="step-menu" role="tablist" aria-label="Project management pages">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={activeStep === 'files'}
+                                    aria-controls="project-files-panel"
+                                    className={`step-menu-item ${activeStep === 'files' ? 'active' : ''}${filesNeedSetup ? ' needs-setup' : ''}`}
+                                    onClick={() => setActiveStep('files')}
+                                >
+                                    <span className="step-title">
+                                        Files
+                                        {filesNeedSetup && <span className="step-needs-indicator">Needs setup</span>}
+                                    </span>
+                                    <span className="step-state">{activeStep === 'files' ? 'Current page' : 'Go to page'}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={activeStep === 'testcases'}
+                                    aria-controls="project-testcases-panel"
+                                    className={`step-menu-item ${activeStep === 'testcases' ? 'active' : ''}${testcasesNeedSetup ? ' needs-setup' : ''}`}
+                                    onClick={() => setActiveStep('testcases')}
+                                    title={
+                                        !hasSolution
+                                            ? 'Upload solution file(s) first, then create or upload test cases.'
+                                            : testcasesNeedSetup
+                                                ? 'Create or upload test cases to finish setup.'
+                                                : undefined
+                                    }
+                                >
+                                    <span className="step-title">
+                                        Test Cases
+                                        {testcasesNeedSetup && <span className="step-needs-indicator">Needs setup</span>}
+                                    </span>
+                                    <span className="step-state">{activeStep === 'testcases' ? 'Current page' : 'Go to page'}</span>
+                                </button>
+                            </div>
                         </div>
 
                         <div className="step-content">
                             {activeStep === 'files' && (
-                                <div className={`pane-project-settings wizard-step-${activeStep}`}>
+                                <div
+                                    id="project-files-panel"
+                                    role="tabpanel"
+                                    className={`pane-project-settings wizard-step-${activeStep}`}
+                                >
                                     <form className="form-project-settings">
                                         <div className="segment-main">
-                                            <div className="form-group language-group">
-                                                <label>Detected Language</label>
-                                                <div className="detected-language">{languageLabel}</div>
-                                            </div>
-
                                             {hasUnsavedProjectChanges && (
                                                 <div className="unsaved-project-warning" role="status" aria-live="polite">
                                                     You have unsaved file or testcase settings. They will not be saved until you click "{SubmitButton}".
@@ -1920,7 +1939,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                             )}
 
                             {activeStep === 'testcases' && (
-                                <div className="pane-testcases">
+                                <div id="project-testcases-panel" role="tabpanel" className="pane-testcases">
                                     <div className="testcase-management-group">
                                         {!hasSolution ? (
                                             <div style={{ padding: 16 }}>

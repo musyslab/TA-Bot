@@ -1,10 +1,11 @@
-import { Component, KeyboardEvent } from 'react'
-import axios from 'axios'
-import { NavigateFunction, useNavigate } from 'react-router-dom'
-import { Helmet } from 'react-helmet'
-import MenuComponent from '../components/MenuComponent'
-import '../../styling/Selection.scss'
+import { Component, KeyboardEvent } from "react"
+import axios from "axios"
+import { NavigateFunction, useNavigate } from "react-router-dom"
+import { Helmet } from "react-helmet"
+
+import MenuComponent from "../components/MenuComponent"
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
+import "../../styling/Selection.scss"
 
 interface SchoolObject {
     Id: number
@@ -16,14 +17,14 @@ interface SchoolState {
     errorMessage: string
 }
 
-const ADMIN_SELECTED_SCHOOL_STORAGE_KEY = "ADMIN_SELECTED_SCHOOL"
-
-interface AdminSchoolSelectProps {
+interface StudentSchoolSelectProps {
     navigate: NavigateFunction
 }
 
-class AdminSchoolSelectInner extends Component<AdminSchoolSelectProps, SchoolState> {
-    constructor(props: AdminSchoolSelectProps) {
+const STUDENT_SELECTED_SCHOOL_STORAGE_KEY = "STUDENT_SELECTED_SCHOOL"
+
+class StudentSchoolSelectInner extends Component<StudentSchoolSelectProps, SchoolState> {
+    constructor(props: StudentSchoolSelectProps) {
         super(props)
         this.state = {
             schools: [],
@@ -55,8 +56,8 @@ class AdminSchoolSelectInner extends Component<AdminSchoolSelectProps, SchoolSta
     }
 
     handleSchoolSelect = (schoolObj: SchoolObject) => {
-        localStorage.setItem(ADMIN_SELECTED_SCHOOL_STORAGE_KEY, JSON.stringify(schoolObj))
-        this.props.navigate(`/admin/school/${schoolObj.Id}/classes`)
+        localStorage.setItem(STUDENT_SELECTED_SCHOOL_STORAGE_KEY, JSON.stringify(schoolObj))
+        this.props.navigate(`/student/school/${schoolObj.Id}/classes`)
     }
 
     handleSchoolCardKeyDown = (event: KeyboardEvent<HTMLElement>, schoolObj: SchoolObject) => {
@@ -72,17 +73,17 @@ class AdminSchoolSelectInner extends Component<AdminSchoolSelectProps, SchoolSta
         return (
             <div className="projects-page admin-landing-root">
                 <Helmet>
-                    <title>[Admin] MAAT</title>
+                    <title>MAAT</title>
                 </Helmet>
 
                 <MenuComponent
-                    showUpload={false}
-                    showAdminUpload={true}
+                    showUpload={true}
+                    showAdminUpload={false}
                     showHelp={false}
                     showCreate={false}
                     showLast={false}
                     showReviewButton={false}
-                ></MenuComponent>
+                />
 
                 <DirectoryBreadcrumbs
                     items={[
@@ -91,10 +92,10 @@ class AdminSchoolSelectInner extends Component<AdminSchoolSelectProps, SchoolSta
                     trailingSeparator={true}
                 />
 
-                <div className="pageTitle">Admin School Selection</div>
+                <div className="pageTitle">Student School Selection</div>
 
                 <p className="projects-subtitle">
-                    Select a school to view its classes.
+                    Select your school to view your classes.
                 </p>
 
                 <section className="module-list-shell" aria-label="School list">
@@ -150,7 +151,7 @@ class AdminSchoolSelectInner extends Component<AdminSchoolSelectProps, SchoolSta
     }
 }
 
-export default function AdminSchoolSelect() {
+export default function StudentSchoolSelect() {
     const navigate = useNavigate()
-    return <AdminSchoolSelectInner navigate={navigate} />
+    return <StudentSchoolSelectInner navigate={navigate} />
 }

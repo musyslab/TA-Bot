@@ -24,6 +24,8 @@ class MenuComponent extends Component<MenuComponentProps> {
     handleLogout = () => {
         localStorage.removeItem("AUTOTA_AUTH_TOKEN");
         localStorage.removeItem("AUTOTA_USER_ROLE");
+        localStorage.removeItem("ADMIN_SELECTED_SCHOOL");
+        localStorage.removeItem("STUDENT_SELECTED_SCHOOL");
         window.location.replace("/login");
     };
 
@@ -80,12 +82,14 @@ class MenuComponent extends Component<MenuComponentProps> {
             .catch(() => {
                 localStorage.removeItem("AUTOTA_AUTH_TOKEN");
                 localStorage.removeItem("AUTOTA_USER_ROLE");
+                localStorage.removeItem("ADMIN_SELECTED_SCHOOL");
+                localStorage.removeItem("STUDENT_SELECTED_SCHOOL");
                 window.location.replace("/login");
             });
     };
 
     getClassIdFromUrl(): string | null {
-        const match = window.location.href.match(/\/student\/(\d+)/);
+        const match = window.location.pathname.match(/^\/student\/(\d+)(?:\/|$)/);
         return match ? match[1] : null;
     }
 

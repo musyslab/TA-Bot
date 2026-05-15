@@ -1,14 +1,22 @@
-import { CSSProperties, useEffect, useMemo, useState } from "react";
+import { CSSProperties, KeyboardEvent, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { eachDayOfInterval } from "date-fns";
 import { Helmet } from "react-helmet";
 import { useNavigate, useParams } from "react-router-dom";
-import { FaChevronLeft, FaChevronRight, FaPlusCircle, FaSave, FaTimes } from "react-icons/fa";
+import {
+    FaCalendarAlt,
+    FaChevronLeft,
+    FaChevronRight,
+    FaListUl,
+    FaPlusCircle,
+    FaSave,
+    FaTimes,
+} from "react-icons/fa";
 
 import MenuComponent from "../components/MenuComponent";
-import "../../styling/AdminModuleCalendar.scss";
+import "../../styling/ModuleList.scss";
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs";
 
 interface ModuleObject {
@@ -223,10 +231,11 @@ function DateTimeField({
     );
 }
 
-export default function AdminModuleCalendar() {
-    const { id } = useParams<{ id: string }>();
+export default function AdminModuleList() {
+    const { school_id, class_id, id } = useParams<{ school_id: string; class_id: string; id: string }>();
     const navigate = useNavigate();
-    const classId = id || "";
+    const schoolId = school_id || "";
+    const classId = class_id || id || "";
 
     const [modules, setModules] = useState<ModuleObject[]>([]);
     const [calendarDate, setCalendarDate] = useState<Date>(new Date());
@@ -236,6 +245,7 @@ export default function AdminModuleCalendar() {
     const [newModuleEnd, setNewModuleEnd] = useState(formatDateTimeLocal(defaultModuleEnd()));
     const [savingModule, setSavingModule] = useState(false);
     const [overlapError, setOverlapError] = useState(false);
+    const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
 
     const parseDate = (value: string): Date | null => {
         const d = new Date(value);
@@ -286,6 +296,37 @@ export default function AdminModuleCalendar() {
             month: "short",
             day: "numeric",
         }).format(d);
+    };
+
+    const formatDate12h = (value: string): string => {
+        const d = parseDate(value);
+        if (!d) return value;
+
+        return new Intl.DateTimeFormat("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+        }).format(d);
+    };
+
+    const getModuleStatus = (module: ModuleObject): "active" | "upcoming" | "ended" => {
+        const startMs = Date.parse(module.Start);
+        const endMs = Date.parse(module.End);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs)) return "upcoming";
+
+        const now = Date.now();
+        if (now >= startMs && now <= endMs) return "active";
+        return now < startMs ? "upcoming" : "ended";
+    };
+
+    const getModuleStatusLabel = (module: ModuleObject): string => {
+        const status = getModuleStatus(module);
+        if (status === "active") return "Active";
+        if (status === "ended") return "Ended";
+        return "Upcoming";
     };
 
     const isModuleActiveNow = (m: ModuleObject): boolean => {
@@ -525,8 +566,21 @@ export default function AdminModuleCalendar() {
         setCalendarDate(new Date(today.getFullYear(), today.getMonth(), 1));
     };
 
+    const getAdminClassBasePath = (): string => {
+        return schoolId
+            ? `/admin/school/${schoolId}/class/${classId}`
+            : `/admin/${classId}`;
+    };
+
     const openModule = (moduleId: number) => {
-        navigate(`/admin/${classId}/module/${moduleId}/overview`);
+        navigate(`${getAdminClassBasePath()}/module/${moduleId}/overview`);
+    };
+
+    const handleModuleCardKeyDown = (event: KeyboardEvent<HTMLElement>, moduleId: number) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+
+        event.preventDefault();
+        openModule(moduleId);
     };
 
     const createModule = async () => {
@@ -577,7 +631,7 @@ export default function AdminModuleCalendar() {
             loadModules();
 
             if (moduleId > 0) {
-                navigate(`/admin/${classId}/module/${moduleId}/overview`);
+                navigate(`${getAdminClassBasePath()}/module/${moduleId}/overview`);
             }
         } catch (err) {
             console.log(err);
@@ -604,13 +658,16 @@ export default function AdminModuleCalendar() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: "School Selection", to: "/admin/classes" },
-                    { label: "Class Selection", to: "/admin/classes" },
-                    { label: "Module Calendar" },
+                    { label: "School Selection", to: "/admin/schools" },
+                    {
+                        label: "Class Selection",
+                        to: schoolId ? `/admin/school/${schoolId}/classes` : "/admin/schools",
+                    },
+                    { label: "Module List" },
                 ]}
             />
 
-            <div className="pageTitle">Module Calendar</div>
+            <div className="pageTitle">Admin Module List</div>
 
             <div className="module-calendar-command-row">
                 <button
@@ -621,6 +678,25 @@ export default function AdminModuleCalendar() {
                     <FaPlusCircle aria-hidden="true" />
                     <span className="button-text">{showCreateModule ? "Close create module" : "Create new module"}</span>
                 </button>
+
+                <div className="module-view-toggle" aria-label="Module view selector">
+                    <button
+                        type="button"
+                        className={`module-view-toggle-button${viewMode === "list" ? " is-active" : ""}`}
+                        onClick={() => setViewMode("list")}
+                    >
+                        <FaListUl aria-hidden="true" />
+                        <span>List</span>
+                    </button>
+                    <button
+                        type="button"
+                        className={`module-view-toggle-button${viewMode === "calendar" ? " is-active" : ""}`}
+                        onClick={() => setViewMode("calendar")}
+                    >
+                        <FaCalendarAlt aria-hidden="true" />
+                        <span>Calendar</span>
+                    </button>
+                </div>
             </div>
 
             {showCreateModule && (
@@ -698,129 +774,186 @@ export default function AdminModuleCalendar() {
             )}
 
             <p className="projects-subtitle">
-                Select a module from the calendar to see more details.
+                Select a module from the list to see more details, or switch to calendar view.
             </p>
 
-            <section className="calendar-shell" aria-label="Project calendar">
-                <div className="calendar-toolbar">
-                    <button type="button" className="button calendar-nav-button" onClick={goToPreviousMonth}>
-                        <FaChevronLeft aria-hidden="true" />
-                        <span>Previous</span>
-                    </button>
-
-                    <div className="calendar-month-title">{formatMonthTitle(calendarDate)}</div>
-
-                    <div className="calendar-toolbar-right">
-                        <button type="button" className="button calendar-today-button" onClick={goToToday}>
-                            Today
-                        </button>
-                        <button type="button" className="button calendar-nav-button" onClick={goToNextMonth}>
-                            <span>Next</span>
-                            <FaChevronRight aria-hidden="true" />
-                        </button>
-                    </div>
-                </div>
-
-                <div className="calendar-weekdays">
-                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-                        <div className="calendar-weekday" key={day}>
-                            {day}
+            {viewMode === "list" && sortedModules.length > 0 && (
+                <section className="module-list-shell" aria-label="Module list">
+                    <div className="module-list-header-row">
+                        <div>
+                            <h2>Modules</h2>
                         </div>
-                    ))}
-                </div>
+                    </div>
 
-                <div className="calendar-grid">
-                    {calendarWeeks.map((week) => {
-                        const maxEventRow = week.segments.reduce(
-                            (max, segment) => Math.max(max, segment.row + 1),
-                            0
-                        );
+                    <div className="module-list-grid">
+                        {sortedModules.map((module) => {
+                            const status = getModuleStatus(module);
+                            const active = status === "active";
 
-                        const weekStyle = {
-                            "--event-rows": maxEventRow,
-                        } as CSSProperties;
-
-                        return (
-                            <div className="calendar-week" key={week.key} style={weekStyle}>
-                                {week.days.map((day) => {
-                                    const today = sameDay(day.date, new Date());
-
-                                    return (
-                                        <div
-                                            className={[
-                                                "calendar-day",
-                                                day.isCurrentMonth ? "" : "is-outside-month",
-                                                today ? "is-today" : "",
-                                            ].join(" ").trim()}
-                                            key={day.key}
-                                        >
-                                            <div className="calendar-day-number">{day.date.getDate()}</div>
-
-                                            <div className="calendar-mobile-projects">
-                                                {sortedModules
-                                                    .filter((module) => moduleOccursOnDate(module, day.date))
-                                                    .map((module) => {
-                                                        const active = isModuleActiveNow(module);
-
-                                                        return (
-                                                            <button
-                                                                type="button"
-                                                                className={`calendar-project${active ? " is-active" : ""}`}
-                                                                key={`${day.key}-${module.Id}`}
-                                                                onClick={() => openModule(module.Id)}
-                                                                title={module.Name}
-                                                            >
-                                                                <span className="calendar-project-name">{module.Name}</span>
-                                                                <span className="calendar-project-meta">
-                                                                    {getModuleDateLabel(module)}
-                                                                    {active ? " • Active" : ""}
-                                                                </span>
-                                                            </button>
-                                                        );
-                                                    })}
-                                            </div>
+                            return (
+                                <article
+                                    className={`module-list-card is-${status}`}
+                                    key={module.Id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => openModule(module.Id)}
+                                    onKeyDown={(event) => handleModuleCardKeyDown(event, module.Id)}
+                                    aria-label={`Open ${module.Name}`}
+                                >
+                                    <div className="module-list-card-main">
+                                        <div className="module-list-card-title-row">
+                                            <h3>{module.Name}</h3>
+                                            <span className={`module-status-badge is-${status}`}>
+                                                {active ? "● " : ""}{getModuleStatusLabel(module)}
+                                            </span>
                                         </div>
-                                    );
-                                })}
 
-                                {week.segments.length > 0 && (
-                                    <div className="calendar-week-events" aria-label="Modules for this week">
-                                        {week.segments.map((segment) => {
-                                            const active = isModuleActiveNow(segment.module);
-
-                                            return (
-                                                <button
-                                                    type="button"
-                                                    className={[
-                                                        "calendar-project",
-                                                        "calendar-project-span",
-                                                        active ? "is-active" : "",
-                                                        segment.startsBeforeWeek ? "continues-from-left" : "",
-                                                        segment.endsAfterWeek ? "continues-to-right" : "",
-                                                    ].join(" ").trim()}
-                                                    key={`${week.key}-${segment.module.Id}-${segment.startColumn}-${segment.row}`}
-                                                    onClick={() => openModule(segment.module.Id)}
-                                                    title={segment.module.Name}
-                                                    style={{
-                                                        gridColumn: `${segment.startColumn + 1} / span ${segment.span}`,
-                                                        gridRow: `${segment.row + 1}`,
-                                                    }}
-                                                >
-                                                    <span className="calendar-project-name">{segment.module.Name}</span>
-                                                    <span className="calendar-project-meta">
-                                                        {getModuleDateLabel(segment.module)}
-                                                        {active ? " • Active" : ""}
-                                                    </span>
-                                                </button>
-                                            );
-                                        })}
+                                        <div className="module-list-card-dates">
+                                            {formatDate12h(module.Start)} - {formatDate12h(module.End)}
+                                        </div>
                                     </div>
-                                )}
+
+                                    <div className="module-list-card-actions">
+                                        <button
+                                            type="button"
+                                            className="project-action project-action-primary"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                openModule(module.Id);
+                                            }}
+                                        >
+                                            Open Module
+                                        </button>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </section>
+            )}
+
+            {viewMode === "calendar" && (
+                <section className="calendar-shell" aria-label="Module calendar">
+                    <div className="calendar-toolbar">
+                        <button type="button" className="button calendar-nav-button" onClick={goToPreviousMonth}>
+                            <FaChevronLeft aria-hidden="true" />
+                            <span>Previous</span>
+                        </button>
+
+                        <div className="calendar-month-title">{formatMonthTitle(calendarDate)}</div>
+
+                        <div className="calendar-toolbar-right">
+                            <button type="button" className="button calendar-today-button" onClick={goToToday}>
+                                Today
+                            </button>
+                            <button type="button" className="button calendar-nav-button" onClick={goToNextMonth}>
+                                <span>Next</span>
+                                <FaChevronRight aria-hidden="true" />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="calendar-weekdays">
+                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+                            <div className="calendar-weekday" key={day}>
+                                {day}
                             </div>
-                        );
-                    })}
-                </div>
-            </section>
+                        ))}
+                    </div>
+
+                    <div className="calendar-grid">
+                        {calendarWeeks.map((week) => {
+                            const maxEventRow = week.segments.reduce(
+                                (max, segment) => Math.max(max, segment.row + 1),
+                                0
+                            );
+
+                            const weekStyle = {
+                                "--event-rows": maxEventRow,
+                            } as CSSProperties;
+
+                            return (
+                                <div className="calendar-week" key={week.key} style={weekStyle}>
+                                    {week.days.map((day) => {
+                                        const today = sameDay(day.date, new Date());
+
+                                        return (
+                                            <div
+                                                className={[
+                                                    "calendar-day",
+                                                    day.isCurrentMonth ? "" : "is-outside-month",
+                                                    today ? "is-today" : "",
+                                                ].join(" ").trim()}
+                                                key={day.key}
+                                            >
+                                                <div className="calendar-day-number">{day.date.getDate()}</div>
+
+                                                <div className="calendar-mobile-projects">
+                                                    {sortedModules
+                                                        .filter((module) => moduleOccursOnDate(module, day.date))
+                                                        .map((module) => {
+                                                            const active = isModuleActiveNow(module);
+
+                                                            return (
+                                                                <button
+                                                                    type="button"
+                                                                    className={`calendar-project${active ? " is-active" : ""}`}
+                                                                    key={`${day.key}-${module.Id}`}
+                                                                    onClick={() => openModule(module.Id)}
+                                                                    title={module.Name}
+                                                                >
+                                                                    <span className="calendar-project-name">{module.Name}</span>
+                                                                    <span className="calendar-project-meta">
+                                                                        {getModuleDateLabel(module)}
+                                                                        {active ? " • Active" : ""}
+                                                                    </span>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
+                                    {week.segments.length > 0 && (
+                                        <div className="calendar-week-events" aria-label="Modules for this week">
+                                            {week.segments.map((segment) => {
+                                                const active = isModuleActiveNow(segment.module);
+
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        className={[
+                                                            "calendar-project",
+                                                            "calendar-project-span",
+                                                            active ? "is-active" : "",
+                                                            segment.startsBeforeWeek ? "continues-from-left" : "",
+                                                            segment.endsAfterWeek ? "continues-to-right" : "",
+                                                        ].join(" ").trim()}
+                                                        key={`${week.key}-${segment.module.Id}-${segment.startColumn}-${segment.row}`}
+                                                        onClick={() => openModule(segment.module.Id)}
+                                                        title={segment.module.Name}
+                                                        style={{
+                                                            gridColumn: `${segment.startColumn + 1} / span ${segment.span}`,
+                                                            gridRow: `${segment.row + 1}`,
+                                                        }}
+                                                    >
+                                                        <span className="calendar-project-name">{segment.module.Name}</span>
+                                                        <span className="calendar-project-meta">
+                                                            {getModuleDateLabel(segment.module)}
+                                                            {active ? " • Active" : ""}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </section>
+            )}
 
             {sortedModules.length === 0 && (
                 <div className="empty-projects">

@@ -1410,6 +1410,19 @@ def create_module(project_repo: ProjectRepository = Provide[Container.project_re
 
     return jsonify({'module_id': int(module_id)})
 
+@projects_api.route('/get_modules_by_class_id_student', methods=['GET'])
+@jwt_required()
+@inject
+def get_modules_by_class_id_student(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    class_id = request.args.get('id')
+
+    if not class_id:
+        return jsonify([])
+
+    modules = project_repo.get_modules_by_class_id(class_id)
+
+    return jsonify([_module_payload(module, project_repo, submission_repo) for module in modules])
+
 @projects_api.route('/update_module', methods=['POST'])
 @jwt_required()
 @inject

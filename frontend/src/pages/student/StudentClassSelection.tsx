@@ -1,236 +1,317 @@
-import React, { useCallback, useEffect, useState } from "react"
-import { Helmet } from "react-helmet"
+import { Component, KeyboardEvent } from "react"
 import axios from "axios"
-import { useNavigate } from "react-router-dom"
+import { Link, NavigateFunction, useNavigate, useParams } from "react-router-dom"
+import { Helmet } from "react-helmet"
 
 import MenuComponent from "../components/MenuComponent"
-import codeimg from "../../images/codeex.png"
-import "../../styling/Classes.scss"
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
+import "../../styling/Selection.scss"
 
-type SchoolRow = {
-    id: number
-    name: string
+interface ClassObject {
+    Id: number
+    Name: string
 }
 
-type AssignedClassRow = {
-    id: number
-    name: string
-    school_id?: number
-    school_name?: string
+interface SchoolObject {
+    Id: number
+    Name: string
 }
 
-const ClassSelectionPage: React.FC = () => {
-    const navigate = useNavigate()
+interface ClassState {
+    classes: Array<ClassObject>
+    selectedSchoolId: number
+    selectedSchoolName: string
+    errorMessage: string
+    isLoading: boolean
+}
 
-    const [schools, setSchools] = useState<SchoolRow[]>([])
-    const [studentClasses, setStudentClasses] = useState<AssignedClassRow[]>([])
-    const [selectedSchoolId, setSelectedSchoolId] = useState<number>(-1)
-    const [selectedSchoolName, setSelectedSchoolName] = useState<string>("")
-    const [errorMessage, setErrorMessage] = useState<string>("")
-    const [didAutoSkipSchoolSelection, setDidAutoSkipSchoolSelection] = useState<boolean>(false)
+interface StudentClassSelectionProps {
+    schoolIdFromUrl: string
+    navigate: NavigateFunction
+}
 
-    const loadSchools = useCallback(() => {
+const STUDENT_SELECTED_SCHOOL_STORAGE_KEY = "STUDENT_SELECTED_SCHOOL"
+
+class StudentClassSelectionInner extends Component<StudentClassSelectionProps, ClassState> {
+    constructor(props: StudentClassSelectionProps) {
+        super(props)
+        this.state = {
+            classes: [],
+            selectedSchoolId: -1,
+            selectedSchoolName: "",
+            errorMessage: "",
+            isLoading: true
+        }
+    }
+
+    componentDidMount() {
+        const schoolId = Number(this.props.schoolIdFromUrl)
+
+        if (!schoolId || Number.isNaN(schoolId)) {
+            this.setState({
+                classes: [],
+                selectedSchoolId: -1,
+                selectedSchoolName: "",
+                errorMessage: "Please select a school first.",
+                isLoading: false
+            })
+            return
+        }
+
+        const storedSchool = this.getStoredSelectedSchool()
+
+        if (storedSchool && storedSchool.Id === schoolId) {
+            this.loadClassesForSchool(storedSchool)
+            return
+        }
+
+        this.loadSchoolAndClasses(schoolId)
+    }
+
+    componentDidUpdate(prevProps: StudentClassSelectionProps) {
+        if (prevProps.schoolIdFromUrl === this.props.schoolIdFromUrl) return
+
+        const schoolId = Number(this.props.schoolIdFromUrl)
+
+        if (!schoolId || Number.isNaN(schoolId)) {
+            this.setState({
+                classes: [],
+                selectedSchoolId: -1,
+                selectedSchoolName: "",
+                errorMessage: "Please select a school first.",
+                isLoading: false
+            })
+            return
+        }
+
+        this.loadSchoolAndClasses(schoolId)
+    }
+
+    getStoredSelectedSchool = (): SchoolObject | null => {
+        const storedValue = localStorage.getItem(STUDENT_SELECTED_SCHOOL_STORAGE_KEY)
+        if (!storedValue) return null
+
+        try {
+            const parsed = JSON.parse(storedValue) as SchoolObject
+
+            if (!parsed || typeof parsed.Id !== "number" || !parsed.Name) {
+                return null
+            }
+
+            return parsed
+        } catch {
+            return null
+        }
+    }
+
+    loadSchoolAndClasses = (schoolId: number) => {
+        this.setState({
+            classes: [],
+            selectedSchoolId: schoolId,
+            selectedSchoolName: "",
+            errorMessage: "",
+            isLoading: true
+        })
+
         axios
             .get(import.meta.env.VITE_API_URL + `/schools/all`)
-            .then((res) => {
-                const rows = Array.isArray(res.data) ? (res.data as SchoolRow[]) : []
-                rows.sort((a, b) => a.name.localeCompare(b.name))
-                setSchools(rows)
-            })
-            .catch(() => {
-                setErrorMessage("Could not load schools.")
-            })
-    }, [])
+            .then(res => {
+                const schools: SchoolObject[] = res.data.map(
+                    (obj: { id: number; name: string }) => ({
+                        Id: obj.id,
+                        Name: obj.name
+                    })
+                )
 
-    const loadClasses = useCallback((schoolId: number) => {
-        axios
-            .get(import.meta.env.VITE_API_URL + `/class/all?filter=true&school_id=${schoolId}`, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
-                },
-            })
-            .then((res) => {
-                const rows = Array.isArray(res.data) ? (res.data as AssignedClassRow[]) : []
-                rows.sort((a, b) => a.name.localeCompare(b.name))
-                setStudentClasses(rows)
-                setErrorMessage("")
-            })
-            .catch(() => {
-                setErrorMessage("Could not load classes for the selected school.")
-            })
-    }, [])
+                const matchingSchool = schools.find((schoolObj: SchoolObject) => schoolObj.Id === schoolId)
 
-    const resolveInitialSelection = useCallback(() => {
-        axios
-            .get(import.meta.env.VITE_API_URL + `/class/all?filter=true`, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
-                },
-            })
-            .then((res) => {
-                const rows = Array.isArray(res.data) ? (res.data as AssignedClassRow[]) : []
-                rows.sort((a, b) => a.name.localeCompare(b.name))
+                if (!matchingSchool) {
+                    this.setState({
+                        classes: [],
+                        selectedSchoolId: schoolId,
+                        selectedSchoolName: "",
+                        errorMessage: "The selected school could not be found.",
+                        isLoading: false
+                    })
+                    return
+                }
 
-                const schoolMap = new Map<number, string>()
-                rows.forEach((row) => {
-                    const sid = Number(row.school_id)
-                    if (sid > 0 && !schoolMap.has(sid)) {
-                        schoolMap.set(sid, row.school_name || "")
-                    }
+                localStorage.setItem(STUDENT_SELECTED_SCHOOL_STORAGE_KEY, JSON.stringify(matchingSchool))
+                this.loadClassesForSchool(matchingSchool)
+            })
+            .catch(err => {
+                console.error(err)
+                this.setState({
+                    classes: [],
+                    selectedSchoolId: schoolId,
+                    selectedSchoolName: "",
+                    errorMessage: "Could not load the selected school.",
+                    isLoading: false
                 })
-
-                if (rows.length === 1 && schoolMap.size === 1) {
-                    navigate(`/student/${rows[0].id}/upload`, { replace: true })
-                    return
-                }
-
-                if (rows.length > 0 && schoolMap.size === 1) {
-                    const [onlySchoolId, onlySchoolName] = Array.from(schoolMap.entries())[0]
-                    setSelectedSchoolId(onlySchoolId)
-                    setSelectedSchoolName(onlySchoolName)
-                    setStudentClasses(rows)
-                    setDidAutoSkipSchoolSelection(true)
-                    setErrorMessage("")
-                    return
-                }
-
-                setDidAutoSkipSchoolSelection(false)
-                loadSchools()
             })
-            .catch(() => {
-                setDidAutoSkipSchoolSelection(false)
-                loadSchools()
-            })
-    }, [loadSchools, navigate])
-
-    const handleSchoolSelect = (school: SchoolRow) => {
-        setDidAutoSkipSchoolSelection(false)
-        setSelectedSchoolId(school.id)
-        setSelectedSchoolName(school.name)
-        setStudentClasses([])
-        setErrorMessage("")
-        loadClasses(school.id)
     }
 
-    const handleBackToSchools = () => {
-        setDidAutoSkipSchoolSelection(false)
-        setSelectedSchoolId(-1)
-        setSelectedSchoolName("")
-        setStudentClasses([])
-        setErrorMessage("")
-        loadSchools()
+    loadClassesForSchool = (schoolObj: SchoolObject) => {
+        this.setState({
+            classes: [],
+            selectedSchoolId: schoolObj.Id,
+            selectedSchoolName: schoolObj.Name,
+            errorMessage: "",
+            isLoading: true
+        })
+
+        axios
+            .get(import.meta.env.VITE_API_URL + `/class/all?filter=true&school_id=${schoolObj.Id}`, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+                }
+            })
+            .then(res => {
+                const classes: ClassObject[] = res.data.map(
+                    (obj: { id: number; name: string }) => ({
+                        Id: obj.id,
+                        Name: obj.name
+                    })
+                )
+
+                classes.sort((a: ClassObject, b: ClassObject) =>
+                    a.Name.localeCompare(b.Name)
+                )
+
+                this.setState({
+                    classes,
+                    selectedSchoolId: schoolObj.Id,
+                    selectedSchoolName: schoolObj.Name,
+                    errorMessage: "",
+                    isLoading: false
+                })
+            })
+            .catch(err => {
+                console.error(err)
+                this.setState({
+                    classes: [],
+                    selectedSchoolId: schoolObj.Id,
+                    selectedSchoolName: schoolObj.Name,
+                    errorMessage: "Could not load classes for the selected school.",
+                    isLoading: false
+                })
+            })
     }
 
-    useEffect(() => {
-        resolveInitialSelection()
-    }, [resolveInitialSelection])
+    handleClassCardKeyDown = (event: KeyboardEvent<HTMLElement>, classObj: ClassObject) => {
+        if (event.key !== "Enter" && event.key !== " ") return
 
-    return (
-        <div id="code-page" className="admin-landing-root">
-            <Helmet>
-                <title>MAAT</title>
-            </Helmet>
+        event.preventDefault()
+        this.props.navigate(this.getClassModulesUrl(classObj.Id))
+    }
 
-            <MenuComponent
-                showUpload={true}
-                showAdminUpload={false}
-                showHelp={false}
-                showCreate={false}
-                showLast={false}
-                showReviewButton={false}
-            />
+    getClassModulesUrl = (classId: number): string => {
+        return `/student/school/${this.state.selectedSchoolId}/class/${classId}/modules`
+    }
 
-            <div className="main-grid">
+    render() {
+        const { classes, selectedSchoolId, selectedSchoolName, errorMessage, isLoading } = this.state
+        const hasSelectedSchool = selectedSchoolId !== -1
+
+        return (
+            <div className="projects-page admin-landing-root">
+                <Helmet>
+                    <title>MAAT</title>
+                </Helmet>
+
+                <MenuComponent
+                    showUpload={true}
+                    showAdminUpload={false}
+                    showHelp={false}
+                    showCreate={false}
+                    showLast={false}
+                    showReviewButton={false}
+                />
+
                 <DirectoryBreadcrumbs
-                    items={
-                        selectedSchoolId === -1
-                            ? [{ label: "School Selection" }]
-                            : didAutoSkipSchoolSelection
-                                ? [{ label: "Class Selection" }]
-                                : [{ label: "School Selection" }, { label: "Class Selection" }]
-                    }
+                    items={[
+                        { label: "School Selection", to: "/student/schools" },
+                        { label: "Class Selection" }
+                    ]}
                     trailingSeparator={true}
                 />
 
                 <div className="pageTitle">
-                    {selectedSchoolId === -1
-                        ? "Select a School"
-                        : didAutoSkipSchoolSelection
-                            ? "Select a Class"
-                            : `Student Classes · ${selectedSchoolName}`}
+                    {hasSelectedSchool && selectedSchoolName ? `Student · ${selectedSchoolName}` : "Class Selection"}
                 </div>
 
-                <div className="main-grid">
-                    <div className="container">
-                        <div className="selectorHeader">
-                            {selectedSchoolId === -1 ? (
-                                <p className="selectorSubtext">Choose your school before selecting a class.</p>
-                            ) : didAutoSkipSchoolSelection ? (
-                                <p className="selectorSubtext">
-                                    Showing your assigned classes for {selectedSchoolName}.
-                                </p>
-                            ) : (
-                                <>
-                                    <p className="selectorSubtext">
-                                        Showing your assigned classes for {selectedSchoolName}.
-                                    </p>
-                                    <button type="button" className="secondaryButton" onClick={handleBackToSchools}>
-                                        Choose a different school
-                                    </button>
-                                </>
-                            )}
+                <p className="projects-subtitle">
+                    Select a class to view its modules.
+                </p>
+
+                <section className="module-list-shell" aria-label="Class list">
+                    <div className="module-list-header-row">
+                        <div>
+                            <h2>{selectedSchoolName} Classes</h2>
                         </div>
-
-                        {errorMessage ? <div className="pageMessage">{errorMessage}</div> : null}
-
-                        <div className="classList">
-                            {selectedSchoolId === -1
-                                ? schools.map((school) => (
-                                    <button
-                                        key={school.id}
-                                        type="button"
-                                        className="clickableRow schoolCardButton"
-                                        onClick={() => handleSchoolSelect(school)}
-                                    >
-                                        <div>
-                                            <img src={codeimg} alt="Code" />
-                                        </div>
-                                        <div>
-                                            <h1 className="title">{school.name}</h1>
-                                        </div>
-                                    </button>
-                                ))
-                                : studentClasses.map((classObj) => (
-                                    <a
-                                        key={classObj.id}
-                                        href={`/student/${classObj.id}/upload`}
-                                        className="clickableRow"
-                                    >
-                                        <div>
-                                            <img src={codeimg} alt="Code" />
-                                        </div>
-                                        <div>
-                                            <h1 className="title">{classObj.name}</h1>
-                                        </div>
-                                    </a>
-                                ))}
-                        </div>
-
-                        {selectedSchoolId === -1 && schools.length === 0 ? (
-                            <div className="emptyState">No schools are available yet.</div>
-                        ) : null}
-
-                        {selectedSchoolId !== -1 && studentClasses.length === 0 && !errorMessage ? (
-                            <div className="emptyState">
-                                No classes are currently assigned to you for this school.
-                            </div>
-                        ) : null}
                     </div>
-                </div>
+
+                    {errorMessage ? <div className="pageMessage">{errorMessage}</div> : null}
+
+                    {!hasSelectedSchool ? (
+                        <Link
+                            to="/student/schools"
+                            className="project-action project-action-secondary"
+                        >
+                            Go to School Selection
+                        </Link>
+                    ) : null}
+
+                    {isLoading && hasSelectedSchool ? (
+                        <div className="empty-projects">Loading classes...</div>
+                    ) : null}
+
+                    {!isLoading && hasSelectedSchool && classes.length > 0 ? (
+                        <div className="module-list-grid">
+                            {classes.map((classObj: ClassObject) => (
+                                <article
+                                    className="module-list-card"
+                                    key={classObj.Id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => this.props.navigate(this.getClassModulesUrl(classObj.Id))}
+                                    onKeyDown={(event) => this.handleClassCardKeyDown(event, classObj)}
+                                    aria-label={`Open ${classObj.Name}`}
+                                >
+                                    <div className="module-list-card-main">
+                                        <div className="module-list-card-title-row">
+                                            <h3>{classObj.Name}</h3>
+                                        </div>
+                                    </div>
+
+                                    <div className="module-list-card-actions">
+                                        <Link
+                                            to={this.getClassModulesUrl(classObj.Id)}
+                                            className="project-action project-action-primary"
+                                            onClick={(event) => event.stopPropagation()}
+                                        >
+                                            Open Class
+                                        </Link>
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    ) : null}
+
+                    {!isLoading && hasSelectedSchool && classes.length === 0 && !errorMessage ? (
+                        <div className="empty-projects">
+                            No classes are currently assigned to you for this school.
+                        </div>
+                    ) : null}
+                </section>
             </div>
-        </div>
-    )
+        )
+    }
 }
 
-export default ClassSelectionPage
+export default function StudentClassSelection() {
+    const navigate = useNavigate()
+    const { school_id } = useParams<{ school_id: string }>()
+
+    return <StudentClassSelectionInner navigate={navigate} schoolIdFromUrl={school_id || ""} />
+}
