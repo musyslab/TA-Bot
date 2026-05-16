@@ -1,3 +1,4 @@
+
 from abc import ABC, abstractmethod
 import os
 import random
@@ -151,10 +152,108 @@ class ProjectRepository():
     def list_practice_problems(self, project_id: int):
         return (
             PracticeProblems.query
-            .filter(PracticeProblems.ProjectId == int(project_id))
+            .filter(
+                PracticeProblems.ProjectId == int(project_id),
+                PracticeProblems.Enabled == True,
+            )
             .order_by(PracticeProblems.PracticeNumber.asc(), PracticeProblems.Id.asc())
             .all()
         )
+
+    def _next_practice_number_scratch_base(self, project_id: int) -> int:
+        max_num = (
+            db.session.query(func.max(PracticeProblems.PracticeNumber))
+            .filter(PracticeProblems.ProjectId == int(project_id))
+            .scalar()
+        )
+        return int(max_num or 0) + 1000
+
+    def reorder_practice_problems(self, project_id: int, ordered_ids: list[int]):
+        active_rows = (
+            PracticeProblems.query
+            .filter(
+                PracticeProblems.ProjectId == int(project_id),
+                PracticeProblems.Enabled == True,
+            )
+            .order_by(PracticeProblems.PracticeNumber.asc(), PracticeProblems.Id.asc())
+            .all()
+        )
+
+        inactive_rows = (
+            PracticeProblems.query
+            .filter(
+                PracticeProblems.ProjectId == int(project_id),
+                PracticeProblems.Enabled == False,
+            )
+            .order_by(PracticeProblems.Id.asc())
+            .all()
+        )
+
+        active_by_id = {int(row.Id): row for row in active_rows}
+        ordered_unique_ids: list[int] = []
+        seen: set[int] = set()
+
+        for raw_id in ordered_ids or []:
+            try:
+                row_id = int(raw_id)
+            except Exception:
+                continue
+
+            if row_id in active_by_id and row_id not in seen:
+                ordered_unique_ids.append(row_id)
+                seen.add(row_id)
+
+        for row in active_rows:
+            row_id = int(row.Id)
+            if row_id not in seen:
+                ordered_unique_ids.append(row_id)
+                seen.add(row_id)
+
+        # MySQL enforces the ProjectId + PracticeNumber unique constraint after
+        # each row update. A direct swap such as 1 -> 2 and 2 -> 1 can fail
+        # mid-flush, so move every row for this project into a temporary, unique
+        # number range first, then write the final compact sequence.
+        scratch_base = self._next_practice_number_scratch_base(project_id)
+        for index, row in enumerate([*active_rows, *inactive_rows], start=1):
+            row.PracticeNumber = scratch_base + index
+
+        db.session.flush()
+
+        for index, row_id in enumerate(ordered_unique_ids, start=1):
+            active_by_id[row_id].PracticeNumber = index
+
+        for index, row in enumerate(inactive_rows, start=1):
+            row.PracticeNumber = scratch_base + len(active_rows) + index
+
+        db.session.commit()
+        return self.list_practice_problems(project_id)
+
+    def renumber_practice_problems(self, project_id: int):
+        rows = self.list_practice_problems(project_id)
+        scratch_base = self._next_practice_number_scratch_base(project_id)
+
+        for index, row in enumerate(rows, start=1):
+            row.PracticeNumber = scratch_base + index
+
+        db.session.flush()
+
+        for index, row in enumerate(rows, start=1):
+            row.PracticeNumber = index
+
+        db.session.commit()
+        return rows
+
+    def delete_practice_problem(self, practice_problem_id: int):
+        pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+        if not pp:
+            return None
+
+        project_id = int(pp.ProjectId)
+        pp.Enabled = False
+        pp.PracticeNumber = self._next_practice_number_scratch_base(project_id)
+        db.session.flush()
+        self.renumber_practice_problems(project_id)
+        return pp
 
     def get_practice_problem(self, practice_problem_id: int) -> Optional[PracticeProblems]:
         return PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()

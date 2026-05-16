@@ -845,45 +845,6 @@ const StudentUpload = () => {
             )}
           </header>
 
-          <div className="testcase-summary-card" aria-label="Testcase pass summary">
-            <div
-              className="testcase-circle"
-              style={{ '--testcase-progress': testcaseProgress.pct } as React.CSSProperties}
-              role="img"
-              aria-label={`${testcaseProgress.passed} of ${testcaseProgress.total} testcases passing`}
-            >
-              <svg className="testcase-circle__svg" viewBox="0 0 112 112" aria-hidden="true">
-                <circle className="testcase-circle__track" cx="56" cy="56" r={testcaseProgress.radius} />
-                <circle
-                  className="testcase-circle__fill"
-                  cx="56"
-                  cy="56"
-                  r={testcaseProgress.radius}
-                  strokeDasharray={testcaseProgress.circumference}
-                  strokeDashoffset={testcaseProgress.strokeDashoffset}
-                />
-              </svg>
-              <div className="testcase-circle__center">
-                <span className="testcase-circle__count">
-                  {testcaseProgress.passed}/{testcaseProgress.total}
-                </span>
-                <span className="testcase-circle__label">passed</span>
-              </div>
-            </div>
-
-            <div className="testcase-summary-card__content">
-              <div className="testcase-summary-card__eyebrow">Testcase Progress</div>
-              <h2 className="testcase-summary-card__title">{testcaseProgress.pct}% passing</h2>
-              <p className="testcase-summary-card__text">
-                {!checkedPassedAll
-                  ? 'Checking testcase results...'
-                  : testcaseProgress.total > 0
-                    ? `${testcaseProgress.passed} out of ${testcaseProgress.total} testcases are currently passing.`
-                    : 'No testcase results are available yet. Upload a solution to see your progress.'}
-              </p>
-            </div>
-          </div>
-
           {inOfficeHours && (
             <div className="oh-banner" role="status" aria-live="polite">
               <div className="oh-banner__content">
@@ -1015,16 +976,6 @@ const StudentUpload = () => {
                   }`}
               >
                 Upload
-              </button>
-
-              <button
-                type="button"
-                onClick={consumeRewardCharge}
-                disabled={isPractice || RewardCharge <= 0 || passedAllTests}
-                className="secondary"
-                title="Use one FastPass charge to submit immediately"
-              >
-                Use FastPass
               </button>
             </div>
 

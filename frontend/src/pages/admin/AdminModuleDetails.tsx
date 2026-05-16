@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+
+import {
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import axios from "axios";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -6,13 +14,22 @@ import { eachDayOfInterval } from "date-fns";
 import { Helmet } from "react-helmet";
 import { Link, useParams } from "react-router-dom";
 import {
+    FaCheck,
     FaCheckCircle,
     FaEdit,
     FaExclamationCircle,
+    FaExclamationTriangle,
     FaEye,
+    FaFlagCheckered,
+    FaArrowDown,
+    FaArrowUp,
+    FaPlus,
+    FaPlay,
     FaSave,
     FaTasks,
     FaTimes,
+    FaTrash,
+    FaWrench,
 } from "react-icons/fa";
 
 import MenuComponent from "../components/MenuComponent";
@@ -81,6 +98,18 @@ type DateTimeFieldProps = {
     startDate: Date | null;
     endDate: Date | null;
     hasError: boolean;
+};
+
+type PathSegment = {
+    key: string;
+    d: string;
+    state: "complete" | "missing" | "incomplete";
+};
+
+type PathSvgState = {
+    width: number;
+    height: number;
+    segments: PathSegment[];
 };
 
 const authHeader = () => ({
@@ -233,6 +262,31 @@ function DateTimeField({
     );
 }
 
+
+const getSetupMissingItems = (status: ProjectSetupStatus): string[] => {
+    const missingItems: string[] = [];
+
+    if (!status.hasSolutionProgram) {
+        missingItems.push("solution");
+    }
+
+    if (status.testcaseCount <= 1) {
+        missingItems.push("test cases");
+    }
+
+    return missingItems;
+};
+
+const getSetupState = (status: ProjectSetupStatus): "complete" | "missing" => (
+    getSetupMissingItems(status).length === 0 ? "complete" : "missing"
+);
+
+const formatMissingSetupText = (missingItems: string[]): string => {
+    if (missingItems.length === 0) return "";
+
+    return `Missing ${missingItems.join(" + ")}`;
+};
+
 export default function AdminModuleDetails() {
     const { school_id, class_id, id, module_id } = useParams<{
         school_id: string;
@@ -266,6 +320,18 @@ export default function AdminModuleDetails() {
     const [savingPracticeNameId, setSavingPracticeNameId] = useState<number | null>(null);
     const [moduleConflicts, setModuleConflicts] = useState<ModuleObject[]>([]);
     const [overlapError, setOverlapError] = useState(false);
+    const [pathSvgState, setPathSvgState] = useState<PathSvgState>({
+        width: 0,
+        height: 0,
+        segments: [],
+    });
+    const [checkpointManagerOpen, setCheckpointManagerOpen] = useState(false);
+    const [checkpointDrafts, setCheckpointDrafts] = useState<PracticeProblemRow[]>([]);
+    const [savingCheckpointOrder, setSavingCheckpointOrder] = useState(false);
+    const [addingCheckpoint, setAddingCheckpoint] = useState(false);
+    const [deletingCheckpointId, setDeletingCheckpointId] = useState<number | null>(null);
+
+    const checkpointPathTrackRef = useRef<HTMLDivElement | null>(null);
 
     const formatDate12h = (value: string): string => {
         const d = new Date(value);
@@ -281,13 +347,14 @@ export default function AdminModuleDetails() {
         }).format(d);
     };
 
-    const isModuleActive = (m: ModuleObject): boolean => {
+    const getModuleStatus = (m: ModuleObject): "active" | "upcoming" | "ended" => {
         const startMs = Date.parse(m.Start);
         const endMs = Date.parse(m.End);
-        if (Number.isNaN(startMs) || Number.isNaN(endMs)) return false;
+        if (Number.isNaN(startMs) || Number.isNaN(endMs)) return "upcoming";
 
         const now = Date.now();
-        return now >= startMs && now <= endMs;
+        if (now >= startMs && now <= endMs) return "active";
+        return now < startMs ? "upcoming" : "ended";
     };
 
     const parseTestcasePayloadCount = (payload: unknown): number => {
@@ -433,6 +500,42 @@ export default function AdminModuleDetails() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [classId, routeProjectId, routeModuleId]);
 
+    const sortedCheckpoints = useMemo(() => {
+        return [...practiceProblems].sort((a, b) => {
+            if (a.number !== b.number) return a.number - b.number;
+            return a.id - b.id;
+        });
+    }, [practiceProblems]);
+
+    const checkpointOrderChanged = checkpointDrafts.length !== sortedCheckpoints.length
+        || checkpointDrafts.some((pp, index) => pp.id !== sortedCheckpoints[index]?.id);
+
+    const checkpointModalBusy = savingCheckpointOrder || addingCheckpoint || deletingCheckpointId !== null;
+
+    useEffect(() => {
+        if (checkpointManagerOpen && !checkpointOrderChanged) {
+            setCheckpointDrafts(sortedCheckpoints);
+        }
+    }, [checkpointManagerOpen, checkpointOrderChanged, sortedCheckpoints]);
+
+    useEffect(() => {
+        if (!checkpointManagerOpen) return;
+
+        const previousBodyOverflow = document.body.style.overflow;
+        const previousHtmlOverflow = document.documentElement.style.overflow;
+        document.body.style.overflow = "hidden";
+        document.documentElement.style.overflow = "hidden";
+        document.body.classList.add("checkpoint-manager-scroll-lock");
+        document.documentElement.classList.add("checkpoint-manager-scroll-lock");
+
+        return () => {
+            document.body.style.overflow = previousBodyOverflow;
+            document.documentElement.style.overflow = previousHtmlOverflow;
+            document.body.classList.remove("checkpoint-manager-scroll-lock");
+            document.documentElement.classList.remove("checkpoint-manager-scroll-lock");
+        };
+    }, [checkpointManagerOpen]);
+
     const moduleConflictRanges = useMemo<DateRange[]>(() => {
         return moduleConflicts
             .filter((m) => !module || m.Id !== module.Id)
@@ -486,13 +589,134 @@ export default function AdminModuleDetails() {
         );
     };
 
-    const totalPracticeSubmissions = useMemo(() => {
-        return practiceProblems.reduce((sum, pp) => sum + Number(pp.submissions || 0), 0);
-    }, [practiceProblems]);
+    const mainProjectReady = useMemo(() => {
+        return !!project?.HasSolutionProgram && Number(project?.TestcaseCount || 0) > 1;
+    }, [project]);
 
-    const enabledPracticeCount = useMemo(() => {
-        return practiceProblems.filter((pp) => pp.enabled).length;
-    }, [practiceProblems]);
+    const pathNodeStates = useMemo<("complete" | "missing" | "incomplete")[]>(() => {
+        return [
+            ...sortedCheckpoints.map((pp) => {
+                const status = {
+                    hasSolutionProgram: !!pp.hasSolutionProgram,
+                    hasTestcases: !!pp.hasTestcases,
+                    testcaseCount: Number(pp.testcaseCount || 0),
+                };
+
+                if (getSetupState(status) === "missing") return "missing";
+                return pp.enabled ? "complete" : "incomplete";
+            }),
+            getSetupState({
+                hasSolutionProgram: !!project?.HasSolutionProgram,
+                hasTestcases: !!project?.HasTestcases,
+                testcaseCount: Number(project?.TestcaseCount || 0),
+            }) === "missing" ? "missing" : "complete",
+        ];
+    }, [sortedCheckpoints, project]);
+
+    const recalculatePathConnectors = useCallback(() => {
+        const trackElement = checkpointPathTrackRef.current;
+
+        if (!trackElement) {
+            setPathSvgState({ width: 0, height: 0, segments: [] });
+            return;
+        }
+
+        const nodeElements = Array.from(
+            trackElement.querySelectorAll<HTMLElement>("[data-admin-path-node='true']")
+        );
+
+        if (nodeElements.length <= 1) {
+            setPathSvgState({
+                width: trackElement.offsetWidth,
+                height: trackElement.offsetHeight,
+                segments: [],
+            });
+            return;
+        }
+
+        const trackRect = trackElement.getBoundingClientRect();
+        const nodeRects = nodeElements.map((nodeElement) => {
+            const rect = nodeElement.getBoundingClientRect();
+
+            return {
+                left: rect.left - trackRect.left,
+                right: rect.right - trackRect.left,
+                top: rect.top - trackRect.top,
+                bottom: rect.bottom - trackRect.top,
+                width: rect.width,
+                height: rect.height,
+                centerX: rect.left - trackRect.left + rect.width / 2,
+                centerY: rect.top - trackRect.top + rect.height / 2,
+            };
+        });
+
+        const segments: PathSegment[] = [];
+
+        for (let i = 0; i < nodeRects.length - 1; i += 1) {
+            const current = nodeRects[i];
+            const next = nodeRects[i + 1];
+            const sameRow = Math.abs(current.centerY - next.centerY) < Math.min(current.height, next.height) * 0.45;
+            let d = "";
+
+            if (sameRow) {
+                d = `M ${current.right} ${current.centerY} L ${next.left} ${next.centerY}`;
+            } else {
+                const routeY = current.bottom + Math.max(12, (next.top - current.bottom) / 2);
+
+                d = [
+                    `M ${current.centerX} ${current.bottom}`,
+                    `L ${current.centerX} ${routeY}`,
+                    `L ${next.centerX} ${routeY}`,
+                    `L ${next.centerX} ${next.top}`,
+                ].join(" ");
+            }
+
+            segments.push({
+                key: `admin-checkpoint-connector-${i}`,
+                d,
+                state: pathNodeStates[i] || "incomplete",
+            });
+        }
+
+        setPathSvgState({
+            width: trackRect.width,
+            height: trackRect.height,
+            segments,
+        });
+    }, [pathNodeStates]);
+
+    useLayoutEffect(() => {
+        recalculatePathConnectors();
+
+        const trackElement = checkpointPathTrackRef.current;
+        if (!trackElement) return;
+
+        const resizeObserver = new ResizeObserver(() => {
+            recalculatePathConnectors();
+        });
+
+        resizeObserver.observe(trackElement);
+
+        Array.from(
+            trackElement.querySelectorAll<HTMLElement>("[data-admin-path-node='true']")
+        ).forEach((nodeElement) => {
+            resizeObserver.observe(nodeElement);
+        });
+
+        window.addEventListener("resize", recalculatePathConnectors);
+
+        return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener("resize", recalculatePathConnectors);
+        };
+    }, [
+        recalculatePathConnectors,
+        sortedCheckpoints.length,
+        editingMainProjectName,
+        editingPracticeNames,
+        loading,
+        module?.Id,
+    ]);
 
     const saveModule = async () => {
         if (!module) return;
@@ -613,7 +837,7 @@ export default function AdminModuleDetails() {
     const savePracticeProblemName = async (practiceProblemId: number) => {
         const trimmed = (practiceNameDrafts[practiceProblemId] || "").trim();
         if (!trimmed) {
-            window.alert("Please enter a practice problem name.");
+            window.alert("Please enter a checkpoint name.");
             return;
         }
 
@@ -631,15 +855,137 @@ export default function AdminModuleDetails() {
             setPracticeProblems((current) => (
                 current.map((pp) => pp.id === practiceProblemId ? { ...pp, name: trimmed } : pp)
             ));
+            setCheckpointDrafts((current) => (
+                current.map((pp) => pp.id === practiceProblemId ? { ...pp, name: trimmed } : pp)
+            ));
             setEditingPracticeNames((current) => ({
                 ...current,
                 [practiceProblemId]: false,
             }));
         } catch (err) {
             console.log(err);
-            window.alert("Could not save the practice problem name.");
+            window.alert("Could not save the checkpoint name.");
         } finally {
             setSavingPracticeNameId(null);
+        }
+    };
+
+    const openCheckpointManager = () => {
+        setCheckpointDrafts(sortedCheckpoints);
+        setCheckpointManagerOpen(true);
+    };
+
+    const closeCheckpointManager = () => {
+        if (checkpointModalBusy) return;
+
+        if (checkpointOrderChanged && !window.confirm("You have unsaved checkpoint order changes. Close without saving?")) {
+            return;
+        }
+
+        setCheckpointDrafts(sortedCheckpoints);
+        setCheckpointManagerOpen(false);
+    };
+
+    const moveCheckpointDraft = (index: number, direction: -1 | 1) => {
+        const nextIndex = index + direction;
+        if (nextIndex < 0 || nextIndex >= checkpointDrafts.length) return;
+
+        setCheckpointDrafts((current) => {
+            const next = [...current];
+            [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+            return next;
+        });
+    };
+
+    const saveCheckpointOrder = async () => {
+        if (!project || !checkpointOrderChanged) return;
+
+        try {
+            setSavingCheckpointOrder(true);
+            const orderedIds = checkpointDrafts.map((pp) => pp.id);
+
+            await axios.post(
+                `${import.meta.env.VITE_API_URL}/projects/reorder_practice_problems`,
+                {
+                    project_id: project.Id,
+                    ordered_ids: orderedIds,
+                },
+                { headers: authHeader() }
+            );
+
+            setPracticeProblems((current) => (
+                orderedIds
+                    .map((idValue, index) => {
+                        const existing = current.find((pp) => pp.id === idValue);
+                        return existing ? { ...existing, number: index + 1 } : null;
+                    })
+                    .filter((pp): pp is PracticeProblemRow => !!pp)
+            ));
+            loadOverview();
+        } catch (err) {
+            console.log(err);
+            window.alert("Could not save the checkpoint order.");
+        } finally {
+            setSavingCheckpointOrder(false);
+        }
+    };
+
+    const addCheckpoint = async () => {
+        if (!project) return;
+
+        const nextNumber = sortedCheckpoints.length + 1;
+        const generatedName = `Checkpoint ${nextNumber}`;
+
+        try {
+            setAddingCheckpoint(true);
+            await axios.post(
+                `${import.meta.env.VITE_API_URL}/projects/create_practice_problem`,
+                {
+                    project_id: project.Id,
+                    name: generatedName,
+                },
+                { headers: authHeader() }
+            );
+            loadOverview();
+        } catch (err) {
+            console.log(err);
+            window.alert("Could not add a checkpoint.");
+        } finally {
+            setAddingCheckpoint(false);
+        }
+    };
+
+    const deleteCheckpoint = async (practiceProblemId: number, checkpointName: string) => {
+        if (!window.confirm(`Delete "${checkpointName}"? Students will no longer see this checkpoint.`)) {
+            return;
+        }
+
+        try {
+            setDeletingCheckpointId(practiceProblemId);
+            await axios.post(
+                `${import.meta.env.VITE_API_URL}/projects/delete_practice_problem`,
+                {
+                    practice_problem_id: practiceProblemId,
+                },
+                { headers: authHeader() }
+            );
+
+            setPracticeProblems((current) => (
+                current
+                    .filter((pp) => pp.id !== practiceProblemId)
+                    .map((pp, index) => ({ ...pp, number: index + 1 }))
+            ));
+            setCheckpointDrafts((current) => (
+                current
+                    .filter((pp) => pp.id !== practiceProblemId)
+                    .map((pp, index) => ({ ...pp, number: index + 1 }))
+            ));
+            loadOverview();
+        } catch (err) {
+            console.log(err);
+            window.alert("Could not delete the checkpoint.");
+        } finally {
+            setDeletingCheckpointId(null);
         }
     };
 
@@ -724,7 +1070,7 @@ export default function AdminModuleDetails() {
                     showReviewButton={false}
                 />
 
-                <div className="project-detail-loading">Loading module...</div>
+                <div className="project-detail-loading">Loading module path...</div>
             </div>
         );
     }
@@ -761,7 +1107,7 @@ export default function AdminModuleDetails() {
         );
     }
 
-    const active = isModuleActive(module);
+    const moduleStatus = getModuleStatus(module);
     const moduleChanged =
         moduleNameDraft.trim() !== module.Name.trim()
         || moduleStartDraft !== formatDateTimeLocal(module.Start)
@@ -770,6 +1116,13 @@ export default function AdminModuleDetails() {
     const mainProjectNameChanged = mainProjectNameDraft.trim() !== project.Name.trim();
     const moduleBaseUrl = `/admin/school/${schoolId}/class/${classId}/module/${module.Id}`;
     const projectBaseUrl = `${moduleBaseUrl}/project/${project.Id}`;
+    const mainProjectSetupStatus = {
+        hasSolutionProgram: !!project.HasSolutionProgram,
+        hasTestcases: !!project.HasTestcases,
+        testcaseCount: Number(project.TestcaseCount || 0),
+    };
+    const mainProjectMissingSetupItems = getSetupMissingItems(mainProjectSetupStatus);
+    const mainProjectHasMissingSetup = mainProjectMissingSetupItems.length > 0;
 
     return (
         <div className="project-detail-page">
@@ -797,29 +1150,29 @@ export default function AdminModuleDetails() {
 
             <div className="pageTitle">Admin Module Details</div>
 
-            <div className={`project-detail-hero${editingModule ? " is-editing-module" : ""}`}>
+            <div className={`project-detail-hero is-${moduleStatus}${editingModule ? " is-editing-module" : ""}`}>
                 <div className="project-detail-hero-copy">
                     <div className="project-detail-title-row">
                         <h1 className="project-detail-title">{module.Name}</h1>
-                        {active && <span className="badge-active">● Active</span>}
+                        <span className={`badge-module-status is-${moduleStatus}`}>
+                            ● {moduleStatus}
+                        </span>
                     </div>
 
                     <div className="project-detail-dates">
-                        {formatDate12h(module.Start)} - {formatDate12h(module.End)}
+                        {formatDate12h(module.Start)} to {formatDate12h(module.End)}
                     </div>
                 </div>
 
                 {!editingModule ? (
-                    <div className="project-detail-hero-actions">
-                        <button
-                            type="button"
-                            className="project-action project-action-secondary"
-                            onClick={() => setEditingModule(true)}
-                        >
-                            <FaEdit aria-hidden="true" />
-                            Edit Module
-                        </button>
-                    </div>
+                    <button
+                        type="button"
+                        className="project-action project-action-secondary module-edit-button"
+                        onClick={() => setEditingModule(true)}
+                    >
+                        <FaEdit aria-hidden="true" />
+                        Edit Module
+                    </button>
                 ) : (
                     <div className="hero-module-settings" aria-label="Module Settings">
                         <div className="hero-module-settings-header">
@@ -892,36 +1245,103 @@ export default function AdminModuleDetails() {
             </div>
 
             <main className="project-workspace">
-                <section className="project-work-section main-project-section">
-                    <div className="work-section-header">
+                <section className="checkpoint-path-section" aria-label="Checkpoint path editor">
+                    <div className="checkpoint-path-header">
                         <div>
-                            <h2>Main Project</h2>
+                            <h2>Checkpoint Path</h2>
+                            <p>Students see these as checkpoints that lead into the main project. Use this page to edit names, setup files, test cases, and review submissions.</p>
                         </div>
+
+                        <button
+                            type="button"
+                            className="project-action project-action-secondary manage-practice-link"
+                            onClick={openCheckpointManager}
+                        >
+                            <FaWrench aria-hidden="true" />
+                            Manage Checkpoints
+                        </button>
                     </div>
 
-                    <div className="project-card-row main-project-row">
-                        <article className="project-tile-card project-tile-main">
-                            <div className="project-tile-top">
-                                <div className="project-tile-identity">
-                                    <div className="project-type-icon" aria-hidden="true">
-                                        <FaTasks />
-                                    </div>
+                    <div className="checkpoint-path-track" ref={checkpointPathTrackRef}>
+                        <svg
+                            className="checkpoint-path-connector-layer"
+                            width={pathSvgState.width}
+                            height={pathSvgState.height}
+                            viewBox={`0 0 ${pathSvgState.width} ${pathSvgState.height}`}
+                            aria-hidden="true"
+                            focusable="false"
+                        >
+                            {pathSvgState.segments.map((segment) => (
+                                <path
+                                    className={[
+                                        "checkpoint-path-connector-line",
+                                        segment.state === "complete" ? "is-complete" : "",
+                                        segment.state === "missing" ? "is-missing" : "",
+                                    ].join(" ").trim()}
+                                    d={segment.d}
+                                    key={segment.key}
+                                />
+                            ))}
+                        </svg>
 
-                                    <div className="project-title-editor">
-                                        <div className="project-card-meta">
-                                            <span>Main Project</span>
+                        {sortedCheckpoints.length === 0 ? (
+                            <div className="checkpoint-path-empty">
+                                No checkpoints are available yet. The main project remains the final path item.
+                            </div>
+                        ) : null}
+
+                        {sortedCheckpoints.map((pp) => {
+                            const submissionCount = pp.submissions ?? 0;
+                            const draftName = practiceNameDrafts[pp.id] ?? pp.name;
+                            const nameChanged = draftName.trim() !== pp.name.trim();
+                            const isEditingPracticeName = !!editingPracticeNames[pp.id];
+                            const checkpointSetupStatus = {
+                                hasSolutionProgram: !!pp.hasSolutionProgram,
+                                hasTestcases: !!pp.hasTestcases,
+                                testcaseCount: Number(pp.testcaseCount || 0),
+                            };
+                            const missingSetupItems = getSetupMissingItems(checkpointSetupStatus);
+                            const hasMissingSetup = missingSetupItems.length > 0;
+                            const checkpointReady = pp.enabled && !hasMissingSetup;
+
+                            return (
+                                <article
+                                    className={[
+                                        "checkpoint-path-node",
+                                        "checkpoint-card",
+                                        hasMissingSetup ? "is-missing-setup" : checkpointReady ? "is-complete" : "is-active",
+                                        !pp.enabled ? "is-disabled" : "",
+                                    ].join(" ").trim()}
+                                    key={pp.id}
+                                    data-admin-path-node="true"
+                                >
+                                    <div className="checkpoint-node-topline">
+                                        <div className="checkpoint-node-icon practice-number-badge" aria-hidden="true">
+                                            {hasMissingSetup ? <FaExclamationTriangle /> : checkpointReady ? <FaCheck /> : <FaPlay />}
                                         </div>
 
-                                        {!editingMainProjectName ? (
+                                        <div className="checkpoint-node-status-stack">
+                                            <span className="checkpoint-node-label">Checkpoint {pp.number}</span>
+                                            {hasMissingSetup ? (
+                                                <span className="project-status-badge setup-warning-badge">
+                                                    <FaExclamationTriangle aria-hidden="true" />
+                                                    {formatMissingSetupText(missingSetupItems)}
+                                                </span>
+                                            ) : null}
+                                            {!pp.enabled ? (
+                                                <span className="project-status-badge">Disabled</span>
+                                            ) : null}
+                                        </div>
+                                    </div>
+
+                                    <div className="project-title-editor checkpoint-title-editor">
+                                        {!isEditingPracticeName ? (
                                             <div className="read-only-name-row">
-                                                <h3 className="project-display-name">{project.Name}</h3>
+                                                <h3 className="project-display-name">{pp.name}</h3>
                                                 <button
                                                     type="button"
                                                     className="project-action project-action-secondary compact-edit-button"
-                                                    onClick={() => {
-                                                        setMainProjectNameDraft(project.Name);
-                                                        setEditingMainProjectName(true);
-                                                    }}
+                                                    onClick={() => beginPracticeNameEdit(pp.id, pp.name)}
                                                 >
                                                     <FaEdit aria-hidden="true" />
                                                     Edit Name
@@ -930,28 +1350,34 @@ export default function AdminModuleDetails() {
                                         ) : (
                                             <>
                                                 <input
-                                                    className="project-inline-name-input"
+                                                    className="project-inline-name-input practice-name-input"
                                                     type="text"
-                                                    value={mainProjectNameDraft}
-                                                    onChange={(e) => setMainProjectNameDraft(e.currentTarget.value)}
+                                                    value={draftName}
+                                                    onChange={(e) => {
+                                                        const next = e.currentTarget.value;
+                                                        setPracticeNameDrafts((current) => ({
+                                                            ...current,
+                                                            [pp.id]: next,
+                                                        }));
+                                                    }}
                                                 />
 
                                                 <div className="name-edit-actions">
                                                     <button
                                                         type="button"
                                                         className="project-action project-action-primary inline-save-button"
-                                                        onClick={saveMainProjectName}
-                                                        disabled={savingProjectName || !mainProjectNameChanged}
+                                                        onClick={() => savePracticeProblemName(pp.id)}
+                                                        disabled={savingPracticeNameId === pp.id || !nameChanged}
                                                     >
                                                         <FaSave aria-hidden="true" />
-                                                        {savingProjectName ? "Saving..." : "Save Name"}
+                                                        {savingPracticeNameId === pp.id ? "Saving..." : "Save Name"}
                                                     </button>
 
                                                     <button
                                                         type="button"
                                                         className="project-action project-action-secondary inline-save-button"
-                                                        onClick={cancelMainProjectEdit}
-                                                        disabled={savingProjectName}
+                                                        onClick={() => cancelPracticeNameEdit(pp.id, pp.name)}
+                                                        disabled={savingPracticeNameId === pp.id}
                                                     >
                                                         <FaTimes aria-hidden="true" />
                                                         Cancel
@@ -960,169 +1386,293 @@ export default function AdminModuleDetails() {
                                             </>
                                         )}
                                     </div>
+
+                                    <div className="checkpoint-node-actions">
+                                        <div className="project-submission-pill">
+                                            <strong>{submissionCount}</strong>
+                                            <span>
+                                                submission{submissionCount === 1 ? "" : "s"}
+                                            </span>
+                                        </div>
+
+                                        <Link
+                                            className="review-submissions-action"
+                                            to={`${projectBaseUrl}/practice/${pp.id}/submissions`}
+                                        >
+                                            <FaEye aria-hidden="true" />
+                                            Review Submissions
+                                        </Link>
+                                    </div>
+
+                                    {renderSetupIndicators(checkpointSetupStatus, `${projectBaseUrl}/practice/${pp.id}/manage`)}
+                                </article>
+                            );
+                        })}
+
+                        <article
+                            className={[
+                                "checkpoint-path-node",
+                                "checkpoint-main-node",
+                                mainProjectHasMissingSetup ? "is-missing-setup" : mainProjectReady ? "is-complete" : "is-active",
+                            ].join(" ").trim()}
+                            data-admin-path-node="true"
+                        >
+                            <div className="checkpoint-node-topline">
+                                <div className="checkpoint-node-icon main-project-icon" aria-hidden="true">
+                                    {mainProjectHasMissingSetup ? <FaExclamationTriangle /> : mainProjectReady ? <FaCheck /> : <FaTasks />}
                                 </div>
 
+                                <div className="checkpoint-node-status-stack">
+                                    <span className="checkpoint-node-label">Main Project</span>
+                                    <span className="checkpoint-node-final-badge">
+                                        <FaFlagCheckered aria-hidden="true" />
+                                        Final submission
+                                    </span>
+                                    {mainProjectHasMissingSetup ? (
+                                        <span className="project-status-badge setup-warning-badge">
+                                            <FaExclamationTriangle aria-hidden="true" />
+                                            {formatMissingSetupText(mainProjectMissingSetupItems)}
+                                        </span>
+                                    ) : null}
+                                </div>
+                            </div>
+
+                            <div className="project-title-editor checkpoint-title-editor">
+                                {!editingMainProjectName ? (
+                                    <div className="read-only-name-row">
+                                        <h3 className="project-display-name">{project.Name}</h3>
+                                        <button
+                                            type="button"
+                                            className="project-action project-action-secondary compact-edit-button"
+                                            onClick={() => {
+                                                setMainProjectNameDraft(project.Name);
+                                                setEditingMainProjectName(true);
+                                            }}
+                                        >
+                                            <FaEdit aria-hidden="true" />
+                                            Edit Name
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <input
+                                            className="project-inline-name-input"
+                                            type="text"
+                                            value={mainProjectNameDraft}
+                                            onChange={(e) => setMainProjectNameDraft(e.currentTarget.value)}
+                                        />
+
+                                        <div className="name-edit-actions">
+                                            <button
+                                                type="button"
+                                                className="project-action project-action-primary inline-save-button"
+                                                onClick={saveMainProjectName}
+                                                disabled={savingProjectName || !mainProjectNameChanged}
+                                            >
+                                                <FaSave aria-hidden="true" />
+                                                {savingProjectName ? "Saving..." : "Save Name"}
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                className="project-action project-action-secondary inline-save-button"
+                                                onClick={cancelMainProjectEdit}
+                                                disabled={savingProjectName}
+                                            >
+                                                <FaTimes aria-hidden="true" />
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+
+                            <div className="checkpoint-node-actions">
                                 <div className="project-submission-pill">
                                     <strong>{project.TotalSubmissions}</strong>
                                     <span>
                                         submission{project.TotalSubmissions === 1 ? "" : "s"}
                                     </span>
                                 </div>
-                            </div>
 
-                            {renderSetupIndicators({
-                                hasSolutionProgram: !!project.HasSolutionProgram,
-                                hasTestcases: !!project.HasTestcases,
-                                testcaseCount: project.TestcaseCount || 0,
-                            }, `${projectBaseUrl}/manage`)}
-
-                            <div className="project-tile-footer project-tile-footer-single">
                                 <Link
-                                    className="project-action project-action-primary review-submissions-action"
+                                    className="review-submissions-action"
                                     to={`${projectBaseUrl}/submissions`}
                                 >
                                     <FaEye aria-hidden="true" />
-                                    Review Student Submissions
+                                    Review Submissions
                                 </Link>
                             </div>
+
+                            {renderSetupIndicators(mainProjectSetupStatus, `${projectBaseUrl}/manage`)}
                         </article>
                     </div>
                 </section>
+            </main>
 
-                <section className="project-work-section practice-project-section">
-                    <div className="work-section-header">
-                        <div>
-                            <h2>Practice Problems</h2>
+            {checkpointManagerOpen ? (
+                <div
+                    className="checkpoint-manager-modal-backdrop"
+                    role="presentation"
+                    onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) {
+                            closeCheckpointManager();
+                        }
+                    }}
+                >
+                    <section
+                        className="checkpoint-manager-modal"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="checkpoint-manager-title"
+                    >
+                        <div className="checkpoint-manager-header">
+                            <div>
+                                <span className="hero-settings-eyebrow">Checkpoint Manager</span>
+                                <h2 id="checkpoint-manager-title">Arrange checkpoints</h2>
+                                <p>
+                                    Add checkpoints, remove old ones, and set the order students will follow before the main project.
+                                </p>
+                                {checkpointOrderChanged ? (
+                                    <div className="checkpoint-manager-unsaved-alert" role="status">
+                                        <FaExclamationTriangle aria-hidden="true" />
+                                        Unsaved order changes. Click Save Order before closing.
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <button
+                                type="button"
+                                className="checkpoint-manager-close"
+                                onClick={closeCheckpointManager}
+                                aria-label="Close checkpoint manager"
+                                disabled={checkpointModalBusy}
+                            >
+                                <FaTimes aria-hidden="true" />
+                            </button>
                         </div>
 
-                        <Link
-                            className="project-action project-action-secondary manage-practice-link"
-                            to={`${projectBaseUrl}/practice/select`}
-                        >
-                            Manage Practice Problems
-                        </Link>
-                    </div>
-
-                    {practiceProblems.length === 0 ? (
-                        <div className="practice-empty">
-                            <div className="practice-empty-title">No practice problems found</div>
-                            <p>
-                                Add practice problems to give students extra attempts before submitting the main
-                                project.
-                            </p>
-                        </div>
-                    ) : (
-                        <div className="project-card-row practice-board">
-                            {practiceProblems.map((pp) => {
-                                const submissionCount = pp.submissions ?? 0;
-                                const draftName = practiceNameDrafts[pp.id] ?? pp.name;
-                                const nameChanged = draftName.trim() !== pp.name.trim();
-                                const isEditingPracticeName = !!editingPracticeNames[pp.id];
-
-                                return (
-                                    <article
-                                        className={`project-tile-card practice-project-card${!pp.enabled ? " is-disabled" : ""}`}
-                                        key={pp.id}
-                                    >
-                                        <div className="project-tile-top">
-                                            <div className="project-tile-identity">
-                                                <div className="project-type-icon practice-number-badge">
-                                                    {pp.number}
-                                                </div>
-
-                                                <div className="project-title-editor">
-                                                    <div className="project-card-meta">
-                                                        <span>Practice Problem</span>
-                                                        {!pp.enabled && (
-                                                            <span className="project-status-badge">
-                                                                Disabled
-                                                            </span>
-                                                        )}
-                                                    </div>
-
-                                                    {!isEditingPracticeName ? (
-                                                        <div className="read-only-name-row">
-                                                            <h3 className="project-display-name">{pp.name}</h3>
-                                                            <button
-                                                                type="button"
-                                                                className="project-action project-action-secondary compact-edit-button"
-                                                                onClick={() => beginPracticeNameEdit(pp.id, pp.name)}
-                                                            >
-                                                                <FaEdit aria-hidden="true" />
-                                                                Edit Name
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <input
-                                                                className="project-inline-name-input practice-name-input"
-                                                                type="text"
-                                                                value={draftName}
-                                                                onChange={(e) => {
-                                                                    const next = e.currentTarget.value;
-                                                                    setPracticeNameDrafts((current) => ({
-                                                                        ...current,
-                                                                        [pp.id]: next,
-                                                                    }));
-                                                                }}
-                                                            />
-
-                                                            <div className="name-edit-actions">
-                                                                <button
-                                                                    type="button"
-                                                                    className="project-action project-action-primary inline-save-button"
-                                                                    onClick={() => savePracticeProblemName(pp.id)}
-                                                                    disabled={savingPracticeNameId === pp.id || !nameChanged}
-                                                                >
-                                                                    <FaSave aria-hidden="true" />
-                                                                    {savingPracticeNameId === pp.id ? "Saving..." : "Save Name"}
-                                                                </button>
-
-                                                                <button
-                                                                    type="button"
-                                                                    className="project-action project-action-secondary inline-save-button"
-                                                                    onClick={() => cancelPracticeNameEdit(pp.id, pp.name)}
-                                                                    disabled={savingPracticeNameId === pp.id}
-                                                                >
-                                                                    <FaTimes aria-hidden="true" />
-                                                                    Cancel
-                                                                </button>
-                                                            </div>
-                                                        </>
-                                                    )}
-                                                </div>
+                        <div className="checkpoint-manager-body">
+                            {checkpointDrafts.length === 0 ? (
+                                <div className="checkpoint-manager-empty">
+                                    No checkpoints have been added yet. Add one to create the first step before the main project.
+                                </div>
+                            ) : (
+                                <div className="checkpoint-manager-list">
+                                    {checkpointDrafts.map((pp, index) => (
+                                        <article className="checkpoint-manager-row" key={pp.id}>
+                                            <div className="checkpoint-manager-number">
+                                                {index + 1}
                                             </div>
 
-                                            <div className="project-submission-pill">
-                                                <strong>{submissionCount}</strong>
+                                            <div className="checkpoint-manager-row-copy">
+                                                <strong>{pp.name}</strong>
                                                 <span>
-                                                    submission{submissionCount === 1 ? "" : "s"}
+                                                    {pp.submissions ?? 0} submission{(pp.submissions ?? 0) === 1 ? "" : "s"}
                                                 </span>
                                             </div>
-                                        </div>
 
-                                        {renderSetupIndicators({
-                                            hasSolutionProgram: !!pp.hasSolutionProgram,
-                                            hasTestcases: !!pp.hasTestcases,
-                                            testcaseCount: pp.testcaseCount || 0,
-                                        }, `${projectBaseUrl}/practice/${pp.id}/manage`)}
+                                            <div className="checkpoint-manager-row-actions">
+                                                <button
+                                                    type="button"
+                                                    className="project-action project-action-secondary checkpoint-manager-icon-button"
+                                                    onClick={() => moveCheckpointDraft(index, -1)}
+                                                    disabled={index === 0 || checkpointModalBusy}
+                                                    aria-label={`Move ${pp.name} up`}
+                                                >
+                                                    <FaArrowUp aria-hidden="true" />
+                                                </button>
 
-                                        <div className="project-tile-footer project-tile-footer-single">
-                                            <Link
-                                                className="project-action project-action-primary review-submissions-action"
-                                                to={`${projectBaseUrl}/practice/${pp.id}/submissions`}
-                                            >
-                                                <FaEye aria-hidden="true" />
-                                                Review Student Submissions
-                                            </Link>
-                                        </div>
-                                    </article>
-                                );
-                            })}
+                                                <button
+                                                    type="button"
+                                                    className="project-action project-action-secondary checkpoint-manager-icon-button"
+                                                    onClick={() => moveCheckpointDraft(index, 1)}
+                                                    disabled={index === checkpointDrafts.length - 1 || checkpointModalBusy}
+                                                    aria-label={`Move ${pp.name} down`}
+                                                >
+                                                    <FaArrowDown aria-hidden="true" />
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    className="project-action project-action-danger checkpoint-manager-icon-button"
+                                                    onClick={() => deleteCheckpoint(pp.id, pp.name)}
+                                                    disabled={checkpointModalBusy}
+                                                    aria-label={`Delete ${pp.name}`}
+                                                >
+                                                    <FaTrash aria-hidden="true" />
+                                                    {deletingCheckpointId === pp.id ? "Deleting..." : "Delete"}
+                                                </button>
+                                            </div>
+                                        </article>
+                                    ))}
+                                </div>
+                            )}
+
+                            <article className="checkpoint-manager-row checkpoint-manager-main-row">
+                                <div className="checkpoint-manager-number checkpoint-manager-main-number">
+                                    <FaFlagCheckered aria-hidden="true" />
+                                </div>
+
+                                <div className="checkpoint-manager-row-copy">
+                                    <strong>{project.Name}</strong>
+                                    <span>Main program, always final · {project.TotalSubmissions} submission{project.TotalSubmissions === 1 ? "" : "s"}</span>
+                                </div>
+
+                                <div className="checkpoint-manager-row-actions checkpoint-manager-main-actions">
+                                    <span className="checkpoint-manager-fixed-pill">Fixed final step</span>
+                                    <Link
+                                        className="project-action project-action-secondary checkpoint-manager-main-link"
+                                        to={`${projectBaseUrl}/manage`}
+                                        onClick={() => setCheckpointManagerOpen(false)}
+                                    >
+                                        <FaWrench aria-hidden="true" />
+                                        Manage Main Program
+                                    </Link>
+                                </div>
+                            </article>
                         </div>
-                    )}
-                </section>
-            </main>
+
+                        <div className="checkpoint-manager-footer">
+                            <div className="checkpoint-manager-footer-start">
+                                <button
+                                    type="button"
+                                    className="project-action project-action-secondary"
+                                    onClick={addCheckpoint}
+                                    disabled={checkpointModalBusy}
+                                >
+                                    <FaPlus aria-hidden="true" />
+                                    {addingCheckpoint ? "Adding..." : "Add Checkpoint"}
+                                </button>
+                                {checkpointOrderChanged ? (
+                                    <span className="checkpoint-manager-unsaved-pill">Unsaved changes</span>
+                                ) : null}
+                            </div>
+
+                            <div className="checkpoint-manager-footer-actions">
+                                <button
+                                    type="button"
+                                    className="project-action project-action-secondary"
+                                    onClick={closeCheckpointManager}
+                                    disabled={checkpointModalBusy}
+                                >
+                                    Cancel
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="project-action project-action-primary"
+                                    onClick={saveCheckpointOrder}
+                                    disabled={!checkpointOrderChanged || checkpointModalBusy}
+                                >
+                                    <FaSave aria-hidden="true" />
+                                    {savingCheckpointOrder ? "Saving..." : "Save Order"}
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            ) : null}
         </div>
     );
 }

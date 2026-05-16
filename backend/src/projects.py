@@ -1,3 +1,4 @@
+
 import ast
 from collections import defaultdict
 from io import BytesIO
@@ -321,10 +322,75 @@ def create_practice_problem(project_repo: ProjectRepository = Provide[Container.
     name = str(data.get('name', '') or '').strip()
     if pid <= 0:
         return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
-    new_id = project_repo.create_practice_problem(pid, name=(name or "Practice Problem"))
+
+    if not name:
+        try:
+            next_number = len(project_repo.list_practice_problems(pid)) + 1
+            name = f"Checkpoint {next_number}"
+        except Exception:
+            name = "Checkpoint"
+
+    new_id = project_repo.create_practice_problem(pid, name=name)
     if not new_id:
         return make_response({'message': 'Could not create practice problem'}, HTTPStatus.INTERNAL_SERVER_ERROR)
     return jsonify({'ok': True, 'practice_problem_id': int(new_id)})
+
+@projects_api.route('/reorder_practice_problems', methods=['POST'])
+@jwt_required()
+@inject
+def reorder_practice_problems(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    data = request.get_json(silent=True) or {}
+    pid = parse_int(data.get("project_id", 0), 0)
+    ordered_ids_raw = data.get("ordered_ids", [])
+
+    if pid <= 0 or not isinstance(ordered_ids_raw, list):
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+
+    ordered_ids = [parse_int(item, 0) for item in ordered_ids_raw]
+    ordered_ids = [item for item in ordered_ids if item > 0]
+
+    try:
+        rows = project_repo.reorder_practice_problems(pid, ordered_ids)
+        return jsonify({
+            'ok': True,
+            'problems': [
+                {
+                    'id': int(r.Id),
+                    'number': int(getattr(r, "PracticeNumber", i + 1)),
+                    'name': (getattr(r, "Name", "") or f"Checkpoint {int(getattr(r, 'PracticeNumber', i + 1))}"),
+                    'enabled': bool(getattr(r, "Enabled", True)),
+                }
+                for i, r in enumerate(rows)
+            ],
+        })
+    except Exception as exc:
+        print(exc, flush=True)
+        return make_response({'message': 'Could not reorder checkpoints'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+@projects_api.route('/delete_practice_problem', methods=['POST'])
+@jwt_required()
+@inject
+def delete_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if current_user.Role != ADMIN_ROLE:
+        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+
+    data = request.get_json(silent=True) or {}
+    practice_problem_id = parse_int(data.get("practice_problem_id", 0), 0)
+
+    if practice_problem_id <= 0:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+
+    try:
+        pp = project_repo.delete_practice_problem(practice_problem_id)
+        if not pp:
+            return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+        return jsonify({'ok': True})
+    except Exception as exc:
+        print(exc, flush=True)
+        return make_response({'message': 'Could not delete checkpoint'}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
 @projects_api.route('/list_solution_files', methods=['GET'])
 @jwt_required()
@@ -1320,6 +1386,7 @@ def _module_payload(module, project_repo: ProjectRepository, submission_repo: Su
     project = project_repo.get_main_project_for_module(int(module.Id)) if module else None
     total_submissions = 0
     practice_total = 0
+    main_completed = False
     if project:
         try:
             totals = submission_repo.get_total_submission_for_all_projects()
@@ -1332,6 +1399,18 @@ def _module_payload(module, project_repo: ProjectRepository, submission_repo: Su
         except Exception:
             practice_total = 0
 
+        try:
+            main_completed = bool(
+                Submissions.query.filter(
+                    Submissions.Project == int(project.Id),
+                    Submissions.User == int(current_user.Id),
+                    Submissions.IsPractice == False,
+                    Submissions.IsPassing == True,
+                ).first()
+            )
+        except Exception:
+            main_completed = False          
+
     return {
         "Id": module.Id,
         "ClassId": module.ClassId,
@@ -1342,6 +1421,7 @@ def _module_payload(module, project_repo: ProjectRepository, submission_repo: Su
         "TotalSubmissions": total_submissions,
         "PracticeTotalSubmissions": int(practice_total),
         "PracticeProblemsEnabled": True,
+        "MainCompleted": main_completed,
     }
 
 def _project_payload(project, submission_repo: SubmissionRepository, project_repo: ProjectRepository):

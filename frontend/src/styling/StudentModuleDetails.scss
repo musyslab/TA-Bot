@@ -1,10 +1,11 @@
 .student-module-details-shell {
-    width: 95%;
+    width: 100%;
     margin: 0 auto 42px;
 }
 
 .module-details-message {
-    margin-top: 18px;
+    width: 95%;
+    margin: 18px auto 0;
     border: 1px solid #d8e0ea;
     background: rgba(255, 255, 255, 0.92);
     border-radius: 22px;
@@ -21,57 +22,63 @@
 }
 
 .module-quest-hero {
-    margin-top: 18px;
+    width: 95%;
+    margin: 1.25rem auto 1rem;
+    padding: 1.35rem;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 28px;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow:
+        0 24px 60px rgba(15, 23, 42, 0.11),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 18px;
+    grid-template-columns: minmax(260px, 1fr) auto;
     align-items: stretch;
-    border: 1px solid rgba(198, 208, 222, 0.9);
-    border-radius: 30px;
-    padding: 24px;
-    background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.82)),
-        linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(59, 130, 246, 0.12));
-    box-shadow: 0 24px 70px rgba(20, 35, 60, 0.12);
+    gap: 1rem;
     overflow: hidden;
     position: relative;
 }
 
-.module-quest-hero.is-ended {
-    background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.85)),
-        linear-gradient(135deg, rgba(148, 163, 184, 0.12), rgba(100, 116, 139, 0.1));
+.module-quest-hero-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .module-quest-hero h1 {
-    margin: 10px 0 8px;
-    font-size: clamp(2rem, 4vw, 3.4rem);
-    line-height: 1;
-    color: #132238;
+    margin: 0;
+    font-size: clamp(1.8rem, 4vw, 2.75rem);
+    line-height: 1.05;
+    font-weight: 950;
+    letter-spacing: -0.045em;
+    color: #0f172a;
+    overflow-wrap: anywhere;
 }
 
 .module-quest-hero p {
     max-width: 660px;
-    margin: 0;
-    color: #4b5c72;
-    font-size: 1.04rem;
-    font-weight: 650;
+    margin: 0.65rem 0 0;
+    color: #475569;
+    font-weight: 750;
+    line-height: 1.45;
 }
 
 .module-quest-meta-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 9px;
-    margin-top: 18px;
-    color: #34445a;
-    font-weight: 800;
+    gap: 0.35rem;
+    margin-top: 0.65rem;
+    color: #475569;
+    font-weight: 750;
+    line-height: 1.45;
 }
 
 .module-quest-meta-row span {
-    background: rgba(241, 245, 249, 0.95);
-    border: 1px solid #dfe7f1;
-    border-radius: 999px;
-    padding: 8px 12px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
 }
 
 .module-quest-progress-card {
@@ -96,8 +103,7 @@
     place-items: center;
     background:
         radial-gradient(circle at center, white 58%, transparent 59%),
-        conic-gradient(#10b981 0 75%, #e2e8f0 75% 100%);
-    box-shadow: 0 16px 30px rgba(16, 185, 129, 0.18);
+        conic-gradient(#10b981 0 var(--progress-percent, 0%), #e2e8f0 var(--progress-percent, 0%) 100%);
 }
 
 .module-quest-progress-ring span {
@@ -119,7 +125,8 @@
 }
 
 .module-path-section {
-    margin-top: 18px;
+    width: 95%;
+    margin: 18px auto 0;
     border: 1px solid rgba(198, 208, 222, 0.9);
     border-radius: 30px;
     background: rgba(255, 255, 255, 0.9);
@@ -164,20 +171,33 @@
     position: relative;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
-    gap: 18px;
+    gap: 52px 44px;
+    align-items: stretch;
+    overflow: visible;
 }
 
-.module-path-track::before {
-    content: "";
+.module-path-connector-layer {
     position: absolute;
-    top: 48px;
-    left: 32px;
-    right: 32px;
-    height: 7px;
-    border-radius: 999px;
-    background: linear-gradient(90deg, #bbf7d0, #bfdbfe, #fde68a);
-    opacity: 0.65;
+    inset: 0;
+    z-index: 0;
+    overflow: visible;
     pointer-events: none;
+}
+
+.module-path-connector-line {
+    fill: none;
+    stroke: #cbd5e1;
+    stroke-width: 6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 10 10;
+    opacity: 0.9;
+}
+
+.module-path-connector-line.is-complete {
+    stroke: #86efac;
+    stroke-dasharray: none;
+    opacity: 1;
 }
 
 .module-path-empty {
@@ -318,6 +338,17 @@
 .module-path-main-node.is-active .module-path-node-icon {
     background: #fef3c7;
     color: #a16207;
+}
+
+.module-path-main-node.is-complete {
+    border-color: #86efac;
+    background:
+        linear-gradient(180deg, rgba(236, 253, 245, 0.96), rgba(255, 255, 255, 0.96));
+}
+
+.module-path-main-node.is-complete .module-path-node-icon {
+    background: #dcfce7;
+    color: #15803d;
 }
 
 .module-path-main-flag {

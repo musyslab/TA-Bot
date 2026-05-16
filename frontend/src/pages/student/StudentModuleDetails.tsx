@@ -1,15 +1,21 @@
-import { KeyboardEvent, useEffect, useMemo, useState } from "react"
+import {
+    CSSProperties,
+    KeyboardEvent,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState
+} from "react"
 import axios from "axios"
 import { Helmet } from "react-helmet"
 import { useNavigate, useParams } from "react-router-dom"
 import {
-    FaArrowLeft,
-    FaBolt,
     FaCheck,
     FaFlagCheckered,
     FaLock,
     FaPlay,
-    FaRoute,
     FaStar,
     FaTrophy
 } from "react-icons/fa"
@@ -28,6 +34,7 @@ interface ModuleObject {
     TotalSubmissions?: number
     PracticeTotalSubmissions?: number
     PracticeProblemsEnabled?: boolean
+    MainCompleted?: boolean
 }
 
 interface PracticeProblem {
@@ -37,6 +44,18 @@ interface PracticeProblem {
     enabled: boolean
     solved: boolean
     rewarded: boolean
+}
+
+interface PathSegment {
+    key: string
+    d: string
+    completed: boolean
+}
+
+interface PathSvgState {
+    width: number
+    height: number
+    segments: PathSegment[]
 }
 
 const authHeader = () => ({
@@ -60,6 +79,13 @@ export default function StudentModuleDetails() {
     const [practiceProblems, setPracticeProblems] = useState<PracticeProblem[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [errorMessage, setErrorMessage] = useState("")
+    const [pathSvgState, setPathSvgState] = useState<PathSvgState>({
+        width: 0,
+        height: 0,
+        segments: []
+    })
+
+    const modulePathTrackRef = useRef<HTMLDivElement | null>(null)
 
     const mainProjectId = module?.MainProjectId || 0
 
@@ -103,14 +129,95 @@ export default function StudentModuleDetails() {
         })
     }, [practiceProblems])
 
-    const completedCount = sortedPracticeProblems.filter((problem) => problem.solved).length
+    const completedPracticeCount = sortedPracticeProblems.filter((problem) => problem.solved).length
     const totalPracticeCount = sortedPracticeProblems.length
-    const allPracticeSolved = totalPracticeCount === 0 || completedCount === totalPracticeCount
+    const mainCompleted = Boolean(module?.MainCompleted)
+    const totalAssignmentCount = totalPracticeCount + 1
+    const completedAssignmentCount = completedPracticeCount + (mainCompleted ? 1 : 0)
+    const allPracticeSolved = totalPracticeCount === 0 || completedPracticeCount === totalPracticeCount
     const firstUnsolvedIndex = sortedPracticeProblems.findIndex((problem) => !problem.solved)
     const activePracticeIndex = firstUnsolvedIndex === -1 ? totalPracticeCount : firstUnsolvedIndex
-    const progressPercent = totalPracticeCount === 0
-        ? 100
-        : Math.round((completedCount / totalPracticeCount) * 100)
+    const progressPercent = Math.round((completedAssignmentCount / totalAssignmentCount) * 100)
+
+    const pathCompletionStates = useMemo(() => {
+        return [
+            ...sortedPracticeProblems.map((problem) => problem.solved),
+            mainCompleted
+        ]
+    }, [sortedPracticeProblems, mainCompleted])
+
+    const recalculatePathConnectors = useCallback(() => {
+        const trackElement = modulePathTrackRef.current
+
+        if (!trackElement) {
+            setPathSvgState({ width: 0, height: 0, segments: [] })
+            return
+        }
+
+        const nodeElements = Array.from(
+            trackElement.querySelectorAll<HTMLElement>("[data-module-path-node='true']")
+        )
+
+        if (nodeElements.length <= 1) {
+            setPathSvgState({
+                width: trackElement.offsetWidth,
+                height: trackElement.offsetHeight,
+                segments: []
+            })
+            return
+        }
+
+        const trackRect = trackElement.getBoundingClientRect()
+        const nodeRects = nodeElements.map((nodeElement) => {
+            const rect = nodeElement.getBoundingClientRect()
+
+            return {
+                left: rect.left - trackRect.left,
+                right: rect.right - trackRect.left,
+                top: rect.top - trackRect.top,
+                bottom: rect.bottom - trackRect.top,
+                width: rect.width,
+                height: rect.height,
+                centerX: rect.left - trackRect.left + rect.width / 2,
+                centerY: rect.top - trackRect.top + rect.height / 2
+            }
+        })
+
+        const segments: PathSegment[] = []
+
+        for (let i = 0; i < nodeRects.length - 1; i += 1) {
+            const current = nodeRects[i]
+            const next = nodeRects[i + 1]
+
+            const sameRow = Math.abs(current.centerY - next.centerY) < Math.min(current.height, next.height) * 0.45
+            let d = ""
+
+            if (sameRow) {
+                d = `M ${current.right} ${current.centerY} L ${next.left} ${next.centerY}`
+            } else {
+                const routeY = current.bottom + Math.max(12, (next.top - current.bottom) / 2)
+
+                d = [
+                    `M ${current.centerX} ${current.bottom}`,
+                    `L ${current.centerX} ${routeY}`,
+                    `L ${next.centerX} ${routeY}`,
+                    `L ${next.centerX} ${next.top}`
+                ].join(" ")
+            }
+
+            segments.push({
+                key: `module-path-connector-${i}`,
+                d,
+                completed: Boolean(pathCompletionStates[i])
+            })
+        }
+
+        setPathSvgState({
+            width: trackRect.width,
+            height: trackRect.height,
+            segments
+        })
+    }, [pathCompletionStates])
 
     const loadModuleDetails = () => {
         if (!classId || !moduleId) {
@@ -178,6 +285,39 @@ export default function StudentModuleDetails() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [classId, moduleId])
 
+    useLayoutEffect(() => {
+        recalculatePathConnectors()
+
+        const trackElement = modulePathTrackRef.current
+        if (!trackElement) return
+
+        const resizeObserver = new ResizeObserver(() => {
+            recalculatePathConnectors()
+        })
+
+        resizeObserver.observe(trackElement)
+
+        Array.from(
+            trackElement.querySelectorAll<HTMLElement>("[data-module-path-node='true']")
+        ).forEach((nodeElement) => {
+            resizeObserver.observe(nodeElement)
+        })
+
+        window.addEventListener("resize", recalculatePathConnectors)
+
+        return () => {
+            resizeObserver.disconnect()
+            window.removeEventListener("resize", recalculatePathConnectors)
+        }
+    }, [
+        recalculatePathConnectors,
+        sortedPracticeProblems.length,
+        mainCompleted,
+        allPracticeSolved,
+        isLoading,
+        module?.Id
+    ])
+
     const goBackToModules = () => {
         navigate(`/student/school/${schoolId}/class/${classId}/modules`)
     }
@@ -242,7 +382,6 @@ export default function StudentModuleDetails() {
             <div className="pageTitle">Student Module Details</div>
 
             <div className="student-module-details-shell">
-
                 {isLoading ? (
                     <div className="module-details-message">Loading module path...</div>
                 ) : null}
@@ -255,13 +394,7 @@ export default function StudentModuleDetails() {
                     <>
                         <section className={`module-quest-hero is-${statusLabel}`}>
                             <div className="module-quest-hero-copy">
-
                                 <h1>{module.Name}</h1>
-
-                                <p>
-                                    Complete the practice checkpoints to unlock the main assignment.
-                                </p>
-
                                 <div className="module-quest-meta-row">
                                     <span>{formatDate12h(module.Start)}</span>
                                     <span>to</span>
@@ -270,16 +403,16 @@ export default function StudentModuleDetails() {
                             </div>
 
                             <div className="module-quest-progress-card">
-                                <div className="module-quest-progress-ring">
+                                <div
+                                    className="module-quest-progress-ring"
+                                    style={{ "--progress-percent": `${progressPercent}%` } as CSSProperties}
+                                >
                                     <span>{progressPercent}%</span>
                                 </div>
 
                                 <div>
                                     <div className="module-quest-progress-title">
-                                        {completedCount} / {totalPracticeCount} checkpoints cleared
-                                    </div>
-                                    <div className="module-quest-progress-subtitle">
-                                        {allPracticeSolved ? "Main assignment unlocked" : "Keep going to reach the final quest"}
+                                        {completedAssignmentCount} / {totalAssignmentCount} assignments completed
                                     </div>
                                 </div>
                             </div>
@@ -288,15 +421,35 @@ export default function StudentModuleDetails() {
                         <section className="module-path-section" aria-label="Practice problem unlock path">
                             <div className="module-path-header">
                                 <div>
-                                    <h2>Unlock Path</h2>
-                                    <p>Each practice problem is a checkpoint on the way to the main assignment.</p>
+                                    <h2>Checkpoint Path</h2>
+                                    <p>Complete the practice checkpoints to unlock the main project.</p>
                                 </div>
                             </div>
 
-                            <div className="module-path-track">
+                            <div className="module-path-track" ref={modulePathTrackRef}>
+                                <svg
+                                    className="module-path-connector-layer"
+                                    width={pathSvgState.width}
+                                    height={pathSvgState.height}
+                                    viewBox={`0 0 ${pathSvgState.width} ${pathSvgState.height}`}
+                                    aria-hidden="true"
+                                    focusable="false"
+                                >
+                                    {pathSvgState.segments.map((segment) => (
+                                        <path
+                                            className={[
+                                                "module-path-connector-line",
+                                                segment.completed ? "is-complete" : ""
+                                            ].join(" ").trim()}
+                                            d={segment.d}
+                                            key={segment.key}
+                                        />
+                                    ))}
+                                </svg>
+
                                 {sortedPracticeProblems.length === 0 ? (
                                     <div className="module-path-empty">
-                                        No practice checkpoints are available yet. The main assignment is open.
+                                        No practice checkpoints are available yet. The main project is open.
                                     </div>
                                 ) : null}
 
@@ -314,6 +467,7 @@ export default function StudentModuleDetails() {
                                                 locked ? "is-locked" : ""
                                             ].join(" ").trim()}
                                             key={problem.id}
+                                            data-module-path-node="true"
                                             role={locked ? "article" : "button"}
                                             tabIndex={locked ? -1 : 0}
                                             onClick={() => {
@@ -354,8 +508,9 @@ export default function StudentModuleDetails() {
                                     className={[
                                         "module-path-node",
                                         "module-path-main-node",
-                                        allPracticeSolved ? "is-active" : "is-locked"
+                                        mainCompleted ? "is-complete" : allPracticeSolved ? "is-active" : "is-locked"
                                     ].join(" ").trim()}
+                                    data-module-path-node="true"
                                     role={allPracticeSolved ? "button" : "article"}
                                     tabIndex={allPracticeSolved ? 0 : -1}
                                     onClick={openMainProject}
@@ -365,19 +520,21 @@ export default function StudentModuleDetails() {
                                         event.preventDefault()
                                         openMainProject()
                                     }}
-                                    aria-label={`Main assignment ${allPracticeSolved ? "unlocked" : "locked"}`}
+                                    aria-label={`Main assignment ${mainCompleted ? "completed" : allPracticeSolved ? "unlocked" : "locked"}`}
                                 >
                                     <div className="module-path-node-icon">
-                                        {allPracticeSolved ? <FaTrophy aria-hidden="true" /> : <FaLock aria-hidden="true" />}
+                                        {mainCompleted ? <FaCheck aria-hidden="true" /> : allPracticeSolved ? <FaTrophy aria-hidden="true" /> : <FaLock aria-hidden="true" />}
                                     </div>
 
                                     <div className="module-path-node-content">
-                                        <div className="module-path-node-label">Final Quest</div>
+                                        <div className="module-path-node-label">Main Project</div>
                                         <h3>Main Assignment</h3>
                                         <p>
-                                            {allPracticeSolved
-                                                ? "Unlocked. Submit your main solution."
-                                                : "Locked until all practice checkpoints are cleared."}
+                                            {mainCompleted
+                                                ? "Completed"
+                                                : allPracticeSolved
+                                                    ? "Unlocked. Submit your main solution."
+                                                    : "Locked until all practice checkpoints are cleared."}
                                         </p>
                                     </div>
 
