@@ -14,13 +14,36 @@ import {
 import MenuComponent from "../components/MenuComponent";
 import "../../styling/HomePage.scss";
 
+const getValidStoredToken = (): string | null => {
+  const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+  if (!token) {
+    return null;
+  }
+
+  const cleanedToken = token.trim();
+
+  if (
+    !cleanedToken ||
+    cleanedToken.toLowerCase() === "null" ||
+    cleanedToken.toLowerCase() === "undefined"
+  ) {
+    localStorage.removeItem("AUTOTA_AUTH_TOKEN");
+    localStorage.removeItem("AUTOTA_USER_ROLE");
+    return null;
+  }
+
+  return cleanedToken;
+};
+
 function HomePage() {
-  const isLoggedIn = Boolean(localStorage.getItem("AUTOTA_AUTH_TOKEN"));
+  const isLoggedIn = Boolean(getValidStoredToken());
   const storedRole = localStorage.getItem("AUTOTA_USER_ROLE");
   const numericRole = storedRole === null ? null : parseInt(storedRole, 10);
-  const dashboardPath = numericRole !== null && !Number.isNaN(numericRole) && numericRole > 0
-    ? "/admin/schools"
-    : "/student/schools";
+  const dashboardPath =
+    numericRole !== null && !Number.isNaN(numericRole) && numericRole > 0
+      ? "/admin/schools"
+      : "/student/schools";
 
   return (
     <div className="home-page">

@@ -2,8 +2,6 @@ import { Component } from "react";
 import axios from "axios";
 import {
     FaUpload,
-    FaClock,
-    FaClipboardList,
     FaHome,
     FaSignInAlt,
     FaSignOutAlt,
@@ -19,6 +17,28 @@ interface MenuComponentProps {
     showReviewButton: boolean;
     showLast: boolean;
 }
+
+const getValidStoredToken = (): string | null => {
+    const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+    if (!token) {
+        return null;
+    }
+
+    const cleanedToken = token.trim();
+
+    if (
+        !cleanedToken ||
+        cleanedToken.toLowerCase() === "null" ||
+        cleanedToken.toLowerCase() === "undefined"
+    ) {
+        localStorage.removeItem("AUTOTA_AUTH_TOKEN");
+        localStorage.removeItem("AUTOTA_USER_ROLE");
+        return null;
+    }
+
+    return cleanedToken;
+};
 
 class MenuComponent extends Component<MenuComponentProps> {
     handleLogout = () => {
@@ -52,7 +72,7 @@ class MenuComponent extends Component<MenuComponentProps> {
     }
 
     handleDashboard = () => {
-        const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+        const token = getValidStoredToken();
 
         if (!token) {
             window.location.replace("/login");
@@ -95,7 +115,7 @@ class MenuComponent extends Component<MenuComponentProps> {
     render() {
         const classId = this.getClassIdFromUrl();
         const officeHoursPath = classId ? `/student/${classId}/OfficeHours` : "/student/schools";
-        const isLoggedIn = Boolean(localStorage.getItem("AUTOTA_AUTH_TOKEN"));
+        const isLoggedIn = Boolean(getValidStoredToken());
 
         return (
             <nav className="menu menu--top menu--inverted menu--borderless menu--huge">
@@ -109,25 +129,6 @@ class MenuComponent extends Component<MenuComponentProps> {
                             <a className="menu__item" href="/admin/upload">
                                 <FaUpload className="menu__icon" aria-hidden="true" />
                                 <span className="menu__text">Admin Upload</span>
-                            </a>
-
-                            <a className="menu__item" href="/admin/OfficeHours">
-                                <FaClock className="menu__icon" aria-hidden="true" />
-                                <span className="menu__text">Office Hours</span>
-                            </a>
-                        </>
-                    )}
-
-                    {this.props.showLast && (
-                        <>
-                            <a className="menu__item" href={officeHoursPath}>
-                                <FaClock className="menu__icon" aria-hidden="true" />
-                                <span className="menu__text">Office Hours</span>
-                            </a>
-
-                            <a className="menu__item" href="/student/PastSubmissions">
-                                <FaClipboardList className="menu__icon" aria-hidden="true" />
-                                <span className="menu__text">Past Submissions</span>
                             </a>
                         </>
                     )}

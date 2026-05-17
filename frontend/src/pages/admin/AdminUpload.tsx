@@ -9,6 +9,11 @@ import LoadingAnimation from '../components/LoadingAnimation'
 import '../../styling/AdminUploadPage.scss'
 import '../../styling/FileUploadCommon.scss'
 
+interface SchoolObject {
+    id: number
+    name: string
+}
+
 interface Student {
     name: string
     mscsnet: string
@@ -21,6 +26,27 @@ interface DropDownOption {
     text: string
 }
 
+interface ModuleObject {
+    Id: number
+    ClassId: number
+    Name: string
+    Start: string
+    End: string
+    MainProjectId: number | null
+    MainProjectName: string
+    TotalSubmissions: number
+    CheckpointTotalSubmissions: number
+    CheckpointsEnabled?: boolean
+    MainCompleted?: boolean
+}
+
+interface CheckpointOption {
+    id: number
+    number: number
+    name: string
+    enabled: boolean
+}
+
 interface UploadPageState {
     files: File[]
     mainJavaFileName: string
@@ -28,34 +54,25 @@ interface UploadPageState {
     isUploading: boolean
     error_message: string
     isErrorMessageHidden: boolean
+    school_id: number
     class_id: number
-    project_name: string
+    module_id: number
     project_id: number
-    end: string
+    student_id: number
+    schoollist: Array<DropDownOption>
     classlist: Array<DropDownOption>
     studentList: Array<DropDownOption>
-    projects: Array<DropDownOption>
-    student_id: number
-    class_selected: boolean
-    projectPracticeEnabledById: Record<number, boolean>
-    practiceProblemsByProjectId: Record<number, { id: number; number: number; name: string; enabled: boolean }[]>
-    selectedPracticeProblemId: number
-}
-
-interface ProjectObject {
-    Id: number
-    Name: string
-    Start: string
-    End: string
-    TotalSubmissions: number
-    PracticeProblemsEnabled?: boolean
+    modules: Array<DropDownOption>
+    moduleMainProjectById: Record<number, number>
+    moduleCheckpointsEnabledById: Record<number, boolean>
+    checkpointsByProjectId: Record<number, CheckpointOption[]>
+    selectedCheckpointId: number
 }
 
 interface AdminUploadPageProps {
     navigate: NavigateFunction
 }
 
-// Wrapper that injects the navigate function for the class component:
 const AdminUploadPageWrapper: React.FC = () => {
     const navigate = useNavigate()
     return <AdminUploadPage navigate={navigate} />
@@ -102,7 +119,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
     private async computeMainJavaFromLocal(localFiles: File[]): Promise<string> {
         const javaFiles = localFiles.filter((f) => AdminUploadPage.isJavaFileName(f.name))
         if (javaFiles.length <= 1) return ''
+
         const withMain: string[] = []
+
         for (const f of javaFiles) {
             try {
                 const txt = await f.text()
@@ -111,6 +130,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                 // ignore read failures
             }
         }
+
         return AdminUploadPage.pickMainJavaFile(
             javaFiles.map((f) => f.name),
             withMain
@@ -124,217 +144,347 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             isUploading: false,
             error_message: '',
             isErrorMessageHidden: true,
-            project_name: '',
+            school_id: 0,
+            class_id: 0,
+            module_id: 0,
             project_id: 0,
             student_id: 0,
-            class_id: 0,
-            end: '',
+            schoollist: [],
             classlist: [],
             studentList: [],
-            projects: [],
-            class_selected: false,
+            modules: [],
+            moduleMainProjectById: {},
+            moduleCheckpointsEnabledById: {},
+            checkpointsByProjectId: {},
+            selectedCheckpointId: 0,
             files: [],
             mainJavaFileName: '',
-            projectPracticeEnabledById: {},
-            practiceProblemsByProjectId: {},
-            selectedPracticeProblemId: 0,
         }
 
         this.handleSubmit = this.handleSubmit.bind(this)
-        this.handleProjectIdChange = this.handleProjectIdChange.bind(this)
-        this.handleStudentIdChange = this.handleStudentIdChange.bind(this)
-        this.handleFilesChange = this.handleFilesChange.bind(this)
+        this.handleSchoolIdChange = this.handleSchoolIdChange.bind(this)
         this.handleClassIdChange = this.handleClassIdChange.bind(this)
+        this.handleStudentIdChange = this.handleStudentIdChange.bind(this)
+        this.handleModuleIdChange = this.handleModuleIdChange.bind(this)
+        this.handleFilesChange = this.handleFilesChange.bind(this)
     }
 
-    private async loadPracticeProblemsForProject(projectId: number) {
-        if (!(projectId > 0)) return
-        if (!this.state.projectPracticeEnabledById[projectId]) return
+    private authHeaders() {
+        return {
+            Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
+        }
+    }
+
+    private clearError() {
+        this.setState({
+            error_message: '',
+            isErrorMessageHidden: true,
+        })
+    }
+
+    private setError(message: string) {
+        this.setState({
+            error_message: message,
+            isErrorMessageHidden: false,
+        })
+    }
+
+    private resetFromSchoolDown(nextSchoolId: number) {
+        this.setState({
+            school_id: nextSchoolId,
+            class_id: 0,
+            module_id: 0,
+            project_id: 0,
+            student_id: 0,
+            classlist: [],
+            studentList: [],
+            modules: [],
+            moduleMainProjectById: {},
+            moduleCheckpointsEnabledById: {},
+            checkpointsByProjectId: {},
+            selectedCheckpointId: 0,
+            files: [],
+            mainJavaFileName: '',
+            isUploading: false,
+        })
+    }
+
+    private resetFromClassDown(nextClassId: number) {
+        this.setState({
+            class_id: nextClassId,
+            module_id: 0,
+            project_id: 0,
+            student_id: 0,
+            studentList: [],
+            modules: [],
+            moduleMainProjectById: {},
+            moduleCheckpointsEnabledById: {},
+            checkpointsByProjectId: {},
+            selectedCheckpointId: 0,
+            files: [],
+            mainJavaFileName: '',
+            isUploading: false,
+        })
+    }
+
+    private resetFromStudentDown(nextStudentId: number) {
+        this.setState({
+            student_id: nextStudentId,
+            module_id: 0,
+            project_id: 0,
+            selectedCheckpointId: 0,
+            files: [],
+            mainJavaFileName: '',
+            isUploading: false,
+        })
+    }
+
+    private async loadSchools() {
+        this.setState({ isLoading: true })
+        this.clearError()
+
+        try {
+            const res = await axios.get(import.meta.env.VITE_API_URL + `/schools/all`, {
+                headers: this.authHeaders(),
+            })
+
+            const schools = res.data as Array<SchoolObject>
+            const schoolsDropdown: Array<DropDownOption> = schools
+                .map((s) => ({
+                    key: Number(s.id),
+                    text: String(s.name),
+                    value: Number(s.id),
+                }))
+                .filter((s) => s.value > 0 && s.text)
+                .sort((a, b) => a.text.localeCompare(b.text))
+
+            this.setState({ schoollist: schoolsDropdown })
+        } catch (err: any) {
+            this.setError(err.response?.data?.message ?? 'Error loading schools')
+        } finally {
+            this.setState({ isLoading: false })
+        }
+    }
+
+    private async loadClassesForSchool(schoolId: number) {
+        if (!(schoolId > 0)) return
+
+        this.setState({ isLoading: true })
+        this.clearError()
 
         try {
             const res = await axios.get(
-                import.meta.env.VITE_API_URL + `/projects/list_practice_problems?project_id=${projectId}`,
-                {
-                    headers: {
-                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-                    },
-                }
+                import.meta.env.VITE_API_URL + `/class/all?school_id=${schoolId}`,
+                { headers: this.authHeaders() }
             )
-            const problems = Array.isArray(res.data?.problems) ? res.data.problems : []
-            const rows = problems.map((pp: any, idx: number) => ({
-                id: Number(pp?.id),
-                number: Number(pp?.number ?? idx + 1),
-                name: String(pp?.name ?? `Practice Problem ${idx + 1}`),
-                enabled: !!pp?.enabled,
+
+            const classes = Array.isArray(res.data?.classes) ? res.data.classes : res.data
+            const classesDropdown: Array<DropDownOption> = (classes || [])
+                .map((c: any) => ({
+                    key: Number(c.id ?? c.Id),
+                    text: String(c.name ?? c.Name ?? ''),
+                    value: Number(c.id ?? c.Id),
+                }))
+                .filter((c: DropDownOption) => c.value > 0 && c.text)
+                .sort((a: DropDownOption, b: DropDownOption) => a.text.localeCompare(b.text))
+
+            this.setState({ classlist: classesDropdown })
+        } catch (err: any) {
+            this.setError(err.response?.data?.message ?? 'Error loading classes')
+        } finally {
+            this.setState({ isLoading: false })
+        }
+    }
+
+    private async loadStudentsForClass(classId: number) {
+        if (!(classId > 0)) return
+
+        try {
+            const res = await axios.get(
+                import.meta.env.VITE_API_URL + `/upload/total_students_by_cid?class_id=${classId}`,
+                { headers: this.authHeaders() }
+            )
+
+            const students = res.data as Array<Student>
+
+            const lastNameOf = (full: string) => {
+                const n = (full || '').trim()
+                if (!n) return ''
+                if (n.includes(',')) return n.split(',')[0]!.trim()
+                const parts = n.split(/\s+/)
+                return parts[parts.length - 1]!
+            }
+
+            const isTestStudent = (name: string) => (name || '').trim().toLowerCase() === 'test student'
+
+            const sorted = [...students].sort((a, b) => {
+                const aTest = isTestStudent(a.name)
+                const bTest = isTestStudent(b.name)
+
+                if (aTest && !bTest) return -1
+                if (!aTest && bTest) return 1
+
+                const lnCmp = lastNameOf(a.name).localeCompare(lastNameOf(b.name), undefined, { sensitivity: 'base' })
+                if (lnCmp !== 0) return lnCmp
+
+                const nameCmp = (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+                if (nameCmp !== 0) return nameCmp
+
+                return a.id - b.id
+            })
+
+            const studentsDropdown: Array<DropDownOption> = sorted.map((s) => ({
+                key: s.id,
+                text: `${s.name} (${s.mscsnet})`,
+                value: s.id,
             }))
+
+            this.setState({ studentList: studentsDropdown })
+        } catch (err: any) {
+            this.setError(err.response?.data?.message ?? 'Error loading students')
+        }
+    }
+
+    private async loadModulesForClass(classId: number) {
+        if (!(classId > 0)) return
+
+        try {
+            const res = await axios.get(
+                import.meta.env.VITE_API_URL + `/projects/get_modules_by_class_id?id=${classId}`,
+                { headers: this.authHeaders() }
+            )
+
+            const modules = res.data as Array<ModuleObject>
+
+            const moduleDropdown: Array<DropDownOption> = modules
+                .filter((m) => Number(m.MainProjectId ?? 0) > 0)
+                .map((m) => ({
+                    key: Number(m.Id),
+                    text: String(m.Name),
+                    value: Number(m.Id),
+                }))
+                .sort((a, b) => a.text.localeCompare(b.text))
+
+            const mainProjectMap: Record<number, number> = {}
+            const checkpointsEnabledMap: Record<number, boolean> = {}
+
+            for (const moduleObj of modules) {
+                const moduleId = Number(moduleObj.Id)
+                const mainProjectId = Number(moduleObj.MainProjectId ?? 0)
+
+                if (moduleId > 0 && mainProjectId > 0) {
+                    mainProjectMap[moduleId] = mainProjectId
+                    checkpointsEnabledMap[moduleId] = moduleObj.CheckpointsEnabled !== false
+                }
+            }
+
+            this.setState({
+                modules: moduleDropdown,
+                moduleMainProjectById: mainProjectMap,
+                moduleCheckpointsEnabledById: checkpointsEnabledMap,
+            })
+        } catch (err: any) {
+            this.setError(err.response?.data?.message ?? 'Error loading modules')
+        }
+    }
+
+    private async loadCheckpointsForProject(projectId: number) {
+        if (!(projectId > 0)) return
+
+        try {
+            const res = await axios.get(
+                import.meta.env.VITE_API_URL + `/projects/list_checkpoints?project_id=${projectId}`,
+                { headers: this.authHeaders() }
+            )
+
+            const problems = Array.isArray(res.data?.problems) ? res.data.problems : []
+
+            const rows: CheckpointOption[] = problems.map((checkpoint: any, idx: number) => ({
+                id: Number(checkpoint?.id),
+                number: Number(checkpoint?.number ?? idx + 1),
+                name: String(checkpoint?.name ?? `Checkpoint ${idx + 1}`),
+                enabled: checkpoint?.enabled !== false,
+            }))
+
             this.setState((prev) => ({
-                practiceProblemsByProjectId: { ...prev.practiceProblemsByProjectId, [projectId]: rows },
+                checkpointsByProjectId: {
+                    ...prev.checkpointsByProjectId,
+                    [projectId]: rows,
+                },
             }))
         } catch {
             this.setState((prev) => ({
-                practiceProblemsByProjectId: { ...prev.practiceProblemsByProjectId, [projectId]: [] },
+                checkpointsByProjectId: {
+                    ...prev.checkpointsByProjectId,
+                    [projectId]: [],
+                },
             }))
         }
+    }
+
+    componentDidMount() {
+        this.loadSchools()
+    }
+
+    handleSchoolIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
+        const value = parseInt(e.target.value, 10)
+        const schoolId = Number.isNaN(value) ? 0 : value
+
+        this.resetFromSchoolDown(schoolId)
+
+        if (schoolId > 0) {
+            this.loadClassesForSchool(schoolId)
+        }
+    }
+
+    handleClassIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
+        const value = parseInt(e.target.value, 10)
+        const classId = Number.isNaN(value) ? 0 : value
+
+        this.resetFromClassDown(classId)
+
+        if (!(classId > 0)) return
+
+        this.setState({ isLoading: true })
+        this.clearError()
+
+        Promise.all([
+            this.loadStudentsForClass(classId),
+            this.loadModulesForClass(classId),
+        ]).finally(() => {
+            this.setState({ isLoading: false })
+        })
     }
 
     handleStudentIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
         const value = parseInt(e.target.value, 10)
-        // Reset downstream (project + selected file) when student changes
-        this.setState({
-            student_id: Number.isNaN(value) ? 0 : value,
-            project_id: 0,
-            files: [],
-            mainJavaFileName: '',
-            isUploading: false,
-            selectedPracticeProblemId: 0,
-        })
+        this.resetFromStudentDown(Number.isNaN(value) ? 0 : value)
     }
 
-    handleProjectIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    handleModuleIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
         const value = parseInt(e.target.value, 10)
-        const nextProjectId = Number.isNaN(value) ? 0 : value
+        const nextModuleId = Number.isNaN(value) ? 0 : value
+        const nextProjectId = this.state.moduleMainProjectById[nextModuleId] ?? 0
+
         this.setState(
             {
+                module_id: nextModuleId,
                 project_id: nextProjectId,
-                selectedPracticeProblemId: 0,
+                selectedCheckpointId: 0,
+                files: [],
+                mainJavaFileName: '',
             },
             () => {
-                if (nextProjectId > 0 && this.state.projectPracticeEnabledById[nextProjectId]) {
-                    this.loadPracticeProblemsForProject(nextProjectId)
+                if (
+                    nextProjectId > 0 &&
+                    this.state.moduleCheckpointsEnabledById[nextModuleId] !== false
+                ) {
+                    this.loadCheckpointsForProject(nextProjectId)
                 }
             }
         )
     }
 
-    handleClassIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
-        const value = parseInt(e.target.value, 10)
-        const cid = e.target.value
-
-        // On class change, reset everything downstream
-        this.setState({
-            isLoading: true,
-            class_id: Number.isNaN(value) ? 0 : value,
-            class_selected: true,
-            student_id: 0,
-            project_id: 0,
-            studentList: [],
-            projects: [],
-            files: [],
-            mainJavaFileName: '',
-            isUploading: false,
-            projectPracticeEnabledById: {},
-            practiceProblemsByProjectId: {},
-            selectedPracticeProblemId: 0,
-        })
-
-        axios
-            .get(import.meta.env.VITE_API_URL + `/upload/total_students_by_cid?class_id=${cid}`, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-                },
-            })
-            .then((res) => {
-                const students = res.data as Array<Student>
-                const lastNameOf = (full: string) => {
-                    const n = (full || '').trim()
-                    if (!n) return ''
-                    if (n.includes(',')) return n.split(',')[0]!.trim()
-                    const parts = n.split(/\s+/)
-                    return parts[parts.length - 1]!
-                }
-                const isTestStudent = (name: string) => (name || '').trim().toLowerCase() === 'test student'
-                const sorted = [...students].sort((a, b) => {
-                    const aTest = isTestStudent(a.name)
-                    const bTest = isTestStudent(b.name)
-                    if (aTest && !bTest) return -1
-                    if (!aTest && bTest) return 1
-                    const lnCmp = lastNameOf(a.name).localeCompare(lastNameOf(b.name), undefined, { sensitivity: 'base' })
-                    if (lnCmp !== 0) return lnCmp
-                    const nameCmp = (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
-                    if (nameCmp !== 0) return nameCmp
-                    return a.id - b.id
-                })
-                const studentsDropdown: Array<DropDownOption> = sorted.map((s) => ({
-                    key: s.id,
-                    text: `${s.name} (${s.mscsnet})`,
-                    value: s.id,
-                }))
-                this.setState({ studentList: studentsDropdown })
-            })
-            .catch((err) => {
-                this.setState({
-                    error_message: err.response?.data?.message ?? 'Error loading students',
-                    isErrorMessageHidden: false,
-                })
-            })
-            .finally(() => {
-                // Note: second request below may still be in-flight; we're okay to turn this off here
-                this.setState({ isLoading: false })
-            })
-
-        axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_projects_by_class_id?id=${cid}`, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-                },
-            })
-            .then((res) => {
-                const projects: Array<ProjectObject> = []
-                res.data.forEach((str: any) => {
-                    projects.push(JSON.parse(str) as ProjectObject)
-                })
-
-                const projectDropdown: Array<DropDownOption> = projects.map((p) => ({
-                    key: p.Id,
-                    text: p.Name,
-                    value: p.Id,
-                }))
-                const practiceMap: Record<number, boolean> = {}
-                for (const p of projects) {
-                    practiceMap[p.Id] = !!p.PracticeProblemsEnabled
-                }
-                this.setState({
-                    projects: projectDropdown,
-                    projectPracticeEnabledById: practiceMap,
-                })
-            })
-            .catch((err) => {
-                this.setState({
-                    error_message: err.response?.data?.message ?? 'Error loading projects',
-                    isErrorMessageHidden: false,
-                })
-            })
-    }
-
-    componentDidMount() {
-        axios
-            .get(import.meta.env.VITE_API_URL + `/class/all`, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-                },
-            })
-            .then((res) => {
-                const classes = res.data as Array<Student>
-                const classesDropdown: Array<DropDownOption> = classes.map((c) => ({
-                    key: c.id,
-                    text: c.name,
-                    value: c.id,
-                }))
-                this.setState({ classlist: classesDropdown })
-            })
-            .catch((err) => {
-                this.setState({
-                    error_message: err.response?.data?.message ?? 'Error loading classes',
-                    isErrorMessageHidden: false,
-                    isLoading: false,
-                })
-            })
-    }
-
-    // Icon system:
-    // - Code (java, python, c, racket) => code icon
-    // - Text (text, word, pdf) => two-line text icon
-    // - Otherwise => alternate icon
     private getFileIcon(filename: string): React.ReactElement {
         const CODE_ICON_RE = /\.(java|py|c|h|rkt|scm)$/i
         const TEXT_ICON_RE = /\.(txt|doc|docx|pdf)$/i
@@ -349,6 +499,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         const fileArr = files ? Array.from(files) : []
 
         const isJavaFile = (f: File) => f.name.toLowerCase().endsWith('.java')
+
         if (fileArr.length > 1 && fileArr.every((f) => !isJavaFile(f))) {
             this.setState({
                 files: [],
@@ -365,7 +516,6 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             isErrorMessageHidden: true,
         })
 
-        // Detect entry point when multiple .java files are uploaded
         if (fileArr.length > 1 && fileArr.every(isJavaFile)) {
             this.computeMainJavaFromLocal(fileArr)
                 .then((main) => this.setState({ mainJavaFileName: main }))
@@ -376,17 +526,24 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
     handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault()
 
-        const uploadDisabled = this.state.isLoading || !(this.state.project_id > 0)
+        const uploadDisabled =
+            this.state.isLoading ||
+            !(this.state.school_id > 0) ||
+            !(this.state.class_id > 0) ||
+            !(this.state.student_id > 0) ||
+            !(this.state.module_id > 0) ||
+            !(this.state.project_id > 0)
+
         if (uploadDisabled) {
-            // Hard guard in case submit is somehow triggered
             this.setState({
                 isErrorMessageHidden: false,
-                error_message: 'Please select a project before uploading.',
+                error_message: 'Please select a school, class, student, and module before uploading.',
             })
             return
         }
 
         const isJavaFile = (f: File) => f.name.toLowerCase().endsWith('.java')
+
         if (this.state.files.length > 1 && this.state.files.every((f) => !isJavaFile(f))) {
             this.setState({
                 files: [],
@@ -396,81 +553,92 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             return
         }
 
-        if (this.state.files.length > 0) {
-            this.setState({ isErrorMessageHidden: true, isLoading: true, isUploading: true })
-
-            const formData = new FormData()
-            this.state.files.forEach((f) => formData.append('files', f, f.name))
-            formData.append('student_id', String(this.state.student_id))
-            formData.append('project_id', String(this.state.project_id))
-            formData.append('class_id', String(this.state.class_id))
-
-            const isPractice = this.state.selectedPracticeProblemId > 0
-            formData.append('practice', isPractice ? '1' : '0')
-            if (isPractice) {
-                formData.append('practice_problem_id', String(this.state.selectedPracticeProblemId))
-            }
-
-            axios
-                .post(import.meta.env.VITE_API_URL + `/upload/`, formData, {
-                    headers: {
-                        Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
-                    },
-                })
-                .then((res) => {
-                    const isPractice = this.state.selectedPracticeProblemId > 0
-                    const practiceQuery = isPractice
-                        ? `?practice=true&practice_problem_id=${this.state.selectedPracticeProblemId.toString()}`
-                        : ''
-
-                    window.location.href =
-                        `/admin/${this.state.class_id.toString()}` +
-                        `/project/${this.state.project_id.toString()}` +
-                        `/codeview/${res.data.sid.toString()}` +
-                        practiceQuery
-                })
-                .catch((err) => {
-                    this.setState({
-                        error_message: err.response?.data?.message ?? 'Upload failed',
-                        isErrorMessageHidden: false,
-                        isLoading: false,
-                        isUploading: false,
-                    })
-                })
-        } else {
+        if (this.state.files.length === 0) {
             this.setState({
                 isErrorMessageHidden: false,
                 error_message: 'Please choose one or more files to upload.',
             })
+            return
         }
+
+        this.setState({ isErrorMessageHidden: true, isLoading: true, isUploading: true })
+
+        const formData = new FormData()
+        this.state.files.forEach((f) => formData.append('files', f, f.name))
+        formData.append('student_id', String(this.state.student_id))
+        formData.append('project_id', String(this.state.project_id))
+        formData.append('class_id', String(this.state.class_id))
+
+        const isCheckpoint = this.state.selectedCheckpointId > 0
+        formData.append('checkpoint', isCheckpoint ? '1' : '0')
+
+        if (isCheckpoint) {
+            formData.append('checkpoint_id', String(this.state.selectedCheckpointId))
+        }
+
+        axios
+            .post(import.meta.env.VITE_API_URL + `/upload/`, formData, {
+                headers: this.authHeaders(),
+            })
+            .then((res) => {
+                const checkpointQuery = isCheckpoint
+                    ? `?checkpoint=1&checkpoint_id=${this.state.selectedCheckpointId.toString()}`
+                    : ''
+
+                const codeViewBase = isCheckpoint
+                    ? `/admin/school/${this.state.school_id.toString()}` +
+                    `/class/${this.state.class_id.toString()}` +
+                    `/module/${this.state.module_id.toString()}` +
+                    `/project/${this.state.project_id.toString()}` +
+                    `/checkpoint/${this.state.selectedCheckpointId.toString()}` +
+                    `/codeview/${res.data.sid.toString()}`
+                    : `/admin/school/${this.state.school_id.toString()}` +
+                    `/class/${this.state.class_id.toString()}` +
+                    `/module/${this.state.module_id.toString()}` +
+                    `/project/${this.state.project_id.toString()}` +
+                    `/codeview/${res.data.sid.toString()}`
+
+                window.location.href = `${codeViewBase}${checkpointQuery}${checkpointQuery ? '&' : '?'}from=admin-upload`
+            })
+            .catch((err) => {
+                this.setState({
+                    error_message: err.response?.data?.message ?? 'Upload failed',
+                    isErrorMessageHidden: false,
+                    isLoading: false,
+                    isUploading: false,
+                })
+            })
     }
 
     render() {
-        // Progressive enablement flags
+        const schoolChosen = this.state.school_id > 0
         const classChosen = this.state.class_id > 0
         const studentChosen = this.state.student_id > 0
+        const moduleChosen = this.state.module_id > 0
         const projectChosen = this.state.project_id > 0
 
+        const disableSchool = this.state.isLoading || this.state.schoollist.length === 0
+        const disableClass = !schoolChosen || this.state.isLoading || this.state.classlist.length === 0
         const disableStudent = !classChosen || this.state.isLoading || this.state.studentList.length === 0
-        const disableProject = !studentChosen || this.state.isLoading || this.state.projects.length === 0
-        const disableUpload = !projectChosen || this.state.isLoading
+        const disableModule = !studentChosen || this.state.isLoading || this.state.modules.length === 0
+        const disableUpload = !moduleChosen || !projectChosen || !studentChosen || this.state.isLoading
 
-        const practiceEnabledForProject =
-            projectChosen && !!this.state.projectPracticeEnabledById[this.state.project_id]
-        const practiceRows = practiceEnabledForProject
-            ? this.state.practiceProblemsByProjectId[this.state.project_id] ?? []
+        const checkpointsEnabledForModule =
+            moduleChosen && this.state.moduleCheckpointsEnabledById[this.state.module_id] !== false
+
+        const checkpointRows = checkpointsEnabledForModule && projectChosen
+            ? this.state.checkpointsByProjectId[this.state.project_id] ?? []
             : []
-        const enabledPracticeRows = practiceRows.filter((p) => !!p.enabled)
+
+        const enabledCheckpointRows = checkpointRows.filter((checkpoint) => !!checkpoint.enabled)
 
         return (
             <>
-
                 <LoadingAnimation show={this.state.isUploading} message="Uploading..." />
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: 'School Selection', to: '/admin/classes' },
-                        { label: 'Class Selection', to: '/admin/classes' },
+                        { label: 'School Selection', to: '/admin/schools' },
                         { label: 'Admin Upload' },
                     ]}
                 />
@@ -479,17 +647,17 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
 
                 <div className="admin-upload-stack">
                     <div className="admin-upload-page">
-                        <p className="section-label">Please select a class</p>
+                        <p className="section-label">Please select a school</p>
                         <select
-                            className="select class-select"
-                            value={this.state.class_id || ''}
-                            onChange={this.handleClassIdChange}
-                            disabled={this.state.isLoading}
+                            className="select school-select"
+                            value={this.state.school_id || ''}
+                            onChange={this.handleSchoolIdChange}
+                            disabled={disableSchool}
                         >
                             <option value="" disabled>
-                                Select class
+                                Select school
                             </option>
-                            {this.state.classlist.map((opt) => (
+                            {this.state.schoollist.map((opt) => (
                                 <option key={opt.key} value={opt.value}>
                                     {opt.text}
                                 </option>
@@ -497,6 +665,27 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                         </select>
 
                         <div className="selection-section">
+                            <div className="spacer" aria-hidden="true">
+                                &nbsp;
+                            </div>
+
+                            <p className="section-label">Please select a class</p>
+                            <select
+                                className="select class-select"
+                                value={this.state.class_id || ''}
+                                onChange={this.handleClassIdChange}
+                                disabled={disableClass}
+                            >
+                                <option value="" disabled>
+                                    Select class
+                                </option>
+                                {this.state.classlist.map((opt) => (
+                                    <option key={opt.key} value={opt.value}>
+                                        {opt.text}
+                                    </option>
+                                ))}
+                            </select>
+
                             <div className="spacer" aria-hidden="true">
                                 &nbsp;
                             </div>
@@ -522,24 +711,24 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                 &nbsp;
                             </div>
 
-                            <p className="section-label">Please select a project</p>
+                            <p className="section-label">Please select a module</p>
                             <select
-                                className="select project-select"
-                                value={this.state.project_id || ''}
-                                onChange={this.handleProjectIdChange}
-                                disabled={disableProject}
+                                className="select module-select"
+                                value={this.state.module_id || ''}
+                                onChange={this.handleModuleIdChange}
+                                disabled={disableModule}
                             >
                                 <option value="" disabled>
-                                    Select project
+                                    Select module
                                 </option>
-                                {this.state.projects.map((opt) => (
+                                {this.state.modules.map((opt) => (
                                     <option key={opt.key} value={opt.value}>
                                         {opt.text}
                                     </option>
                                 ))}
                             </select>
 
-                            {practiceEnabledForProject && (
+                            {moduleChosen && (
                                 <>
                                     <div className="spacer" aria-hidden="true">
                                         &nbsp;
@@ -547,32 +736,41 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
 
                                     <p className="section-label">Submit to</p>
                                     <select
-                                        className="select practice-target-select"
+                                        className="select checkpoint-target-select"
                                         value={
-                                            this.state.selectedPracticeProblemId > 0
-                                                ? `practice:${this.state.selectedPracticeProblemId}`
+                                            this.state.selectedCheckpointId > 0
+                                                ? `checkpoint:${this.state.selectedCheckpointId}`
                                                 : 'main'
                                         }
                                         onChange={(e) => {
                                             const v = e.target.value || 'main'
+
                                             if (v === 'main') {
-                                                this.setState({ selectedPracticeProblemId: 0 })
+                                                this.setState({
+                                                    selectedCheckpointId: 0,
+                                                    files: [],
+                                                    mainJavaFileName: '',
+                                                })
                                                 return
                                             }
-                                            if (v.startsWith('practice:')) {
+
+                                            if (v.startsWith('checkpoint:')) {
                                                 const idStr = v.split(':', 2)[1] || ''
-                                                const pid = parseInt(idStr, 10)
+                                                const checkpointId = parseInt(idStr, 10)
+
                                                 this.setState({
-                                                    selectedPracticeProblemId: Number.isNaN(pid) ? 0 : pid,
+                                                    selectedCheckpointId: Number.isNaN(checkpointId) ? 0 : checkpointId,
+                                                    files: [],
+                                                    mainJavaFileName: '',
                                                 })
                                             }
                                         }}
                                         disabled={this.state.isLoading}
                                     >
                                         <option value="main">Main Problem</option>
-                                        {enabledPracticeRows.map((pp) => (
-                                            <option key={pp.id} value={`practice:${pp.id}`}>
-                                                {`Practice ${pp.number}: ${pp.name}`}
+                                        {enabledCheckpointRows.map((checkpoint) => (
+                                            <option key={checkpoint.id} value={`checkpoint:${checkpoint.id}`}>
+                                                {`Checkpoint ${checkpoint.number}: ${checkpoint.name}`}
                                             </option>
                                         ))}
                                     </select>
@@ -596,7 +794,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                             }}
                                             onDrop={(e) => {
                                                 e.preventDefault()
+
                                                 if (disableUpload) return
+
                                                 const files = e.dataTransfer.files
                                                 if (files && files.length > 0) {
                                                     this.handleFilesChange({ target: { files } } as any)

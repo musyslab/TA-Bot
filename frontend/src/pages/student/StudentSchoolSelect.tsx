@@ -21,6 +21,34 @@ interface StudentSchoolSelectProps {
     navigate: NavigateFunction
 }
 
+const getValidStoredToken = (): string | null => {
+    const token = localStorage.getItem("AUTOTA_AUTH_TOKEN")
+
+    if (!token) {
+        return null
+    }
+
+    const cleanedToken = token.trim()
+
+    if (
+        !cleanedToken ||
+        cleanedToken.toLowerCase() === "null" ||
+        cleanedToken.toLowerCase() === "undefined"
+    ) {
+        localStorage.removeItem("AUTOTA_AUTH_TOKEN")
+        localStorage.removeItem("AUTOTA_USER_ROLE")
+        return null
+    }
+
+    return cleanedToken
+}
+
+const clearStoredAuthAndRedirectToLogin = () => {
+    localStorage.removeItem("AUTOTA_AUTH_TOKEN")
+    localStorage.removeItem("AUTOTA_USER_ROLE")
+    window.location.replace("/login")
+}
+
 class StudentSchoolSelectInner extends Component<StudentSchoolSelectProps, SchoolState> {
     constructor(props: StudentSchoolSelectProps) {
         super(props)
@@ -31,10 +59,17 @@ class StudentSchoolSelectInner extends Component<StudentSchoolSelectProps, Schoo
     }
 
     componentDidMount() {
+        const token = getValidStoredToken()
+
+        if (!token) {
+            clearStoredAuthAndRedirectToLogin()
+            return
+        }
+
         axios
             .get(import.meta.env.VITE_API_URL + `/schools/all`, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+                    Authorization: `Bearer ${token}`
                 }
             })
             .then(res => {
@@ -53,6 +88,12 @@ class StudentSchoolSelectInner extends Component<StudentSchoolSelectProps, Schoo
             })
             .catch(err => {
                 console.error(err)
+
+                if (err?.response?.status === 401 || err?.response?.status === 422 || err?.response?.status === 403) {
+                    clearStoredAuthAndRedirectToLogin()
+                    return
+                }
+
                 this.setState({ errorMessage: "Could not load schools." })
             })
     }

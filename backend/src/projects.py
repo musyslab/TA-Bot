@@ -26,12 +26,12 @@ from src.repositories.models import (
     ClassAssignments,
     Classes,
     Modules,
-    PracticeProblems,
+    Checkpoints,
     Projects,
     Submissions,
 )
 from src.repositories.project_repository import ProjectRepository
-from src.repositories.submission_repository import PracticeBonusAwards, SubmissionRepository
+from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.user_repository import UserRepository
 
 projects_api = Blueprint('projects_api', __name__)
@@ -39,13 +39,55 @@ projects_api = Blueprint('projects_api', __name__)
 ALLOWED_SOURCE_EXTS = {'.py', '.c', '.java', '.rkt'}
 TS_DIR_RE = re.compile(r"^\d{8}_\d{6}$")
 
+
+def normalize_grader_language(language: str, solution_root: str = "") -> str:
+    """
+    Convert the project language stored/displayed by the app into the token
+    expected by /tabot-files/grading-scripts/grade.py. The UI stores Python as
+    "python", but the grader's language switch uses "py".
+    """
+    raw = str(language or "").strip().lower()
+    aliases = {
+        "python": "py",
+        "python3": "py",
+        "py": "py",
+        "java": "java",
+        "c": "c",
+        "racket": "racket",
+        "rkt": "racket",
+        "scheme": "racket",
+        "scm": "racket",
+    }
+    if raw in aliases:
+        return aliases[raw]
+
+    try:
+        candidates = []
+        if solution_root and os.path.isdir(solution_root):
+            candidates = [os.path.splitext(name)[1].lower() for name in os.listdir(solution_root)]
+        elif solution_root:
+            candidates = [os.path.splitext(solution_root)[1].lower()]
+
+        if ".py" in candidates:
+            return "py"
+        if ".java" in candidates:
+            return "java"
+        if ".c" in candidates:
+            return "c"
+        if ".rkt" in candidates or ".scm" in candidates:
+            return "racket"
+    except Exception:
+        pass
+
+    return raw or "py"
+
 def parse_int(v, default: int = 0) -> int:
     try:
         return int(str(v).strip())
     except Exception:
         return default
 
-DEFAULT_CHECKPOINT_NAME_RE = re.compile(r"^(checkpoint|practice problem)\s+\d+$", re.IGNORECASE)
+DEFAULT_CHECKPOINT_NAME_RE = re.compile(r"^(checkpoint)\s+\d+$", re.IGNORECASE)
 
 def default_checkpoint_name(number: int) -> str:
     return f"Checkpoint {int(number)}"
@@ -62,17 +104,78 @@ def normalize_default_checkpoint_names(project_repo: ProjectRepository, rows):
 
         if should_renumber_default_checkpoint_name(current_name) and current_name != next_name:
             try:
-                project_repo.update_practice_problem_name(int(row.Id), next_name)
+                project_repo.update_checkpoint_name(int(row.Id), next_name)
                 setattr(row, "Name", next_name)
             except Exception as exc:
                 print(
-                    f"[practice_problem] could not normalize checkpoint name for {getattr(row, 'Id', '')}: {exc}",
+                    f"[checkpoint] could not normalize checkpoint name for {getattr(row, 'Id', '')}: {exc}",
                     flush=True,
                 )
 
         normalized_rows.append(row)
 
     return normalized_rows
+
+def ensure_default_checkpoint_for_project(
+    project_repo: ProjectRepository,
+    project_id: int,
+    *,
+    context: str = "project",
+) -> int | None:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return None
+
+    try:
+        existing_checkpoints = project_repo.list_checkpoints(project_id)
+        if existing_checkpoints:
+            return int(existing_checkpoints[0].Id)
+
+        checkpoint_id = project_repo.create_checkpoint(
+            project_id,
+            name=default_checkpoint_name(1),
+        )
+        return int(checkpoint_id) if checkpoint_id else None
+    except Exception as exc:
+        print(
+            f"[{context}] default checkpoint creation failed for project {project_id}: {exc}",
+            flush=True,
+        )
+        return None
+
+
+def ensure_default_checkpoint_for_module(
+    project_repo: ProjectRepository,
+    module_id: int,
+    *,
+    context: str = "module",
+) -> int | None:
+    module_id = parse_int(module_id, 0)
+    if module_id <= 0:
+        return None
+
+    try:
+        project = project_repo.get_main_project_for_module(module_id)
+    except Exception as exc:
+        print(
+            f"[{context}] could not load main project for module {module_id}: {exc}",
+            flush=True,
+        )
+        return None
+
+    if not project:
+        print(
+            f"[{context}] no main project exists for module {module_id}; default checkpoint was not created",
+            flush=True,
+        )
+        return None
+
+    return ensure_default_checkpoint_for_project(
+        project_repo,
+        int(project.Id),
+        context=context,
+    )
+
 
 def parse_bool(v) -> bool:
     if isinstance(v, bool):
@@ -119,14 +222,14 @@ def source_file_names(path_value: str) -> list[str]:
 def project_setup_status(
     project_repo: ProjectRepository,
     project_id: int,
-    practice_problem_id: int | None = None,
+    checkpoint_id: int | None = None,
     testcase_count: int | None = None,
 ):
     if testcase_count is None:
         try:
             testcase_count = project_repo.count_testcases(
                 int(project_id),
-                practice_problem_id=(int(practice_problem_id) if practice_problem_id else None),
+                checkpoint_id=(int(checkpoint_id) if checkpoint_id else None),
             )
         except Exception:
             testcase_count = 0
@@ -134,7 +237,7 @@ def project_setup_status(
     try:
         solution_path = project_repo.get_project_path(
             int(project_id),
-            practice_problem_id=(int(practice_problem_id) if practice_problem_id else None),
+            checkpoint_id=(int(checkpoint_id) if checkpoint_id else None),
         )
         has_solution_program = len(source_file_names(solution_path)) > 0
     except Exception:
@@ -147,16 +250,109 @@ def project_setup_status(
     }
 
 
-def practice_submission_count_map(project_id: int) -> dict[int, int]:
+
+
+def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) -> list[dict]:
+    """
+    Student-safe checkpoint list rows.
+    Returns only enabled checkpoints and includes setup/progress fields used by student pages.
+    """
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return []
+
     try:
-        if hasattr(Submissions, "PracticeProblemId"):
+        rows = normalize_default_checkpoint_names(
+            project_repo,
+            project_repo.list_checkpoints(project_id),
+        )
+    except Exception as exc:
+        print(f"[student_checkpoint_rows] failed to list checkpoints for project {project_id}: {exc}", flush=True)
+        return []
+
+    passed_checkpoint_ids: set[int] = set()
+    try:
+        if hasattr(Submissions, "IsCheckpoint") and hasattr(Submissions, "CheckpointId"):
+            passed_rows = (
+                db.session.query(Submissions.CheckpointId)
+                .filter(
+                    Submissions.Project == int(project_id),
+                    Submissions.User == int(current_user.Id),
+                    Submissions.IsCheckpoint == True,
+                    Submissions.IsPassing == True,
+                    Submissions.CheckpointId.isnot(None),
+                )
+                .distinct()
+                .all()
+            )
+            passed_checkpoint_ids = {
+                int(row[0])
+                for row in passed_rows
+                if row and row[0] is not None and parse_int(row[0], 0) > 0
+            }
+    except Exception as exc:
+        print(
+            f"[student_checkpoint_rows] failed to load solved checkpoints for project {project_id}: {exc}",
+            flush=True,
+        )
+        passed_checkpoint_ids = set()
+
+    out = []
+    for index, row in enumerate(rows or []):
+        checkpoint_id = parse_int(getattr(row, "Id", 0), 0)
+        if checkpoint_id <= 0:
+            continue
+
+        enabled = bool(getattr(row, "Enabled", True))
+        if not enabled:
+            continue
+
+        status = project_setup_status(
+            project_repo,
+            project_id,
+            checkpoint_id=checkpoint_id,
+        )
+        name = str(getattr(row, "Name", "") or default_checkpoint_name(index + 1))
+        solved = checkpoint_id in passed_checkpoint_ids
+
+        out.append({
+            "id": checkpoint_id,
+            "checkpointId": checkpoint_id,
+            "Id": checkpoint_id,
+            "CheckpointId": checkpoint_id,
+            "number": index + 1,
+            "Number": index + 1,
+            "name": name,
+            "Name": name,
+            "enabled": enabled,
+            "Enabled": enabled,
+            "solved": solved,
+            "Solved": solved,
+            "passed": solved,
+            "Passed": solved,
+            "rewarded": solved,
+            "Rewarded": solved,
+            "hasSolutionProgram": bool(status.get("HasSolutionProgram", False)),
+            "HasSolutionProgram": bool(status.get("HasSolutionProgram", False)),
+            "hasTestcases": bool(status.get("HasTestcases", False)),
+            "HasTestcases": bool(status.get("HasTestcases", False)),
+            "testcaseCount": int(status.get("TestcaseCount", 0) or 0),
+            "TestcaseCount": int(status.get("TestcaseCount", 0) or 0),
+        })
+
+    return out
+
+
+def checkpoint_submission_count_map(project_id: int) -> dict[int, int]:
+    try:
+        if hasattr(Submissions, "CheckpointId"):
             rows = (
                 db.session.query(
-                    Submissions.PracticeProblemId,
+                    Submissions.CheckpointId,
                     func.count(func.distinct(Submissions.User)),
                 )
-                .filter(Submissions.Project == int(project_id), Submissions.IsPractice == True)
-                .group_by(Submissions.PracticeProblemId)
+                .filter(Submissions.Project == int(project_id), Submissions.IsCheckpoint == True)
+                .group_by(Submissions.CheckpointId)
                 .all()
             )
             return {int(ppid): int(count or 0) for ppid, count in rows if ppid is not None}
@@ -165,7 +361,7 @@ def practice_submission_count_map(project_id: int) -> dict[int, int]:
     return {}
 
 
-def practice_unique_user_counts(project_ids: list[int]) -> dict[int, int]:
+def checkpoint_unique_user_counts(project_ids: list[int]) -> dict[int, int]:
     ids = [int(pid) for pid in (project_ids or []) if int(pid or 0) > 0]
     if not ids:
         return {}
@@ -176,7 +372,7 @@ def practice_unique_user_counts(project_ids: list[int]) -> dict[int, int]:
                 Submissions.Project,
                 func.count(func.distinct(Submissions.User)),
             )
-            .filter(Submissions.Project.in_(ids), Submissions.IsPractice == True)
+            .filter(Submissions.Project.in_(ids), Submissions.IsCheckpoint == True)
             .group_by(Submissions.Project)
             .all()
         )
@@ -196,7 +392,7 @@ def main_completed_project_ids(project_ids: list[int]) -> set[int]:
             .filter(
                 Submissions.Project.in_(ids),
                 Submissions.User == int(current_user.Id),
-                Submissions.IsPractice == False,
+                Submissions.IsCheckpoint == False,
                 Submissions.IsPassing == True,
             )
             .distinct()
@@ -247,6 +443,35 @@ def user_can_access_project_id(project_id: int) -> bool:
 
     return user_can_access_class_id(int(getattr(project, "ClassId", 0) or 0))
 
+def current_user_is_enrolled_in_project_class(project_id: int) -> bool:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return False
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    class_id = parse_int(getattr(project, "ClassId", 0) or 0, 0)
+    if class_id <= 0:
+        return False
+
+    try:
+        return (
+            ClassAssignments.query.filter(
+                ClassAssignments.ClassId == class_id,
+                ClassAssignments.UserId == int(current_user.Id),
+            ).first()
+            is not None
+        )
+    except Exception:
+        return False
+
+
+def current_user_can_download_project_files(project_id: int) -> bool:
+    return user_can_access_project_id(project_id) or current_user_is_enrolled_in_project_class(project_id)
+
+
 
 def user_can_access_module_id(module_id: int) -> bool:
     module_id = parse_int(module_id, 0)
@@ -260,16 +485,16 @@ def user_can_access_module_id(module_id: int) -> bool:
     return user_can_access_class_id(int(getattr(module, "ClassId", 0) or 0))
 
 
-def user_can_access_practice_problem_id(practice_problem_id: int) -> bool:
-    practice_problem_id = parse_int(practice_problem_id, 0)
-    if practice_problem_id <= 0:
+def user_can_access_checkpoint_id(checkpoint_id: int) -> bool:
+    checkpoint_id = parse_int(checkpoint_id, 0)
+    if checkpoint_id <= 0:
         return False
 
-    practice_problem = PracticeProblems.query.filter(PracticeProblems.Id == practice_problem_id).first()
-    if practice_problem is None:
+    checkpoint = Checkpoints.query.filter(Checkpoints.Id == checkpoint_id).first()
+    if checkpoint is None:
         return False
 
-    return user_can_access_project_id(int(getattr(practice_problem, "ProjectId", 0) or 0))
+    return user_can_access_project_id(int(getattr(checkpoint, "ProjectId", 0) or 0))
 
 
 def user_can_access_student_id(student_id: int) -> bool:
@@ -338,12 +563,12 @@ def project_end(project):
     module = project_module(project)
     return getattr(module, "End", None) if module else None
 
-def count_practice_unique_users(project_id: int) -> int:
+def count_checkpoint_unique_users(project_id: int) -> int:
     try:
-        if hasattr(Submissions, "IsPractice"):
+        if hasattr(Submissions, "IsCheckpoint"):
             return int(
                 db.session.query(func.count(func.distinct(Submissions.User)))
-                .filter(Submissions.Project == int(project_id), Submissions.IsPractice == True)
+                .filter(Submissions.Project == int(project_id), Submissions.IsCheckpoint == True)
                 .scalar()
                 or 0
             )
@@ -364,14 +589,14 @@ def project_dir(base_proj: str, ts: str) -> str:
     # teacher-files/<YYYYMMDD_HHMMSS>__<projectname>
     return os.path.join(teacher_root(), f"{ts}__{base_proj}")
 
-def practice_teacher_root() -> str:
-    return os.path.join(project_root(), "teacher-practice-files")
+def checkpoint_teacher_root() -> str:
+    return os.path.join(project_root(), "teacher-checkpoint-files")
 
-def practice_project_dir(project_id: int) -> str:
-    return os.path.join(practice_teacher_root(), str(int(project_id)))
+def checkpoint_project_dir(project_id: int) -> str:
+    return os.path.join(checkpoint_teacher_root(), str(int(project_id)))
 
-def practice_version_dir(project_id: int, ts: str) -> str:
-    return os.path.join(practice_project_dir(project_id), ts)
+def checkpoint_version_dir(project_id: int, ts: str) -> str:
+    return os.path.join(checkpoint_project_dir(project_id), ts)
 
 def is_ts_dir(name: str) -> bool:
     return bool(TS_DIR_RE.match(name or ""))
@@ -417,12 +642,12 @@ def module_payload(
     project_repo: ProjectRepository,
     submission_repo: SubmissionRepository,
     total_submission_counts: dict[int, int] | None = None,
-    practice_total_counts: dict[int, int] | None = None,
+    checkpoint_total_counts: dict[int, int] | None = None,
     main_completed_project_ids: set[int] | None = None,
 ):
     project = project_repo.get_main_project_for_module(int(module.Id)) if module else None
     total_submissions = 0
-    practice_total = 0
+    checkpoint_total = 0
     main_completed = False
 
     if project:
@@ -436,12 +661,12 @@ def module_payload(
             total_submissions = 0
 
         try:
-            if practice_total_counts is None:
-                practice_total = count_practice_unique_users(project_id)
+            if checkpoint_total_counts is None:
+                checkpoint_total = count_checkpoint_unique_users(project_id)
             else:
-                practice_total = int(practice_total_counts.get(project_id, 0) or 0)
+                checkpoint_total = int(checkpoint_total_counts.get(project_id, 0) or 0)
         except Exception:
-            practice_total = 0
+            checkpoint_total = 0
 
         try:
             if main_completed_project_ids is not None:
@@ -451,7 +676,7 @@ def module_payload(
                     Submissions.query.filter(
                         Submissions.Project == project_id,
                         Submissions.User == int(current_user.Id),
-                        Submissions.IsPractice == False,
+                        Submissions.IsCheckpoint == False,
                         Submissions.IsPassing == True,
                     ).first()
                 )
@@ -465,9 +690,10 @@ def module_payload(
         "Start": module.Start.strftime("%x %X") if module.Start else "",
         "End": module.End.strftime("%x %X") if module.End else "",
         "MainProjectId": getattr(project, "Id", None),
+        "MainProjectName": getattr(project, "Name", "") if project else "",
         "TotalSubmissions": total_submissions,
-        "PracticeTotalSubmissions": int(practice_total),
-        "PracticeProblemsEnabled": True,
+        "CheckpointTotalSubmissions": int(checkpoint_total),
+        "CheckpointsEnabled": True,
         "MainCompleted": main_completed,
     }
 
@@ -477,7 +703,7 @@ def project_payload(
     submission_repo: SubmissionRepository,
     project_repo: ProjectRepository,
     total_submission_counts: dict[int, int] | None = None,
-    practice_total_counts: dict[int, int] | None = None,
+    checkpoint_total_counts: dict[int, int] | None = None,
 ):
     if not project:
         return None
@@ -492,12 +718,12 @@ def project_payload(
         total_submissions = 0
 
     try:
-        if practice_total_counts is None:
-            practice_total = count_practice_unique_users(project_id)
+        if checkpoint_total_counts is None:
+            checkpoint_total = count_checkpoint_unique_users(project_id)
         else:
-            practice_total = int(practice_total_counts.get(project_id, 0) or 0)
+            checkpoint_total = int(checkpoint_total_counts.get(project_id, 0) or 0)
     except Exception:
-        practice_total = 0
+        checkpoint_total = 0
 
     return {
         "Id": project.Id,
@@ -505,8 +731,8 @@ def project_payload(
         "Start": project_start(project).strftime("%x %X") if project_start(project) else "",
         "End": project_end(project).strftime("%x %X") if project_end(project) else "",
         "TotalSubmissions": total_submissions,
-        "PracticeTotalSubmissions": int(practice_total),
-        "PracticeProblemsEnabled": True,
+        "CheckpointTotalSubmissions": int(checkpoint_total),
+        "CheckpointsEnabled": True,
         **project_setup_status(project_repo, project_id),
     }
 
@@ -521,7 +747,7 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
 
-        practice_total = count_practice_unique_users(int(proj.Id))
+        checkpoint_total = count_checkpoint_unique_users(int(proj.Id))
 
         new_projects.append(json.dumps({
             "Id": proj.Id,
@@ -529,16 +755,16 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
             "Start": project_start(proj).strftime("%x %X") if project_start(proj) else "",
             "End": project_end(proj).strftime("%x %X") if project_end(proj) else "",
             "TotalSubmissions": int(thisdic.get(proj.Id, 0) or 0),
-            "PracticeTotalSubmissions": int(practice_total),
-            "PracticeProblemsEnabled": True,
+            "CheckpointTotalSubmissions": int(checkpoint_total),
+            "CheckpointsEnabled": True,
             "ModuleId": getattr(proj, "ModuleId", None),
         }))
     return jsonify(new_projects)
 
-@projects_api.route('/set_practice_problems_enabled', methods=['POST'])
+@projects_api.route('/set_checkpoints_enabled', methods=['POST'])
 @jwt_required()
 @inject
-def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def set_checkpoints_enabled(project_repo: ProjectRepository = Provide[Container.project_repo]):
     if not is_staff_user():
         return access_denied_response()
 
@@ -552,15 +778,15 @@ def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Cont
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
     try:
-        project_repo.set_practice_problems_enabled(pid, True)
+        project_repo.set_checkpoints_enabled(pid, True)
         return jsonify({'ok': True, 'enabled': True})
     except Exception:
         return make_response({'ok': False}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@projects_api.route('/list_practice_problems', methods=['GET'])
+@projects_api.route('/list_checkpoints', methods=['GET'])
 @jwt_required()
 @inject
-def list_practice_problems(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def list_checkpoints(project_repo: ProjectRepository = Provide[Container.project_repo]):
     if not is_staff_user():
         return access_denied_response()
     pid = parse_int(request.args.get("project_id", ""), 0)
@@ -568,104 +794,45 @@ def list_practice_problems(project_repo: ProjectRepository = Provide[Container.p
         return jsonify({'problems': []})
     if not user_can_access_project_id(pid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
-    rows = project_repo.list_practice_problems(int(pid))
+    rows = project_repo.list_checkpoints(int(pid))
     return jsonify({
         'problems': [
             {
                 'id': int(r.Id),
                 'number': i + 1,
-                'name': (getattr(r, "Name", "") or f"Practice Problem {i + 1}"),
+                'name': (getattr(r, "Name", "") or f"Checkpoint {i + 1}"),
                 'enabled': bool(getattr(r, "Enabled", True)),
             }
             for i, r in enumerate(rows)
         ]
     })
 
-def student_practice_problem_rows(project_repo: ProjectRepository, project_id: int):
-    """
-    Student-safe practice problem rows with completion and reward flags.
-    Kept as a helper so the student module overview can return the module and
-    checkpoint data in one request instead of requiring a second page load call.
-    """
-    rows = project_repo.list_practice_problems(project_id)
 
-    solved_ids = set()
-    try:
-        if hasattr(Submissions, "IsPractice") and hasattr(Submissions, "PracticeProblemId"):
-            solved_rows = (
-                db.session.query(Submissions.PracticeProblemId)
-                .filter(
-                    Submissions.Project == int(project_id),
-                    Submissions.User == int(current_user.Id),
-                    Submissions.IsPractice == True,
-                    Submissions.IsPassing == True,
-                    Submissions.PracticeProblemId.isnot(None),
-                )
-                .distinct()
-                .all()
-            )
-            solved_ids = {int(r[0]) for r in (solved_rows or []) if r and r[0] is not None}
-    except Exception:
-        solved_ids = set()
-
-    rewarded_ids = set()
-    try:
-        PracticeBonusAwards.__table__.create(db.engine, checkfirst=True)
-        rewarded_rows = (
-            db.session.query(PracticeBonusAwards.PracticeProblemId)
-            .filter(
-                PracticeBonusAwards.UserId == int(current_user.Id),
-                PracticeBonusAwards.ProjectId == int(project_id),
-            )
-            .distinct()
-            .all()
-        )
-        rewarded_ids = {int(r[0]) for r in (rewarded_rows or []) if r and r[0] is not None}
-    except Exception:
-        rewarded_ids = set()
-
-    out = []
-    for i, r in enumerate(rows or []):
-        enabled = bool(getattr(r, "Enabled", True))
-        if not enabled:
-            continue
-        out.append({
-            'id': int(r.Id),
-            'number': i + 1,
-            'name': (getattr(r, "Name", "") or f"Practice Problem {i + 1}"),
-            'enabled': True,
-            'solved': (int(r.Id) in solved_ids),
-            'rewarded': (int(r.Id) in rewarded_ids),
-        })
-
-    return out
-
-
-@projects_api.route('/list_practice_problems_student', methods=['GET'])
+@projects_api.route('/list_checkpoints_student', methods=['GET'])
 @jwt_required()
 @inject
-def list_practice_problems_student(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def list_checkpoints_student(project_repo: ProjectRepository = Provide[Container.project_repo]):
     """
-    Student-safe practice problem list.
-    Returns only enabled practice problems. Practice problems are always enabled at the project level.
+    Student-safe checkpoint list.
+    Returns only enabled checkpoints. Checkpoints are always enabled at the project level.
     """
     project_id = parse_int(request.args.get("project_id", ""), 0)
     if project_id <= 0:
         return jsonify({'problems': []})
 
-    return jsonify({'problems': student_practice_problem_rows(project_repo, project_id)})
+    return jsonify({'problems': student_checkpoint_rows(project_repo, project_id)})
 
-@projects_api.route('/create_practice_problem', methods=['POST'])
+@projects_api.route('/create_checkpoint', methods=['POST'])
 @jwt_required()
 @inject
-def create_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def create_checkpoint(project_repo: ProjectRepository = Provide[Container.project_repo]):
     if not is_staff_user():
         return access_denied_response()
+
     data = request.get_json(silent=True) or {}
-
     pid = parse_int(data.get("project_id", 0), 0)
-
     name = str(data.get('name', '') or '').strip()
+
     if pid <= 0:
         return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
     if not user_can_access_project_id(pid):
@@ -673,20 +840,34 @@ def create_practice_problem(project_repo: ProjectRepository = Provide[Container.
 
     if not name:
         try:
-            next_number = len(project_repo.list_practice_problems(pid)) + 1
+            next_number = len(project_repo.list_checkpoints(pid)) + 1
             name = default_checkpoint_name(next_number)
         except Exception:
             name = default_checkpoint_name(1)
 
-    new_id = project_repo.create_practice_problem(pid, name=name)
-    if not new_id:
-        return make_response({'message': 'Could not create practice problem'}, HTTPStatus.INTERNAL_SERVER_ERROR)
-    return jsonify({'ok': True, 'practice_problem_id': int(new_id)})
+    try:
+        new_id = project_repo.create_checkpoint(pid, name=name)
+    except Exception as exc:
+        print(f"[create_checkpoint] failed for project {pid}: {exc}", flush=True)
+        return make_response({'message': 'Could not create checkpoint'}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@projects_api.route('/reorder_practice_problems', methods=['POST'])
+    if not new_id:
+        return make_response({'message': 'Could not create checkpoint'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    try:
+        rows = project_repo.list_checkpoints(pid)
+        ordered_ids = [int(row.Id) for row in rows]
+        if ordered_ids:
+            project_repo.reorder_checkpoints(pid, ordered_ids)
+    except Exception as exc:
+        print(f"[create_checkpoint] checkpoint created, but numbering refresh failed: {exc}", flush=True)
+
+    return jsonify({'ok': True, 'checkpoint_id': int(new_id)})
+
+@projects_api.route('/reorder_checkpoints', methods=['POST'])
 @jwt_required()
 @inject
-def reorder_practice_problems(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def reorder_checkpoints(project_repo: ProjectRepository = Provide[Container.project_repo]):
     if not is_staff_user():
         return access_denied_response()
 
@@ -703,7 +884,7 @@ def reorder_practice_problems(project_repo: ProjectRepository = Provide[Containe
     ordered_ids = [item for item in ordered_ids if item > 0]
 
     try:
-        rows = project_repo.reorder_practice_problems(pid, ordered_ids)
+        rows = project_repo.reorder_checkpoints(pid, ordered_ids)
         return jsonify({
             'ok': True,
             'problems': [
@@ -720,42 +901,42 @@ def reorder_practice_problems(project_repo: ProjectRepository = Provide[Containe
         print(exc, flush=True)
         return make_response({'message': 'Could not reorder checkpoints'}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-@projects_api.route('/delete_practice_problem', methods=['POST'])
+@projects_api.route('/delete_checkpoint', methods=['POST'])
 @jwt_required()
 @inject
-def delete_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def delete_checkpoint(project_repo: ProjectRepository = Provide[Container.project_repo]):
     if not is_staff_user():
         return access_denied_response()
 
     data = request.get_json(silent=True) or {}
-    practice_problem_id = parse_int(data.get("practice_problem_id", 0), 0)
+    checkpoint_id = parse_int(data.get("checkpoint_id", 0), 0)
 
-    if practice_problem_id <= 0:
+    if checkpoint_id <= 0:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
-    if not user_can_access_practice_problem_id(practice_problem_id):
+    if not user_can_access_checkpoint_id(checkpoint_id):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
     try:
-        pp = project_repo.get_practice_problem(practice_problem_id)
+        pp = project_repo.get_checkpoint(checkpoint_id)
         if not pp:
-            return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+            return make_response({'message': 'Checkpoint not found'}, HTTPStatus.NOT_FOUND)
 
         project_id = int(getattr(pp, "ProjectId", 0) or 0)
-        existing_rows = project_repo.list_practice_problems(project_id) if project_id > 0 else []
+        existing_rows = project_repo.list_checkpoints(project_id) if project_id > 0 else []
         if len(existing_rows) <= 1:
             return make_response(
                 {'message': 'A module must have at least one checkpoint'},
                 HTTPStatus.BAD_REQUEST,
             )
 
-        deleted = project_repo.delete_practice_problem(practice_problem_id)
+        deleted = project_repo.delete_checkpoint(checkpoint_id)
         if not deleted:
-            return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+            return make_response({'message': 'Checkpoint not found'}, HTTPStatus.NOT_FOUND)
 
-        remaining_rows = project_repo.list_practice_problems(project_id)
+        remaining_rows = project_repo.list_checkpoints(project_id)
         remaining_ids = [int(row.Id) for row in remaining_rows]
         if remaining_ids:
-            remaining_rows = project_repo.reorder_practice_problems(project_id, remaining_ids)
+            remaining_rows = project_repo.reorder_checkpoints(project_id, remaining_ids)
         return jsonify({'ok': True})
     except Exception as exc:
         print(exc, flush=True)
@@ -769,14 +950,14 @@ def list_solution_files(project_repo: ProjectRepository = Provide[Container.proj
         return access_denied_response()
 
     pid = parse_int(request.args.get("id", ""), 0)
-    ppid = opt_int(request.args.get("practice_problem_id", ""))
+    ppid = opt_int(request.args.get("checkpoint_id", ""))
 
     if pid <= 0:
         return make_response([], HTTPStatus.OK)
     if not user_can_access_project_id(pid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
-    p = project_repo.get_project_path(pid, practice_problem_id=ppid)
+    p = project_repo.get_project_path(pid, checkpoint_id=ppid)
     if not p:
         return make_response([], HTTPStatus.OK)
 
@@ -904,7 +1085,7 @@ def past_submissions():
         {
           projectId, projectName, classId, className, start, end,
           main: {submissionId,time,passed} | null,
-          practices: [{practiceProblemId,number,name,submissionId,time,passed}, ...]
+          checkpoints: [{checkpointId,number,name,submissionId,time,passed}, ...]
         }, ...
       ]
     """
@@ -912,7 +1093,7 @@ def past_submissions():
     if uid <= 0:
         return jsonify([])
 
-    # Projects where this student has ANY submissions (main or practice)
+    # Projects where this student has ANY submissions (main or checkpoint)
     proj_ids = [
         int(r[0])
         for r in (
@@ -956,7 +1137,7 @@ def past_submissions():
         .filter(
             Submissions.User == uid,
             Submissions.Project.in_(proj_ids),
-            Submissions.IsPractice == False,
+            Submissions.IsCheckpoint == False,
         )
         .order_by(Submissions.Project.asc(), Submissions.Time.desc())
         .all()
@@ -966,73 +1147,73 @@ def past_submissions():
         if pid and pid not in main_by_project:
             main_by_project[pid] = s
 
-    # Most recent PRACTICE submission per (project, practice_problem_id)
-    latest_practice = {}
+    # Most recent PRACTICE submission per (project, checkpoint_id)
+    latest_checkpoint = {}
     pp_ids = set()
-    practice_rows = (
+    checkpoint_rows = (
         Submissions.query
         .filter(
             Submissions.User == uid,
             Submissions.Project.in_(proj_ids),
-            Submissions.IsPractice == True,
+            Submissions.IsCheckpoint == True,
         )
-        .filter(Submissions.PracticeProblemId.isnot(None))
-        .order_by(Submissions.Project.asc(), Submissions.PracticeProblemId.asc(), Submissions.Time.desc())
+        .filter(Submissions.CheckpointId.isnot(None))
+        .order_by(Submissions.Project.asc(), Submissions.CheckpointId.asc(), Submissions.Time.desc())
         .all()
     )
-    for s in (practice_rows or []):
+    for s in (checkpoint_rows or []):
         pid = int(getattr(s, "Project", 0) or 0)
-        ppid = getattr(s, "PracticeProblemId", None)
+        ppid = getattr(s, "CheckpointId", None)
         if not pid or ppid is None:
             continue
         ppid_int = int(ppid)
         key = (pid, ppid_int)
-        if key not in latest_practice:
-            latest_practice[key] = s
+        if key not in latest_checkpoint:
+            latest_checkpoint[key] = s
             pp_ids.add(ppid_int)
 
     pp_map = {}
     if pp_ids:
-        for pp in PracticeProblems.query.filter(PracticeProblems.Id.in_(list(pp_ids))).all():
+        for pp in Checkpoints.query.filter(Checkpoints.Id.in_(list(pp_ids))).all():
             pp_map[int(getattr(pp, "Id", 0) or 0)] = pp
 
-    practice_number_by_project_and_id = {}
+    checkpoint_number_by_project_and_id = {}
     for pid in proj_ids:
         try:
             rows = (
-                PracticeProblems.query
+                Checkpoints.query
                 .filter(
-                    PracticeProblems.ProjectId == int(pid),
-                    PracticeProblems.Enabled == True,
+                    Checkpoints.ProjectId == int(pid),
+                    Checkpoints.Enabled == True,
                 )
-                .order_by(PracticeProblems.PracticeNumber.asc(), PracticeProblems.Id.asc())
+                .order_by(Checkpoints.CheckpointNumber.asc(), Checkpoints.Id.asc())
                 .all()
             )
-            practice_number_by_project_and_id[int(pid)] = {
+            checkpoint_number_by_project_and_id[int(pid)] = {
                 int(getattr(row, "Id", 0) or 0): index
                 for index, row in enumerate(rows or [], start=1)
             }
         except Exception:
-            practice_number_by_project_and_id[int(pid)] = {}
+            checkpoint_number_by_project_and_id[int(pid)] = {}
 
-    practices_by_project = defaultdict(list)
-    for (pid, ppid), s in latest_practice.items():
+    checkpoints_by_project = defaultdict(list)
+    for (pid, ppid), s in latest_checkpoint.items():
         pp = pp_map.get(ppid)
-        number = int(practice_number_by_project_and_id.get(pid, {}).get(ppid, 0) or 0)
+        number = int(checkpoint_number_by_project_and_id.get(pid, {}).get(ppid, 0) or 0)
         name = str(getattr(pp, "Name", "") or "") if pp else ""
         if not name:
-            name = f"Practice Problem {number}" if number else "Practice Problem"
-        practices_by_project[pid].append({
-            "practiceProblemId": int(ppid),
+            name = f"Checkpoint {number}" if number else "Checkpoint"
+        checkpoints_by_project[pid].append({
+            "checkpointId": int(ppid),
             "number": int(number),
             "name": name,
             "submissionId": int(getattr(s, "Id", 0) or 0),
             "time": iso(getattr(s, "Time", "")),
             "passed": bool(getattr(s, "IsPassing", False)),
         })
-    for pid in practices_by_project:
-        practices_by_project[pid].sort(
-            key=lambda x: (int(x.get("number", 0) or 0), int(x.get("practiceProblemId", 0) or 0))
+    for pid in checkpoints_by_project:
+        checkpoints_by_project[pid].sort(
+            key=lambda x: (int(x.get("number", 0) or 0), int(x.get("checkpointId", 0) or 0))
         )
 
     out = []
@@ -1052,7 +1233,7 @@ def past_submissions():
                 "time": iso(getattr(main_s, "Time", "")),
                 "passed": bool(getattr(main_s, "IsPassing", False)),
             },
-            "practices": practices_by_project.get(pid, []),
+            "checkpoints": checkpoints_by_project.get(pid, []),
         })
 
     return jsonify(out)
@@ -1086,7 +1267,7 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     class_id = request.form.get('class_id', '')
     if not user_can_access_class_id(parse_int(class_id, 0)):
         return access_denied_response(HTTPStatus.FORBIDDEN)
-    practice_enabled = True
+    checkpoint_enabled = True
     module_id = request.form.get('module_id', '').strip()
 
     if name == '' or language == '':
@@ -1130,7 +1311,7 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
         selected_path,
         assignmentdesc_path,
         json.dumps(add_names),
-        practice_enabled,
+        checkpoint_enabled,
         int(module_id) if module_id.isdigit() else None
     )
 
@@ -1139,21 +1320,13 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     except Exception:
         new_project_id_int = 0
 
-    # Automatically create the first practice problem for every newly-created project.
+    # Automatically create the first checkpoint for every newly-created project.
     # The admin detail page will show this alongside the main project.
-    if new_project_id_int > 0:
-        try:
-            existing_practice = project_repo.list_practice_problems(new_project_id_int)
-            if not existing_practice:
-                project_repo.create_practice_problem(
-                    new_project_id_int,
-                    name=default_checkpoint_name(1)
-                )
-        except Exception as e:
-            print(
-                f"[create_project] project created, but default practice problem creation failed: {e}",
-                flush=True
-            )
+    ensure_default_checkpoint_for_project(
+        project_repo,
+        new_project_id_int,
+        context="create_project",
+    )
 
     return make_response(str(new_project_id), HTTPStatus.OK)
 
@@ -1180,7 +1353,7 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
 
     name = request.form.get('name', '')
     language = request.form.get('language', '')
-    practice_enabled = True
+    checkpoint_enabled = True
     module_id = request.form.get('module_id', '').strip()
 
     if name == '' or language == '':
@@ -1340,7 +1513,7 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
 
     project_repo.edit_project(
         name, language, pid,
-        path, assignmentdesc_path, json.dumps(add_names), practice_enabled
+        path, assignmentdesc_path, json.dumps(add_names), checkpoint_enabled
     )
 
     # Recompute testcase outputs **against the path we just wrote**, so we don't depend on
@@ -1399,7 +1572,7 @@ def run_solution_for_input(solution_root: str, language: str, input_text: str, p
     args = [
         "python", script,
         "ADMIN",              # student_name triggers admin path
-        language or "python", # language as tabot expects
+        normalize_grader_language(language, solution_root), # language as grade.py expects
         input_text or "",     # goes to admin_run(user_input)
         solution_root,        # file or directory
         add_arg,
@@ -1456,7 +1629,7 @@ except Exception as e:
     TABOT = None
     print(f"[projects] Warning: tabot import failed (will use subprocess path): {e}", flush=True)
 
-def recompute_expected_outputs(project_repo, project_id, *, solution_override_path: str = None, language_override: str = None, practice_problem_id: int | None = None):
+def recompute_expected_outputs(project_repo, project_id, *, solution_override_path: str = None, language_override: str = None, checkpoint_id: int | None = None):
 
     """
     For each testcase, run the (updated) solution and persist the new output.
@@ -1477,7 +1650,7 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
         solution_root = getattr(proj_obj, "solutionpath", "")
         lang = getattr(proj_obj, "Language", "")
 
-    cases = project_repo.get_testcases(int(project_id), practice_problem_id=practice_problem_id)
+    cases = project_repo.get_testcases(int(project_id), checkpoint_id=checkpoint_id)
 
     # Determine class id (needed by repo call)
     class_id = getattr(proj_obj, "ClassId", 0) if proj_obj else 0
@@ -1489,8 +1662,8 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
             class_id = 0
 
     for tc_id, vals in cases.items():
-        if practice_problem_id:
-            pp = project_repo.get_practice_problem(int(practice_problem_id))
+        if checkpoint_id:
+            pp = project_repo.get_checkpoint(int(checkpoint_id))
             add_path = getattr(pp, "AdditionalFilePath", "") if pp else ""
         else:
             add_path = getattr(proj_obj, "AdditionalFilePath", "") if proj_obj else ""
@@ -1511,7 +1684,7 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
                 inp or "",
                 new_out,
                 int(class_id),
-                practice_problem_id=practice_problem_id,
+                checkpoint_id=checkpoint_id,
             )
         except Exception:
             # continue on individual failures
@@ -1531,8 +1704,8 @@ def list_source_files(project_repo: ProjectRepository = Provide[Container.projec
     if not user_can_access_project_id(pid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
-    ppid = opt_int(request.args.get("practice_problem_id", ""))
-    root = project_repo.get_project_path(int(pid), practice_problem_id=ppid)
+    ppid = opt_int(request.args.get("checkpoint_id", ""))
+    root = project_repo.get_project_path(int(pid), checkpoint_id=ppid)
 
     if not root or not os.path.exists(root):
         return jsonify({'files': []})
@@ -1567,9 +1740,9 @@ def get_source_file(project_repo: ProjectRepository = Provide[Container.project_
     if not user_can_access_project_id(pid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
-    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
+    ppid_raw = (request.args.get('checkpoint_id', '') or '').strip()
     ppid = int(ppid_raw) if ppid_raw.isdigit() else None
-    root = project_repo.get_project_path(int(pid), practice_problem_id=ppid)
+    root = project_repo.get_project_path(int(pid), checkpoint_id=ppid)
 
     if not root or not os.path.exists(root):
         return make_response({'message': 'Project path not found'}, HTTPStatus.NOT_FOUND)
@@ -1618,8 +1791,8 @@ def get_project(project_repo: ProjectRepository = Provide[Container.project_repo
     pid = int(pid_raw)
     if not user_can_access_project_id(pid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
-    ppid = opt_int(request.args.get("practice_problem_id", ""))
-    project_info = project_repo.get_project(pid, practice_problem_id=ppid)
+    ppid = opt_int(request.args.get("checkpoint_id", ""))
+    project_info = project_repo.get_project(pid, checkpoint_id=ppid)
 
     return make_response(json.dumps(project_info), HTTPStatus.OK)
     
@@ -1633,8 +1806,8 @@ def get_testcases(project_repo: ProjectRepository = Provide[Container.project_re
     project_id = parse_int(request.args.get("id", ""), 0)
     if not user_can_access_project_id(project_id):
         return access_denied_response(HTTPStatus.FORBIDDEN)
-    ppid = opt_int(request.args.get("practice_problem_id", ""))
-    testcases = project_repo.get_testcases(int(project_id), practice_problem_id=ppid)
+    ppid = opt_int(request.args.get("checkpoint_id", ""))
+    testcases = project_repo.get_testcases(int(project_id), checkpoint_id=ppid)
  
     return make_response(json.dumps(testcases), HTTPStatus.OK)
 
@@ -1650,8 +1823,8 @@ def count_testcases(project_repo: ProjectRepository = Provide[Container.project_
     if not user_can_access_project_id(project_id):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
-    ppid = opt_int(request.args.get("practice_problem_id", ""))
-    count = project_repo.count_testcases(int(project_id), practice_problem_id=ppid)
+    ppid = opt_int(request.args.get("checkpoint_id", ""))
+    count = project_repo.count_testcases(int(project_id), checkpoint_id=ppid)
     return jsonify({"count": int(count)})
 
 
@@ -1666,12 +1839,12 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
     project_id = request.form["project_id"]
     if not user_can_access_project_id(parse_int(project_id, 0)):
         return access_denied_response(HTTPStatus.FORBIDDEN)
-    ppid = opt_int(request.form.get("practice_problem_id", ""))
+    ppid = opt_int(request.form.get("checkpoint_id", ""))
 
-    # Require a solution root for whichever scope we're writing testcases into (main or practice)
-    sol = project_repo.get_project_path(int(project_id), practice_problem_id=ppid)
+    # Require a solution root for whichever scope we're writing testcases into (main or checkpoint)
+    sol = project_repo.get_project_path(int(project_id), checkpoint_id=ppid)
     if not sol:
-        msg = 'Practice problem has no solution files' if ppid else 'Assignment has no solution files'
+        msg = 'Checkpoint has no solution files' if ppid else 'Assignment has no solution files'
         return make_response({'message': msg}, HTTPStatus.BAD_REQUEST)
 
     try:
@@ -1698,7 +1871,7 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
                 testcase["output"],
                 class_id,
                 bool(testcase.get("hidden", False)),
-                practice_problem_id=ppid,
+                checkpoint_id=ppid,
             )
 
     return make_response("Testcase Added", HTTPStatus.OK)
@@ -1719,7 +1892,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
 
-    ppid_raw = request.form.get('practice_problem_id', '').strip()
+    ppid_raw = request.form.get('checkpoint_id', '').strip()
     
     if id_val == '' or name == '' or input_data == '' or project_id == '' or description == '' or class_id == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
@@ -1733,17 +1906,17 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         return make_response("Invalid numeric id", HTTPStatus.BAD_REQUEST)
 
     hidden = parse_bool(request.form.get("hidden", ""))
-    practice_problem_id = int(ppid_raw) if (ppid_raw or "").isdigit() else None
+    checkpoint_id = int(ppid_raw) if (ppid_raw or "").isdigit() else None
     if not user_can_access_project_id(project_id):
         return access_denied_response(HTTPStatus.FORBIDDEN)
     if not user_can_access_class_id(class_id_int):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
-    # Do not allow testcase edits/creates unless solution files exist (main or practice)
-    sol = project_repo.get_project_path(int(project_id), practice_problem_id=practice_problem_id)
+    # Do not allow testcase edits/creates unless solution files exist (main or checkpoint)
+    sol = project_repo.get_project_path(int(project_id), checkpoint_id=checkpoint_id)
     if not sol:
         return make_response(
-            "Practice problem has no solution files" if practice_problem_id else "Assignment has no solution files",
+            "Checkpoint has no solution files" if checkpoint_id else "Assignment has no solution files",
             HTTPStatus.BAD_REQUEST
         )
 
@@ -1753,10 +1926,10 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     try:
         project = project_repo.get_selected_project(int(project_id))
         language = (getattr(project, "Language", "") or "")
-        # If this testcase is PRACTICE, use practice solution/desc/additional
-        if practice_problem_id:
-            solution_root = project_repo.get_project_path(int(project_id), practice_problem_id=practice_problem_id)
-            pp = project_repo.get_practice_problem(int(practice_problem_id))
+        # If this testcase is PRACTICE, use checkpoint solution/desc/additional
+        if checkpoint_id:
+            solution_root = project_repo.get_project_path(int(project_id), checkpoint_id=checkpoint_id)
+            pp = project_repo.get_checkpoint(int(checkpoint_id))
             add_path = getattr(pp, "AdditionalFilePath", "") if pp else ""
         else:
             solution_root = (getattr(project, "solutionpath", "") or "")
@@ -1776,7 +1949,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         output,
         class_id_int,
         hidden,
-        practice_problem_id=practice_problem_id,
+        checkpoint_id=checkpoint_id,
     )
 
     return make_response("Testcase Added", HTTPStatus.OK)
@@ -1812,7 +1985,7 @@ def get_modules_by_class_id(project_repo: ProjectRepository = Provide[Container.
     module_projects = [project_repo.get_main_project_for_module(int(module.Id)) for module in modules]
     project_ids = [int(project.Id) for project in module_projects if project is not None]
     total_submission_counts = submission_repo.get_total_submission_for_all_projects()
-    practice_total_counts = practice_unique_user_counts(project_ids)
+    checkpoint_total_counts = checkpoint_unique_user_counts(project_ids)
     main_completed_ids = main_completed_project_ids(project_ids)
 
     return jsonify([
@@ -1821,7 +1994,7 @@ def get_modules_by_class_id(project_repo: ProjectRepository = Provide[Container.
             project_repo,
             submission_repo,
             total_submission_counts=total_submission_counts,
-            practice_total_counts=practice_total_counts,
+            checkpoint_total_counts=checkpoint_total_counts,
             main_completed_project_ids=main_completed_ids,
         )
         for module in modules
@@ -1855,7 +2028,16 @@ def create_module(project_repo: ProjectRepository = Provide[Container.project_re
     except Exception as exc:
         return make_response({'message': f'Could not create module: {exc}'}, HTTPStatus.BAD_REQUEST)
 
-    return jsonify({'module_id': int(module_id)})
+    default_checkpoint_id = ensure_default_checkpoint_for_module(
+        project_repo,
+        int(module_id),
+        context="create_module",
+    )
+
+    return jsonify({
+        'module_id': int(module_id),
+        'checkpoint_id': int(default_checkpoint_id) if default_checkpoint_id else None,
+    })
 
 @projects_api.route('/get_modules_by_class_id_student', methods=['GET'])
 @jwt_required()
@@ -1870,7 +2052,7 @@ def get_modules_by_class_id_student(project_repo: ProjectRepository = Provide[Co
     module_projects = [project_repo.get_main_project_for_module(int(module.Id)) for module in modules]
     project_ids = [int(project.Id) for project in module_projects if project is not None]
     total_submission_counts = submission_repo.get_total_submission_for_all_projects()
-    practice_total_counts = practice_unique_user_counts(project_ids)
+    checkpoint_total_counts = checkpoint_unique_user_counts(project_ids)
     main_completed_ids = main_completed_project_ids(project_ids)
 
     return jsonify([
@@ -1879,7 +2061,7 @@ def get_modules_by_class_id_student(project_repo: ProjectRepository = Provide[Co
             project_repo,
             submission_repo,
             total_submission_counts=total_submission_counts,
-            practice_total_counts=practice_total_counts,
+            checkpoint_total_counts=checkpoint_total_counts,
             main_completed_project_ids=main_completed_ids,
         )
         for module in modules
@@ -1898,11 +2080,12 @@ def get_module_overview_student(project_repo: ProjectRepository = Provide[Contai
         return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
 
     project = project_repo.get_main_project_for_module(int(module.Id))
-    practice_rows = student_practice_problem_rows(project_repo, int(project.Id)) if project else []
+    checkpoint_rows = student_checkpoint_rows(project_repo, int(project.Id)) if project else []
 
     return jsonify({
         "module": module_payload(module, project_repo, submission_repo),
-        "practiceProblems": practice_rows,
+        "checkpoints": checkpoint_rows,
+        "practiceProblems": checkpoint_rows,
     })
 
 @projects_api.route('/update_module', methods=['POST'])
@@ -1961,28 +2144,33 @@ def get_module_overview(project_repo: ProjectRepository = Provide[Container.proj
         return make_response({'message': 'Main project not found'}, HTTPStatus.NOT_FOUND)
 
     project_id = int(project.Id)
+    ensure_default_checkpoint_for_project(
+        project_repo,
+        project_id,
+        context="get_module_overview",
+    )
     total_submission_counts = submission_repo.get_total_submission_for_all_projects()
-    practice_total_counts = practice_unique_user_counts([project_id])
+    checkpoint_total_counts = checkpoint_unique_user_counts([project_id])
     main_completed_ids = main_completed_project_ids([project_id])
 
-    practice_rows = []
+    checkpoint_rows = []
     try:
-        problems = project_repo.list_practice_problems(project_id)
-        submission_counts = practice_submission_count_map(project_id)
-        testcase_counts = project_repo.count_testcases_by_practice_problem(project_id)
+        problems = project_repo.list_checkpoints(project_id)
+        submission_counts = checkpoint_submission_count_map(project_id)
+        testcase_counts = project_repo.count_testcases_by_checkpoint(project_id)
 
         for idx, pp in enumerate(problems):
             pp_id = int(pp.Id)
             setup_status = project_setup_status(
                 project_repo,
                 project_id,
-                practice_problem_id=pp_id,
+                checkpoint_id=pp_id,
                 testcase_count=int(testcase_counts.get(pp_id, 0) or 0),
             )
-            practice_rows.append({
+            checkpoint_rows.append({
                 "id": pp_id,
                 "number": idx + 1,
-                "name": str(getattr(pp, "Name", "") or f"Practice Problem {idx + 1}"),
+                "name": str(getattr(pp, "Name", "") or f"Checkpoint {idx + 1}"),
                 "enabled": bool(getattr(pp, "Enabled", True)),
                 "submissions": int(submission_counts.get(pp_id, 0) or 0),
                 "hasSolutionProgram": bool(setup_status["HasSolutionProgram"]),
@@ -1990,7 +2178,7 @@ def get_module_overview(project_repo: ProjectRepository = Provide[Container.proj
                 "testcaseCount": int(setup_status["TestcaseCount"]),
             })
     except Exception:
-        practice_rows = []
+        checkpoint_rows = []
 
     return jsonify({
         "module": module_payload(
@@ -1998,7 +2186,7 @@ def get_module_overview(project_repo: ProjectRepository = Provide[Container.proj
             project_repo,
             submission_repo,
             total_submission_counts=total_submission_counts,
-            practice_total_counts=practice_total_counts,
+            checkpoint_total_counts=checkpoint_total_counts,
             main_completed_project_ids=main_completed_ids,
         ),
         "project": project_payload(
@@ -2006,9 +2194,9 @@ def get_module_overview(project_repo: ProjectRepository = Provide[Container.proj
             submission_repo,
             project_repo,
             total_submission_counts=total_submission_counts,
-            practice_total_counts=practice_total_counts,
+            checkpoint_total_counts=checkpoint_total_counts,
         ),
-        "practiceProblems": practice_rows,
+        "checkpoints": checkpoint_rows,
     })
 
 @projects_api.route('/update_project_name', methods=['POST'])
@@ -2033,27 +2221,27 @@ def update_project_name(project_repo: ProjectRepository = Provide[Container.proj
 
     return jsonify({'message': 'Project name updated'})
 
-@projects_api.route('/update_practice_problem_name', methods=['POST'])
+@projects_api.route('/update_checkpoint_name', methods=['POST'])
 @jwt_required()
 @inject
-def update_practice_problem_name(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def update_checkpoint_name(project_repo: ProjectRepository = Provide[Container.project_repo]):
     if not is_staff_user():
         return access_denied_response()
 
     data = request.get_json(silent=True) or {}
-    practice_problem_id = int(str(data.get('practice_problem_id', 0)) or 0)
+    checkpoint_id = int(str(data.get('checkpoint_id', 0)) or 0)
     name = str(data.get('name', '')).strip()
 
-    if practice_problem_id <= 0 or not name:
+    if checkpoint_id <= 0 or not name:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
-    if not user_can_access_practice_problem_id(practice_problem_id):
+    if not user_can_access_checkpoint_id(checkpoint_id):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
-    pp = project_repo.update_practice_problem_name(practice_problem_id, name)
+    pp = project_repo.update_checkpoint_name(checkpoint_id, name)
     if not pp:
-        return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+        return make_response({'message': 'Checkpoint not found'}, HTTPStatus.NOT_FOUND)
 
-    return jsonify({'message': 'Practice problem name updated'})
+    return jsonify({'message': 'Checkpoint name updated'})
 
 
 @projects_api.route('/get_projects_by_class_id', methods=['GET'])
@@ -2071,7 +2259,7 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
 
-        practice_total = count_practice_unique_users(int(proj.Id))
+        checkpoint_total = count_checkpoint_unique_users(int(proj.Id))
 
         new_projects.append(json.dumps({
             "Id": proj.Id,
@@ -2079,17 +2267,17 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
             "Start": project_start(proj).strftime("%x %X") if project_start(proj) else "",
             "End": project_end(proj).strftime("%x %X") if project_end(proj) else "",
             "TotalSubmissions": int(thisdic.get(proj.Id, 0) or 0),
-            "PracticeTotalSubmissions": int(practice_total),
-            "PracticeProblemsEnabled": True,
+            "CheckpointTotalSubmissions": int(checkpoint_total),
+            "CheckpointsEnabled": True,
             "ModuleId": getattr(proj, "ModuleId", None),
         }))
     return jsonify(new_projects)
 
-@projects_api.route('/practice_submission_counts', methods=['GET'])
+@projects_api.route('/checkpoint_submission_counts', methods=['GET'])
 @jwt_required()
-def practice_submission_counts():
+def checkpoint_submission_counts():
     """
-    Returns practice submission counts per practice_problem_id (and total) for a project.
+    Returns checkpoint submission counts per checkpoint_id (and total) for a project.
     Response:
       { "total": <int>, "by_problem": { "<ppid>": <count>, ... } }
     """
@@ -2103,24 +2291,24 @@ def practice_submission_counts():
     if not user_can_access_project_id(pid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
-    if not hasattr(Submissions, "IsPractice"):
+    if not hasattr(Submissions, "IsCheckpoint"):
         return jsonify({'total': 0, 'by_problem': {}})
 
     total = 0
     by_problem = {}
     try:
-        total = count_practice_unique_users(int(pid))
+        total = count_checkpoint_unique_users(int(pid))
 
-        # If your Submissions model tracks which practice problem was submitted:
-        if hasattr(Submissions, "PracticeProblemId"):
+        # If your Submissions model tracks which checkpoint was submitted:
+        if hasattr(Submissions, "CheckpointId"):
             rows = (
                 db.session.query(
-                    Submissions.PracticeProblemId,
+                    Submissions.CheckpointId,
                     func.count(func.distinct(Submissions.User))
                 )
 
-                .filter(Submissions.Project == pid, Submissions.IsPractice == True)
-                .group_by(Submissions.PracticeProblemId)
+                .filter(Submissions.Project == pid, Submissions.IsCheckpoint == True)
+                .group_by(Submissions.CheckpointId)
                 .all()
             )
             for ppid, cnt in rows:
@@ -2139,12 +2327,12 @@ def practice_submission_counts():
 def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container.project_repo]):
     
     project_id = request.args.get('project_id')
-    if not user_can_access_project_id(parse_int(project_id, 0)):
+    if not current_user_can_download_project_files(parse_int(project_id, 0)):
         return access_denied_response(HTTPStatus.FORBIDDEN)
-    ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
+    ppid_raw = (request.args.get('checkpoint_id', '') or '').strip()
     ppid = int(ppid_raw) if ppid_raw.isdigit() else None
-    assignmentdesc_contents = project_repo.get_project_desc_file(int(project_id), practice_problem_id=ppid)
-    assignmentdesc_path = project_repo.get_project_desc_path(int(project_id), practice_problem_id=ppid)
+    assignmentdesc_contents = project_repo.get_project_desc_file(int(project_id), checkpoint_id=ppid)
+    assignmentdesc_path = project_repo.get_project_desc_path(int(project_id), checkpoint_id=ppid)
 
     fname = os.path.basename(assignmentdesc_path) if assignmentdesc_path else 'assignment_description'
     ext = os.path.splitext(fname)[1].lower()
@@ -2170,13 +2358,13 @@ def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container
         },
     )
 
-@projects_api.route('/edit_practice_project_files', methods=['POST'])
+@projects_api.route('/edit_checkpoint_project_files', methods=['POST'])
 @jwt_required()
 @inject
-def edit_practice_project_files(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def edit_checkpoint_project_files(project_repo: ProjectRepository = Provide[Container.project_repo]):
     """
-    Upload practice-problem solution files + assignment description (and optional additional files)
-    into a dedicated practice folder, and store paths on PracticeProjects (not Projects).
+    Upload checkpoint solution files + assignment description (and optional additional files)
+    into a dedicated checkpoint folder, and store paths on CheckpointProjects (not Projects).
     """
     def ts_str() -> str:
         return datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2188,21 +2376,21 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
         return access_denied_response()
 
     pid_str = (request.form.get("project_id", "") or "").strip()
-    ppid_str = (request.form.get("practice_problem_id", "") or "").strip()
+    ppid_str = (request.form.get("checkpoint_id", "") or "").strip()
     if not pid_str.isdigit() or not ppid_str.isdigit():
-        return make_response({'message': 'Invalid project_id or practice_problem_id'}, HTTPStatus.BAD_REQUEST)
+        return make_response({'message': 'Invalid project_id or checkpoint_id'}, HTTPStatus.BAD_REQUEST)
     pid = int(pid_str)
     ppid = int(ppid_str)
     if not user_can_access_project_id(pid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
-    if not user_can_access_practice_problem_id(ppid):
+    if not user_can_access_checkpoint_id(ppid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
     proj = project_repo.get_selected_project(pid)
     if not proj:
         return make_response({'message': 'Project not found'}, HTTPStatus.NOT_FOUND)
 
-    # Require both solution and description for practice files
+    # Require both solution and description for checkpoint files
     solution_uploads = request.files.getlist('solutionFiles')
     solution_uploads = [f for f in solution_uploads if f and f.filename]
     if not solution_uploads:
@@ -2210,12 +2398,12 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
     if 'assignmentdesc' not in request.files or not request.files['assignmentdesc'].filename:
         return make_response({'message': 'No assignment description file'}, HTTPStatus.BAD_REQUEST)
 
-    pp = project_repo.get_practice_problem(ppid)
+    pp = project_repo.get_checkpoint(ppid)
     if not pp:
-        return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+        return make_response({'message': 'Checkpoint not found'}, HTTPStatus.NOT_FOUND)
 
     ts = ts_str()
-    base_dir = os.path.join(practice_project_dir(pid), str(ppid), ts)
+    base_dir = os.path.join(checkpoint_project_dir(pid), str(ppid), ts)
     os.makedirs(base_dir, exist_ok=True)
 
     # Save solution file(s)
@@ -2232,7 +2420,7 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
     desc_path = os.path.join(base_dir, ad_name)
     ad.save(desc_path)
 
-    # Save additional practice files (optional)
+    # Save additional checkpoint files (optional)
     add_names = []
     for add_up in request.files.getlist('additionalFiles'):
         if add_up and add_up.filename:
@@ -2240,7 +2428,7 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
             add_up.save(os.path.join(base_dir, orig_name))
             add_names.append(orig_name)
 
-    # Persist practice-only paths
+    # Persist checkpoint-only paths
     pp.solutionpath = base_dir
     pp.AsnDescriptionPath = desc_path
     pp.AdditionalFilePath = json.dumps(add_names)
@@ -2250,26 +2438,26 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
         from src.repositories.database import db
         db.session.commit()
     except Exception:
-        return make_response({'message': 'Failed to save practice paths'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        return make_response({'message': 'Failed to save checkpoint paths'}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    # Recompute outputs for this PRACTICE PROBLEM's testcases using this practice solution
+    # Recompute outputs for this PRACTICE PROBLEM's testcases using this checkpoint solution
     try:
         recompute_expected_outputs(
             project_repo,
             int(pid),
             solution_override_path=base_dir,
             language_override=getattr(proj, "Language", ""),
-            practice_problem_id=int(ppid),
+            checkpoint_id=int(ppid),
         )
     except Exception:
         pass
 
     return jsonify({'ok': True})
 
-@projects_api.route('/rename_practice_problem', methods=['POST'])
+@projects_api.route('/rename_checkpoint', methods=['POST'])
 @jwt_required()
 @inject
-def rename_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def rename_checkpoint(project_repo: ProjectRepository = Provide[Container.project_repo]):
     if not is_staff_user():
         return access_denied_response()
 
@@ -2279,7 +2467,7 @@ def rename_practice_problem(project_repo: ProjectRepository = Provide[Container.
     except ValueError:
         pid = 0
     try:
-        ppid = int(str(data.get('practice_problem_id', 0)) or 0)
+        ppid = int(str(data.get('checkpoint_id', 0)) or 0)
     except ValueError:
         ppid = 0
     name = str(data.get('name', '') or '').strip()
@@ -2288,19 +2476,19 @@ def rename_practice_problem(project_repo: ProjectRepository = Provide[Container.
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
     if not user_can_access_project_id(pid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
-    if not user_can_access_practice_problem_id(ppid):
+    if not user_can_access_checkpoint_id(ppid):
         return access_denied_response(HTTPStatus.FORBIDDEN)
 
-    pp = project_repo.get_practice_problem(ppid)
+    pp = project_repo.get_checkpoint(ppid)
     if not pp or int(getattr(pp, "ProjectId", 0) or 0) != int(pid):
-        return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+        return make_response({'message': 'Checkpoint not found'}, HTTPStatus.NOT_FOUND)
 
     pp.Name = name
     try:
         from src.repositories.database import db
         db.session.commit()
     except Exception:
-        return make_response({'message': 'Failed to rename practice problem'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        return make_response({'message': 'Failed to rename checkpoint'}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     return jsonify({'ok': True, 'name': name})
 
@@ -2316,28 +2504,28 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
     if not user_can_access_project_id(project_id):
         return access_denied_response(HTTPStatus.FORBIDDEN)
     user_id = input_json['userID']
-    practice_raw = (input_json or {}).get('practice', False)
-    practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+    checkpoint_raw = (input_json or {}).get('checkpoint', False)
+    checkpoint = str(checkpoint_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
-    ppid_raw = (input_json or {}).get('practice_problem_id', None)
+    ppid_raw = (input_json or {}).get('checkpoint_id', None)
     try:
-        practice_problem_id = int(ppid_raw) if ppid_raw is not None else None
+        checkpoint_id = int(ppid_raw) if ppid_raw is not None else None
     except (TypeError, ValueError):
-        practice_problem_id = None
+        checkpoint_id = None
 
-    if practice and hasattr(Submissions, "IsPractice"):
+    if checkpoint and hasattr(Submissions, "IsCheckpoint"):
 
         q = (
             Submissions.query
             .filter(
                 Submissions.Project == project_id,
                 Submissions.User == user_id,
-                Submissions.IsPractice == True
+                Submissions.IsCheckpoint == True
             )
         )
-        # If grading a specific practice problem, restrict to that practice_problem_id.
-        if practice_problem_id is not None and hasattr(Submissions, "PracticeProblemId"):
-            q = q.filter(Submissions.PracticeProblemId == practice_problem_id)
+        # If grading a specific checkpoint, restrict to that checkpoint_id.
+        if checkpoint_id is not None and hasattr(Submissions, "CheckpointId"):
+            q = q.filter(Submissions.CheckpointId == checkpoint_id)
         sub = q.order_by(Submissions.Time.desc()).first()
 
         submissions = {user_id: sub} if sub else {}

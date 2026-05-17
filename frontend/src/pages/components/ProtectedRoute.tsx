@@ -9,6 +9,33 @@ interface RouteScope {
   classId: string | null
 }
 
+const getValidStoredToken = (): string | null => {
+  const token = localStorage.getItem("AUTOTA_AUTH_TOKEN")
+
+  if (!token) {
+    return null
+  }
+
+  const cleanedToken = token.trim()
+
+  if (
+    !cleanedToken ||
+    cleanedToken.toLowerCase() === "null" ||
+    cleanedToken.toLowerCase() === "undefined"
+  ) {
+    localStorage.removeItem("AUTOTA_AUTH_TOKEN")
+    localStorage.removeItem("AUTOTA_USER_ROLE")
+    return null
+  }
+
+  return cleanedToken
+}
+
+const clearStoredAuth = () => {
+  localStorage.removeItem("AUTOTA_AUTH_TOKEN")
+  localStorage.removeItem("AUTOTA_USER_ROLE")
+}
+
 const getRouteScope = (pathname: string): RouteScope | null => {
   const match = pathname.match(/^\/(admin|student)\/school\/(\d+)(?:\/class\/(\d+))?(?:\/|$)/)
 
@@ -43,7 +70,7 @@ const getAccessCacheKey = (pathname: string): string | null => {
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation()
-  const token = localStorage.getItem("AUTOTA_AUTH_TOKEN")
+  const token = getValidStoredToken()
   const accessCacheKey = useMemo(() => getAccessCacheKey(location.pathname), [location.pathname])
   const [isCheckingAccess, setIsCheckingAccess] = useState(Boolean(token && accessCacheKey))
   const [checkedAccessKey, setCheckedAccessKey] = useState<string | null>(null)
@@ -55,6 +82,8 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
     const checkAccess = async () => {
       if (!token) {
+        clearStoredAuth()
+
         if (isMounted) {
           setKickoutPath("/login")
           setHasAccess(false)
@@ -109,8 +138,20 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           setCheckedAccessKey(accessCacheKey)
           setIsCheckingAccess(false)
         }
-      } catch {
+      } catch (err: any) {
         sessionStorage.removeItem(accessCacheKey)
+
+        if (err?.response?.status === 401 || err?.response?.status === 422 || err?.response?.status === 403) {
+          clearStoredAuth()
+
+          if (isMounted) {
+            setKickoutPath("/login")
+            setHasAccess(false)
+            setCheckedAccessKey(accessCacheKey)
+            setIsCheckingAccess(false)
+          }
+          return
+        }
 
         if (isMounted) {
           setKickoutPath(getKickoutPath(scope.section))
@@ -129,6 +170,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }, [accessCacheKey, location.pathname, token])
 
   if (!token) {
+    clearStoredAuth()
     return <Navigate to="/login" replace />
   }
 

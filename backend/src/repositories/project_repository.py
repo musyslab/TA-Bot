@@ -6,13 +6,56 @@ import subprocess
 from typing import Optional, Dict
 from flask import send_file
 from sqlalchemy.sql.expression import asc
-from .models import Projects, PracticeProblems, StudentGrades, Submissions, Testcases, Classes, Modules
+from .models import Projects, Checkpoints, MainAssignmentGrades, Submissions, Testcases, Classes, Modules
 from src.repositories.database import db
 from sqlalchemy import desc, and_, func
 from datetime import datetime
-from pyston import PystonClient,File
+from pyston import PystonClient, File
 import asyncio
 import json
+
+
+def normalize_grader_language(language: str, solution_root: str = "") -> str:
+    """
+    Convert the project language stored/displayed by the app into the token
+    expected by /tabot-files/grading-scripts/grade.py. The UI stores Python as
+    "python", but the grader's language switch uses "py".
+    """
+    raw = str(language or "").strip().lower()
+    aliases = {
+        "python": "py",
+        "python3": "py",
+        "py": "py",
+        "java": "java",
+        "c": "c",
+        "racket": "racket",
+        "rkt": "racket",
+        "scheme": "racket",
+        "scm": "racket",
+    }
+    if raw in aliases:
+        return aliases[raw]
+
+    try:
+        candidates = []
+        if solution_root and os.path.isdir(solution_root):
+            candidates = [os.path.splitext(name)[1].lower() for name in os.listdir(solution_root)]
+        elif solution_root:
+            candidates = [os.path.splitext(solution_root)[1].lower()]
+
+        if ".py" in candidates:
+            return "py"
+        if ".java" in candidates:
+            return "java"
+        if ".c" in candidates:
+            return "c"
+        if ".rkt" in candidates or ".scm" in candidates:
+            return "racket"
+    except Exception:
+        pass
+
+    return raw or "py"
+
 
 class ProjectRepository():
 
@@ -49,7 +92,6 @@ class ProjectRepository():
         except Exception:
             return add_path or ""
 
-
     def _coerce_datetime(self, value):
         if isinstance(value, datetime):
             return value
@@ -77,7 +119,7 @@ class ProjectRepository():
         db.session.add(project)
         db.session.commit()
 
-        self.create_practice_problem(project.Id, name="Practice Problem 1")
+        self.create_checkpoint(project.Id, name="Checkpoint 1")
         return int(module.Id)
 
     def get_modules_by_class_id(self, class_id: int):
@@ -139,49 +181,48 @@ class ProjectRepository():
         db.session.commit()
         return project
 
-    def update_practice_problem_name(self, practice_problem_id: int, name: str):
-        pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+    def update_checkpoint_name(self, checkpoint_id: int, name: str):
+        pp = Checkpoints.query.filter(Checkpoints.Id == int(checkpoint_id)).first()
         if not pp:
             return None
         pp.Name = name
         db.session.commit()
         return pp
 
-
-    def list_practice_problems(self, project_id: int):
+    def list_checkpoints(self, project_id: int):
         return (
-            PracticeProblems.query
+            Checkpoints.query
             .filter(
-                PracticeProblems.ProjectId == int(project_id),
-                PracticeProblems.Enabled == True,
+                Checkpoints.ProjectId == int(project_id),
+                Checkpoints.Enabled == True,
             )
-            .order_by(PracticeProblems.PracticeNumber.asc(), PracticeProblems.Id.asc())
+            .order_by(Checkpoints.CheckpointNumber.asc(), Checkpoints.Id.asc())
             .all()
         )
 
-    def _next_practice_number_scratch_base(self, project_id: int) -> int:
+    def _next_checkpoint_number_scratch_base(self, project_id: int) -> int:
         max_num = (
-            db.session.query(func.max(PracticeProblems.PracticeNumber))
-            .filter(PracticeProblems.ProjectId == int(project_id))
+            db.session.query(func.max(Checkpoints.CheckpointNumber))
+            .filter(Checkpoints.ProjectId == int(project_id))
             .scalar()
         )
         total_rows = (
-            PracticeProblems.query
-            .filter(PracticeProblems.ProjectId == int(project_id))
+            Checkpoints.query
+            .filter(Checkpoints.ProjectId == int(project_id))
             .count()
         )
         return int(max_num or 0) + int(total_rows or 0) + 1000
 
-    def _practice_problem_rows_for_project(self, project_id: int):
+    def _checkpoint_rows_for_project(self, project_id: int):
         return (
-            PracticeProblems.query
-            .filter(PracticeProblems.ProjectId == int(project_id))
-            .order_by(PracticeProblems.PracticeNumber.asc(), PracticeProblems.Id.asc())
+            Checkpoints.query
+            .filter(Checkpoints.ProjectId == int(project_id))
+            .order_by(Checkpoints.CheckpointNumber.asc(), Checkpoints.Id.asc())
             .all()
         )
 
-    def _write_practice_problem_order(self, project_id: int, ordered_active_ids: list[int]):
-        all_rows = self._practice_problem_rows_for_project(project_id)
+    def _write_checkpoint_order(self, project_id: int, ordered_active_ids: list[int]):
+        all_rows = self._checkpoint_rows_for_project(project_id)
         active_rows = [row for row in all_rows if bool(getattr(row, "Enabled", True))]
         inactive_rows = [row for row in all_rows if not bool(getattr(row, "Enabled", True))]
 
@@ -208,35 +249,29 @@ class ProjectRepository():
 
         final_rows = [*ordered_rows, *inactive_rows]
 
-        # PracticeProblems has a unique ProjectId + PracticeNumber constraint.
-        # MySQL checks that uniqueness row by row during a flush, so swapping
-        # numbers directly can silently leave the UI looking like it saved while
-        # the next reload falls back to the old order. Move every row for the
-        # project into a guaranteed-unused range first, flush that state, then
-        # write the final compact sequence.
-        scratch_base = self._next_practice_number_scratch_base(project_id)
+        scratch_base = self._next_checkpoint_number_scratch_base(project_id)
         for index, row in enumerate(all_rows, start=1):
-            row.PracticeNumber = scratch_base + index
+            row.CheckpointNumber = scratch_base + index
 
         db.session.flush()
 
         for index, row in enumerate(final_rows, start=1):
-            row.PracticeNumber = index
+            row.CheckpointNumber = index
 
         db.session.commit()
         return ordered_rows
 
-    def reorder_practice_problems(self, project_id: int, ordered_ids: list[int]):
+    def reorder_checkpoints(self, project_id: int, ordered_ids: list[int]):
         try:
-            return self._write_practice_problem_order(project_id, ordered_ids)
+            return self._write_checkpoint_order(project_id, ordered_ids)
         except Exception:
             db.session.rollback()
             raise
 
-    def renumber_practice_problems(self, project_id: int):
+    def renumber_checkpoints(self, project_id: int):
         try:
-            rows = self.list_practice_problems(project_id)
-            return self._write_practice_problem_order(
+            rows = self.list_checkpoints(project_id)
+            return self._write_checkpoint_order(
                 project_id,
                 [int(row.Id) for row in rows],
             )
@@ -244,38 +279,38 @@ class ProjectRepository():
             db.session.rollback()
             raise
 
-    def delete_practice_problem(self, practice_problem_id: int):
-        pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+    def delete_checkpoint(self, checkpoint_id: int):
+        pp = Checkpoints.query.filter(Checkpoints.Id == int(checkpoint_id)).first()
         if not pp:
             return None
 
         project_id = int(pp.ProjectId)
         pp.Enabled = False
-        pp.PracticeNumber = self._next_practice_number_scratch_base(project_id)
+        pp.CheckpointNumber = self._next_checkpoint_number_scratch_base(project_id)
         db.session.flush()
-        self.renumber_practice_problems(project_id)
+        self.renumber_checkpoints(project_id)
         return pp
 
-    def get_practice_problem(self, practice_problem_id: int) -> Optional[PracticeProblems]:
-        return PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+    def get_checkpoint(self, checkpoint_id: int) -> Optional[Checkpoints]:
+        return Checkpoints.query.filter(Checkpoints.Id == int(checkpoint_id)).first()
 
-    def create_practice_problem(self, project_id: int, *, name: str = "") -> int:
+    def create_checkpoint(self, project_id: int, *, name: str = "") -> int:
         proj = Projects.query.filter(Projects.Id == int(project_id)).first()
         if not proj:
             return 0
 
         max_num = (
-            db.session.query(func.max(PracticeProblems.PracticeNumber))
-            .filter(PracticeProblems.ProjectId == int(project_id))
+            db.session.query(func.max(Checkpoints.CheckpointNumber))
+            .filter(Checkpoints.ProjectId == int(project_id))
             .scalar()
         )
         next_num = int(max_num or 0) + 1
 
-        pp = PracticeProblems(
+        pp = Checkpoints(
             ProjectId=int(project_id),
-            PracticeNumber=next_num,
+            CheckpointNumber=next_num,
             Enabled=True,
-            Name=(name or f"Practice Problem {next_num}"),
+            Name=(name or f"Checkpoint {next_num}"),
             Language=getattr(proj, "Language", ""),
             solutionpath=None,
             AsnDescriptionPath=None,
@@ -286,10 +321,6 @@ class ProjectRepository():
         return int(pp.Id)
 
     def get_current_project(self) -> Optional[Projects]:
-        """[Identifies the current project based on the start and end date]
-        Returns:
-            Project: [this should be the currently assigned project object]
-        """
         now = datetime.now()
         return (
             Projects.query
@@ -300,14 +331,6 @@ class ProjectRepository():
         )
 
     def get_current_project_by_class(self, class_id: int) -> Optional[Projects]:
-        """Identifies the current project based on the start and end date.
-
-        Args:
-            class_id (int): The ID of the class.
-
-        Returns:
-            Optional[Projects]: The currently assigned project object.
-        """
         now = datetime.now()
         return (
             Projects.query
@@ -322,11 +345,6 @@ class ProjectRepository():
         )
 
     def get_all_projects(self) -> Projects:
-        """Get all projects from the mySQL database and return a project object sorted by end date.
-
-        Returns:
-            Projects: A project object sorted by end date.
-        """
         return (
             Projects.query
             .outerjoin(Modules, Projects.ModuleId == Modules.Id)
@@ -335,31 +353,24 @@ class ProjectRepository():
         )
 
     def get_selected_project(self, project_id: int) -> Projects:
-        """[summary]
-        Args:
-            project_id (int): [The Project ID]
-
-        Returns:
-            Project: [a project object]
-        """
-        project= Projects.query.filter(Projects.Id == project_id).first()
+        project = Projects.query.filter(Projects.Id == project_id).first()
         return project
 
-
-    def get_projects_by_class_id(self,class_id: int) -> int:
-        """
-        Returns a list of projects associated with a given class ID.
-
-        Args:
-        class_id (int): The ID of the class to retrieve projects for.
-
-        Returns:
-        A list of project objects associated with the given class ID.
-        """
-        class_projects = Projects.query.filter(Projects.ClassId==class_id)
+    def get_projects_by_class_id(self, class_id: int) -> int:
+        class_projects = Projects.query.filter(Projects.ClassId == class_id)
         return class_projects
-    
-    def create_project(self, name: str, language: str, class_id: int, file_path: str, description_path: str, additional_file_path: str, practice_problems_enabled: bool = False, module_id: Optional[int] = None):
+
+    def create_project(
+        self,
+        name: str,
+        language: str,
+        class_id: int,
+        file_path: str,
+        description_path: str,
+        additional_file_path: str,
+        checkpoints_enabled: bool = False,
+        module_id: Optional[int] = None,
+    ):
         project = Projects(
             Name=name,
             Language=language,
@@ -373,12 +384,12 @@ class ProjectRepository():
         db.session.add(project)
         db.session.commit()
 
-        if bool(practice_problems_enabled):
-            pp = PracticeProblems(
+        if bool(checkpoints_enabled):
+            pp = Checkpoints(
                 ProjectId=project.Id,
                 Enabled=True,
-                Name="Practice Problem 1",
-                PracticeNumber=1,
+                Name="Checkpoint 1",
+                CheckpointNumber=1,
                 Language=language,
                 solutionpath=None,
                 AsnDescriptionPath=None,
@@ -389,30 +400,29 @@ class ProjectRepository():
 
         return project.Id
 
-    def set_practice_problems_enabled(self, project_id: int, enabled: bool):
+    def set_checkpoints_enabled(self, project_id: int, enabled: bool):
         proj = Projects.query.filter(Projects.Id == int(project_id)).first()
         if not proj:
             return
         if bool(enabled):
-            # Ensure at least one exists when toggled on
-            existing = self.list_practice_problems(int(project_id))
+            existing = self.list_checkpoints(int(project_id))
             if not existing:
-                self.create_practice_problem(int(project_id), name="Practice Problem 1")
-        # No global disable cascade here. UI can hide access when toggle off.
+                self.create_checkpoint(int(project_id), name="Checkpoint 1")
         db.session.commit()
 
-    def get_practice_problems_enabled(self, project_id: int) -> bool:
-        q = PracticeProblems.query.filter(
-            PracticeProblems.ProjectId == int(project_id),
-            PracticeProblems.Enabled == True,
+    def get_checkpoints_enabled(self, project_id: int) -> bool:
+        q = Checkpoints.query.filter(
+            Checkpoints.ProjectId == int(project_id),
+            Checkpoints.Enabled == True,
         ).first()
         return bool(q)
-        
-    def get_project(self, project_id:int, practice_problem_id: Optional[int] = None) -> Projects:
+
+    def get_project(self, project_id: int, checkpoint_id: Optional[int] = None) -> Projects:
         project_data = Projects.query.filter(Projects.Id == project_id).first()
         pp = None
-        if practice_problem_id:
-            pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+        if checkpoint_id:
+            pp = Checkpoints.query.filter(Checkpoints.Id == int(checkpoint_id)).first()
+
         project = {}
         module = self.get_module_by_project_id(project_id)
         start_value = module.Start if module and module.Start else datetime.now()
@@ -420,7 +430,7 @@ class ProjectRepository():
         start_string = start_value.strftime("%Y-%m-%dT%H:%M:%S")
         end_string = end_value.strftime("%Y-%m-%dT%H:%M:%S")
 
-        if practice_problem_id:
+        if checkpoint_id:
             project_solutionFile = self.basename_or_empty(pp.solutionpath if (pp and pp.solutionpath) else "")
             project_descriptionfile = self.basename_or_empty(pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else "")
             add_field = (getattr(pp, "AdditionalFilePath", "") if pp else "") or ""
@@ -432,11 +442,11 @@ class ProjectRepository():
         project_additionalfiles = [os.path.basename(p) for p in self.json_list_field(add_field)]
 
         display_name = project_data.Name
-        practice_num = 0
+        checkpoint_num = 0
 
-        if practice_problem_id and pp and getattr(pp, "Name", None):
+        if checkpoint_id and pp and getattr(pp, "Name", None):
             display_name = pp.Name
-            practice_num = int(getattr(pp, "PracticeNumber", 0) or 0)
+            checkpoint_num = int(getattr(pp, "CheckpointNumber", 0) or 0)
 
         project[project_data.Id] = [
             str(display_name),
@@ -447,12 +457,21 @@ class ProjectRepository():
             str(project_solutionFile),
             str(project_descriptionfile),
             project_additionalfiles,
-            self.get_practice_problems_enabled(project_data.Id),
-            practice_num,
+            self.get_checkpoints_enabled(project_data.Id),
+            checkpoint_num,
         ]
         return project
 
-    def edit_project(self, name: str, language: str, project_id: int, path: str, description_path: str, additional_file_path: str, practice_problems_enabled: bool = False):
+    def edit_project(
+        self,
+        name: str,
+        language: str,
+        project_id: int,
+        path: str,
+        description_path: str,
+        additional_file_path: str,
+        checkpoints_enabled: bool = False,
+    ):
         project = Projects.query.filter(Projects.Id == project_id).first()
         project.Name = name
         project.Language = language
@@ -462,25 +481,28 @@ class ProjectRepository():
 
         db.session.commit()
 
-        self.set_practice_problems_enabled(project_id, bool(practice_problems_enabled))
-        
-    def get_testcases(self, project_id: int, practice_problem_id: Optional[int] = None) -> Dict[int, list]:
+        self.set_checkpoints_enabled(project_id, bool(checkpoints_enabled))
+
+    def get_testcases(self, project_id: int, checkpoint_id: Optional[int] = None) -> Dict[int, list]:
         q = Testcases.query.filter(Testcases.ProjectId == int(project_id))
-        if practice_problem_id:
-            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        if checkpoint_id:
+            q = q.filter(Testcases.CheckpointId == int(checkpoint_id))
         else:
-            q = q.filter(Testcases.PracticeProblemId.is_(None))
+            q = q.filter(Testcases.CheckpointId.is_(None))
+
         testcases = q.all()
         testcase_info: Dict[int, list] = {}
+
         for test in testcases:
-            testcase_data = []
-            testcase_data.append(test.Id)          
-            testcase_data.append(test.Name)        
-            testcase_data.append(test.Description) 
-            testcase_data.append(test.input)       
-            testcase_data.append(test.Output) 
-            testcase_data.append(bool(getattr(test, "Hidden", False)))     
-            testcase_info[test.Id] = testcase_data
+            testcase_info[test.Id] = [
+                test.Id,
+                test.Name,
+                test.Description,
+                test.input,
+                test.Output,
+                bool(getattr(test, "Hidden", False)),
+            ]
+
         return testcase_info
 
     def add_or_update_testcase(
@@ -493,27 +515,24 @@ class ProjectRepository():
         output: str,
         class_id: int,
         hidden: bool = False,
-        practice_problem_id: Optional[int] = None,
+        checkpoint_id: Optional[int] = None,
     ):
         from flask import current_app
 
-        # Fetch project (main) and choose correct file roots (main vs practice)
         project = Projects.query.filter(Projects.Id == project_id).first()
         pp = None
-        if practice_problem_id:
-            pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
+        if checkpoint_id:
+            pp = Checkpoints.query.filter(Checkpoints.Id == int(checkpoint_id)).first()
 
-        # Ensure practice testcases NEVER fall back to main solution files
-        if practice_problem_id:
+        if checkpoint_id:
             if not pp or not getattr(pp, "solutionpath", None):
-                raise ValueError("Practice problem has no solution files")
+                raise ValueError("Checkpoint has no solution files")
             project_base = pp.solutionpath
         else:
             if not project or not getattr(project, "solutionpath", None):
                 raise ValueError("Assignment has no solution files")
             project_base = project.solutionpath
 
-        # Run grading-script to compute default output if none provided
         grading_script = os.path.join(
             current_app.root_path, "..", "tabot-files", "grading-scripts", "grade.py"
         )
@@ -521,13 +540,12 @@ class ProjectRepository():
         add_path = (getattr(pp, "AdditionalFilePath", "") if pp else getattr(project, "AdditionalFilePath", "")) or ""
         add_path = self.expand_additional_paths(add_path, project_base)
 
-        #   grade.py ADMIN <language> <input_text> <solution_path> [additional_files_json]
         result = subprocess.run(
             [
                 "python",
                 grading_script,
                 "ADMIN",
-                (pp.Language if (pp and pp.Language) else project.Language),
+                normalize_grader_language((pp.Language if (pp and pp.Language) else project.Language), project_base),
                 input_data,
                 project_base,
                 add_path,
@@ -538,25 +556,22 @@ class ProjectRepository():
             text=True,
         )
 
-        # Always prefer recomputed output (includes AdditionalFilePath);
-        # fall back to provided output only if recompute failed/empty.
         recomputed = (result.stdout or "").strip()
         if recomputed:
             output = recomputed
 
-        # Handle creation or update of the testcase record
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
 
         if testcase is None:
             testcase = Testcases(
                 ProjectId=project_id,
-                PracticeProblemId=(int(practice_problem_id) if practice_problem_id else None),
+                CheckpointId=(int(checkpoint_id) if checkpoint_id else None),
                 Name=name,
                 Description=description,
                 input=input_data,
                 Output=output,
                 Hidden=bool(hidden),
-                Practice=bool(practice_problem_id),
+                Checkpoint=bool(checkpoint_id),
             )
             db.session.add(testcase)
         else:
@@ -565,8 +580,8 @@ class ProjectRepository():
             testcase.input = input_data
             testcase.Output = output
             testcase.Hidden = bool(hidden)
-            testcase.PracticeProblemId = (int(practice_problem_id) if practice_problem_id else None)
-            testcase.Practice = bool(practice_problem_id)
+            testcase.CheckpointId = (int(checkpoint_id) if checkpoint_id else None)
+            testcase.Checkpoint = bool(checkpoint_id)
 
         db.session.commit()
 
@@ -575,47 +590,48 @@ class ProjectRepository():
         db.session.delete(testcase)
         db.session.commit()
 
-    def count_testcases(self, project_id: int, practice_problem_id: Optional[int] = None) -> int:
+    def count_testcases(self, project_id: int, checkpoint_id: Optional[int] = None) -> int:
         q = Testcases.query.filter(Testcases.ProjectId == int(project_id))
-        if practice_problem_id:
-            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        if checkpoint_id:
+            q = q.filter(Testcases.CheckpointId == int(checkpoint_id))
         else:
-            q = q.filter(Testcases.PracticeProblemId.is_(None))
+            q = q.filter(Testcases.CheckpointId.is_(None))
         return int(q.count() or 0)
 
-    def count_testcases_by_practice_problem(self, project_id: int) -> Dict[int, int]:
+    def count_testcases_by_checkpoint(self, project_id: int) -> Dict[int, int]:
         rows = (
-            db.session.query(Testcases.PracticeProblemId, func.count(Testcases.Id))
+            db.session.query(Testcases.CheckpointId, func.count(Testcases.Id))
             .filter(
                 Testcases.ProjectId == int(project_id),
-                Testcases.PracticeProblemId.isnot(None),
+                Testcases.CheckpointId.isnot(None),
             )
-            .group_by(Testcases.PracticeProblemId)
+            .group_by(Testcases.CheckpointId)
             .all()
         )
         return {int(ppid): int(count or 0) for ppid, count in rows if ppid is not None}
 
-    def testcases_to_json(self, project_id: int, practice_problem_id: Optional[int] = None) -> str:
+    def testcases_to_json(self, project_id: int, checkpoint_id: Optional[int] = None) -> str:
         testcase_holder: Dict[int, list] = {}
         proj = Projects.query.filter(Projects.Id == project_id).first()
         add_field = getattr(proj, "AdditionalFilePath", "") if proj else ""
         add_list = self.json_list_field(add_field)
 
-        # Expand stored names to absolute paths under the teacher solution folder.
         base_dir = ""
         if proj and getattr(proj, "solutionpath", ""):
             sp = getattr(proj, "solutionpath", "")
             base_dir = sp if os.path.isdir(sp) else os.path.dirname(sp)
+
         try:
             add_list = json.loads(self.expand_additional_paths(json.dumps(add_list), base_dir))
         except Exception:
             pass
 
         q = Testcases.query.filter(Testcases.ProjectId == project_id)
-        if practice_problem_id:
-            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        if checkpoint_id:
+            q = q.filter(Testcases.CheckpointId == int(checkpoint_id))
         else:
-            q = q.filter(Testcases.PracticeProblemId.is_(None))
+            q = q.filter(Testcases.CheckpointId.is_(None))
+
         tests = q.all()
 
         for test in tests:
@@ -627,10 +643,11 @@ class ProjectRepository():
                 bool(getattr(test, "Hidden", False)),
                 add_list,
             ]
+
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)
         return json_object
-    
+
     def get_className_by_projectId(self, project_id):
         try:
             pid = int(project_id)
@@ -648,48 +665,66 @@ class ProjectRepository():
         return class_obj.Name
 
     def get_class_id_by_name(self, class_name):
-        class_id = Classes.query.filter(Classes.Name==class_name).first().Id
+        class_id = Classes.query.filter(Classes.Name == class_name).first().Id
         return class_id
 
-    def get_project_path(self, project_id, practice_problem_id: Optional[int] = None):
-        project = Projects.query.filter(Projects.Id==project_id).first()
-        if not project:
-            return ""
-        if practice_problem_id:
-            pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
-            return (pp.solutionpath if (pp and pp.solutionpath) else "")
-        return project.solutionpath
-
-    def get_project_desc_path(self, project_id, practice_problem_id: Optional[int] = None):
+    def get_project_path(self, project_id, checkpoint_id: Optional[int] = None):
         project = Projects.query.filter(Projects.Id == project_id).first()
         if not project:
             return ""
-        if practice_problem_id:
-            pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
-            return (pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else "")
+        if checkpoint_id:
+            pp = Checkpoints.query.filter(Checkpoints.Id == int(checkpoint_id)).first()
+            return pp.solutionpath if (pp and pp.solutionpath) else ""
+        return project.solutionpath
+
+    def get_project_desc_path(self, project_id, checkpoint_id: Optional[int] = None):
+        project = Projects.query.filter(Projects.Id == project_id).first()
+        if not project:
+            return ""
+        if checkpoint_id:
+            pp = Checkpoints.query.filter(Checkpoints.Id == int(checkpoint_id)).first()
+            return pp.AsnDescriptionPath if (pp and pp.AsnDescriptionPath) else ""
         return project.AsnDescriptionPath
 
-    def get_project_desc_file(self, project_id, practice_problem_id: Optional[int] = None):
-        filepath = self.get_project_desc_path(project_id, practice_problem_id=practice_problem_id)
+    def get_project_desc_file(self, project_id, checkpoint_id: Optional[int] = None):
+        filepath = self.get_project_desc_path(project_id, checkpoint_id=checkpoint_id)
         if not filepath:
             return b""
-        with open(filepath, 'rb') as file:
+        with open(filepath, "rb") as file:
             file_contents = file.read()
-        return file_contents  # Return the contents of the PDF file
+        return file_contents
 
     def get_student_grade(self, project_id, user_id):
-        student_progress = StudentGrades.query.filter(and_(StudentGrades.Sid==user_id, StudentGrades.Pid==project_id)).first()
+        student_progress = MainAssignmentGrades.query.filter(
+            and_(
+                MainAssignmentGrades.Sid == user_id,
+                MainAssignmentGrades.Pid == project_id,
+            )
+        ).first()
+
         if student_progress is None:
             return 0
+
         return student_progress.Grade
-        
+
     def set_student_grade(self, project_id, user_id, grade):
-        student_grade = StudentGrades.query.filter(and_(StudentGrades.Sid==user_id, StudentGrades.Pid==project_id)).first()
+        student_grade = MainAssignmentGrades.query.filter(
+            and_(
+                MainAssignmentGrades.Sid == user_id,
+                MainAssignmentGrades.Pid == project_id,
+            )
+        ).first()
+
         if student_grade is not None:
             student_grade.Grade = grade
             db.session.commit()
             return
-        studentGrade = StudentGrades(Sid=user_id, Pid=project_id, Grade=grade)
+
+        studentGrade = MainAssignmentGrades(
+            Sid=user_id,
+            Pid=project_id,
+            Grade=grade,
+        )
         db.session.add(studentGrade)
         db.session.commit()
         return

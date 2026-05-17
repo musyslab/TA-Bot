@@ -1,4 +1,3 @@
-
 from datetime import timedelta
 import os
 import threading
@@ -137,23 +136,23 @@ def opt_int(raw) -> int | None:
     s = str(raw or "").strip()
     return int(s) if s.isdigit() else None
 
-def practice_params_from_args() -> tuple[bool, int | None]:
-    want_practice = parse_bool(request.args.get("practice", ""))
-    ppid = opt_int(request.args.get("practice_problem_id", ""))
-    return want_practice, ppid
+def checkpoint_params_from_args() -> tuple[bool, int | None]:
+    want_checkpoint = parse_bool(request.args.get("checkpoint", ""))
+    ppid = opt_int(request.args.get("checkpoint_id", ""))
+    return want_checkpoint, ppid
 
-def latest_practice_submission(project_id: int, user_id: int, practice_problem_id: int | None):
+def latest_checkpoint_submission(project_id: int, user_id: int, checkpoint_id: int | None):
     try:
         q = (
             Submissions.query
             .filter(
                 Submissions.Project == int(project_id),
                 Submissions.User == int(user_id),
-                Submissions.IsPractice == True,
+                Submissions.IsCheckpoint == True,
             )
         )
-        if practice_problem_id is not None and hasattr(Submissions, "PracticeProblemId"):
-            q = q.filter(Submissions.PracticeProblemId == int(practice_problem_id))
+        if checkpoint_id is not None and hasattr(Submissions, "CheckpointId"):
+            q = q.filter(Submissions.CheckpointId == int(checkpoint_id))
         return q.order_by(Submissions.Time.desc()).first()
     except Exception:
         return None
@@ -163,26 +162,26 @@ def resolve_submission_for_current_user(
     project_repo: ProjectRepository,
     submission_id: int,
     class_id: int,
-    want_practice: bool,
+    want_checkpoint: bool,
     ppid: int | None,
 ):
     """
     Resolves:
       - real submission id -> that submission
-      - otherwise treats submission_id as project id and returns latest (main/practice) for current_user
+      - otherwise treats submission_id as project id and returns latest (main/checkpoint) for current_user
       - if submission_id is EMPTY, resolves current project by class_id and returns latest main submission
-    Returns: (submission | None, project_id:int, practice_problem_id_for_hidden_flags:int|None)
+    Returns: (submission | None, project_id:int, checkpoint_id_for_hidden_flags:int|None)
     """
     project_id = -1
     sub = None
-    practice_problem_id = None
+    checkpoint_id = None
 
     if submission_id != -1:
         sub = submission_repo.get_submission_by_submission_id(int(submission_id))
         if sub is None:
             project_id = int(submission_id)
-            if want_practice:
-                sub = latest_practice_submission(project_id, int(current_user.Id), ppid)
+            if want_checkpoint:
+                sub = latest_checkpoint_submission(project_id, int(current_user.Id), ppid)
             else:
                 sub = submission_repo.get_submission_by_user_and_projectid(int(current_user.Id), int(project_id))
         if sub is None:
@@ -198,14 +197,14 @@ def resolve_submission_for_current_user(
             return None, int(project_id), None
 
     try:
-        if bool(getattr(sub, "IsPractice", False)) and getattr(sub, "PracticeProblemId", None) is not None:
-            practice_problem_id = int(getattr(sub, "PracticeProblemId"))
+        if bool(getattr(sub, "IsCheckpoint", False)) and getattr(sub, "CheckpointId", None) is not None:
+            checkpoint_id = int(getattr(sub, "CheckpointId"))
     except Exception:
-        practice_problem_id = None
+        checkpoint_id = None
 
-    return sub, int(project_id), practice_problem_id
+    return sub, int(project_id), checkpoint_id
 
-def apply_hidden_flags_to_results(output_json: str, project_id: int, practice_problem_id: int | None) -> str:
+def apply_hidden_flags_to_results(output_json: str, project_id: int, checkpoint_id: int | None) -> str:
     try:
         obj = json.loads(output_json) if isinstance(output_json, str) else (output_json or {})
         results = obj.get("results", None) if isinstance(obj, dict) else None
@@ -213,10 +212,10 @@ def apply_hidden_flags_to_results(output_json: str, project_id: int, practice_pr
             return output_json
 
         q = Testcases.query.filter(Testcases.ProjectId == int(project_id))
-        if practice_problem_id is not None:
-            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        if checkpoint_id is not None:
+            q = q.filter(Testcases.CheckpointId == int(checkpoint_id))
         else:
-            q = q.filter(Testcases.PracticeProblemId.is_(None))
+            q = q.filter(Testcases.CheckpointId.is_(None))
         tcs = q.all()
         hidden_by_name = {
             (str(getattr(tc, "Name", "") or "").strip().lower()): bool(getattr(tc, "Hidden", False))
@@ -335,14 +334,14 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
 def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo:  ProjectRepository = Provide[Container.project_repo]):
     class_id = parse_int(request.args.get("class_id", "-1"), -1)
     submission_id = parse_int(request.args.get("id", "-1"), -1)
-    want_practice, ppid_qs = practice_params_from_args()
+    want_checkpoint, ppid_qs = checkpoint_params_from_args()
 
-    submission, projectid, practice_problem_id = resolve_submission_for_current_user(
+    submission, projectid, checkpoint_id = resolve_submission_for_current_user(
         submission_repo,
         project_repo,
         submission_id,
         class_id,
-        want_practice,
+        want_checkpoint,
         ppid_qs,
     )
     if submission is None:
@@ -356,7 +355,7 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
    
     output = convert_tap_to_json(submission.OutputFilepath, current_user.Role, 0, False)
-    output = apply_hidden_flags_to_results(output, int(projectid), practice_problem_id)
+    output = apply_hidden_flags_to_results(output, int(projectid), checkpoint_id)
 
     return make_response(output, HTTPStatus.OK)
 
@@ -369,7 +368,7 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
     fmt = (request.args.get("format", "") or "").strip().lower()
     want_json = fmt in ("json", "view", "preview")
 
-    want_practice, ppid = practice_params_from_args()
+    want_checkpoint, ppid = checkpoint_params_from_args()
 
     code_output = ""
     if submissionid != -1:
@@ -382,7 +381,7 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
                 project_repo,
                 int(submissionid),
                 int(class_id),
-                bool(want_practice),
+                bool(want_checkpoint),
                 ppid,
             )
             code_output = getattr(resolved, "CodeFilepath", "") if resolved else ""
@@ -465,14 +464,14 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
     projectid = input_json['project_id']
     if not user_can_access_project_id(int(projectid)):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
-    practice_raw = (input_json or {}).get('practice', False)
-    practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+    checkpoint_raw = (input_json or {}).get('checkpoint', False)
+    checkpoint = str(checkpoint_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
     
-    ppid_raw = (input_json or {}).get('practice_problem_id', None)
+    ppid_raw = (input_json or {}).get('checkpoint_id', None)
     try:
-        practice_problem_id = int(ppid_raw) if ppid_raw is not None else None
+        checkpoint_id = int(ppid_raw) if ppid_raw is not None else None
     except (TypeError, ValueError):
-        practice_problem_id = None
+        checkpoint_id = None
     
     class_name = project_repo.get_className_by_projectId(projectid)
     class_id = project_repo.get_class_id_by_name(class_name)
@@ -482,7 +481,7 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
     for user in users:
         userids.append(user.Id)
 
-    if practice and hasattr(Submissions, "IsPractice"):
+    if checkpoint and hasattr(Submissions, "IsCheckpoint"):
         bucket = {}
         submission_counter_dict = {uid: 0 for uid in userids}
         
@@ -491,12 +490,12 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
             .filter(
                 Submissions.Project == projectid,
                 Submissions.User.in_(userids),
-                Submissions.IsPractice == True,
+                Submissions.IsCheckpoint == True,
             )
         )
-        # If the UI requested a specific practice problem, scope to it.
-        if practice_problem_id is not None and hasattr(Submissions, "PracticeProblemId"):
-            q = q.filter(Submissions.PracticeProblemId == practice_problem_id)
+        # If the UI requested a specific checkpoint, scope to it.
+        if checkpoint_id is not None and hasattr(Submissions, "CheckpointId"):
+            q = q.filter(Submissions.CheckpointId == checkpoint_id)
         subs = q.order_by(Submissions.User.asc(), Submissions.Time.desc()).all()
 
         for s in subs:
@@ -514,7 +513,11 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
     for user in users:
         if int(user.Role) == 0:
             if user.Id in bucket:
-                student_grade = 0 if practice else project_repo.get_student_grade(projectid, user.Id)
+                if checkpoint:
+                    manual_grade = submission_repo.get_manual_grade_for_submission(bucket[user.Id].Id)
+                    student_grade = manual_grade.get('grade') if manual_grade and manual_grade.get('grade') is not None else 0
+                else:
+                    student_grade = project_repo.get_student_grade(projectid, user.Id)
                 student_id = user_repo.get_StudentNumber(user.Id)
                 studentattempts[user.Id]=[
                     user.Lastname,
@@ -549,256 +552,31 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
                 ]
     return make_response(json.dumps(studentattempts), HTTPStatus.OK)
 
-@submission_api.route('/submitOHquestion', methods=['GET'])
-@jwt_required()
-@inject
-def Submit_OH_Question(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    question = str(request.args.get("question"))
-    project_id_raw = (request.args.get("projectId") or "").strip()
-    if not project_id_raw.isdigit():
-        return make_response("Invalid projectId", HTTPStatus.BAD_REQUEST)
-    project_id = int(project_id_raw)
-    return make_response(
-        submission_repo.Submit_Student_OH_question(question, current_user.Id, project_id),
-        HTTPStatus.OK
-    )
-
-@submission_api.route('/getOHquestions', methods=['GET'])
-@jwt_required()
-@inject
-def Get_OH_Questions(submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if not is_staff_user():
-        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
-
-    def fmt_dt(dt_val):
-        if dt_val is None:
-            return ""
-        try:
-            return dt_val.strftime("%x %X")
-        except Exception:
-            return str(dt_val)
-
-    # Admin view needs ALL OHVisits entries (active + dismissed) so the UI can split
-    # into Current Queue vs History.
-    questions = submission_repo.Get_all_OH_questions(include_dismissed=True)
-    question_list = []
-    #Need class ID and submission ID
-    for question in questions:
-        # If the project was deleted / missing, skip this OH entry so the admin page doesn't 500.
-        try:
-            proj = project_repo.get_selected_project(int(getattr(question, "projectId", 0) or 0))
-        except Exception:
-            proj = None
-        if not proj:
-            continue
-        user = user_repo.get_user(question.StudentId)
-        Student_name = user.Firstname + " " + user.Lastname
-        class_id = int(getattr(proj, "ClassId", 0) or 0)
-        if not user_can_access_class_id(class_id):
-            continue
-        subs = submission_repo.get_most_recent_submission_by_project(question.projectId, [question.StudentId])
-        try:
-            question_list.append([
-                question.Sqid,
-                question.StudentQuestionscol,
-                fmt_dt(question.TimeSubmitted),
-                Student_name,
-                question.ruling,
-                int(getattr(question, "dismissed", 0) or 0),
-                fmt_dt(getattr(question, "TimeAccepted", None)),
-                fmt_dt(getattr(question, "TimeCompleted", None)),
-                question.projectId,
-                class_id,
-                subs[question.StudentId].Id
-            ])
-        except:
-            question_list.append([
-                question.Sqid,
-                question.StudentQuestionscol,
-                fmt_dt(question.TimeSubmitted),
-                Student_name,
-                question.ruling,
-                int(getattr(question, "dismissed", 0) or 0),
-                fmt_dt(getattr(question, "TimeAccepted", None)),
-                fmt_dt(getattr(question, "TimeCompleted", None)),
-                question.projectId,
-                class_id,
-                -1
-            ])
-    return make_response(json.dumps(question_list), HTTPStatus.OK)
-
-@submission_api.route('/getOHqueue', methods=['GET'])
-@jwt_required()
-@inject
-def Get_OH_Queue(submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    """
-    Student-safe queue endpoint.
-    Returns only ACTIVE (dismissed == 0) OHVisits for a single project.
-    Accepts either:
-      - project_id=<int>
-      - class_id=<int>  (uses current project for that class)
-    Response (list rows): [Sqid, question, time_submitted, student_name]
-    """
-    def fmt_dt(dt_val):
-        if dt_val is None:
-            return ""
-        try:
-            return dt_val.strftime("%x %X")
-        except Exception:
-            return str(dt_val)
-
-    project_id = None
-    pid_raw = (request.args.get("project_id", "") or "").strip()
-    if pid_raw.isdigit():
-        project_id = int(pid_raw)
-    else:
-        cid_raw = request.args.get("class_id", None)
-        try:
-            class_id = int(cid_raw) if cid_raw is not None else None
-        except (TypeError, ValueError):
-            class_id = None
-        if class_id is not None:
-            try:
-                proj = project_repo.get_current_project_by_class(class_id)
-                project_id = int(getattr(proj, "Id", 0) or 0) if proj else None
-            except Exception:
-                project_id = None
-
-    if not project_id:
-        return make_response(json.dumps([]), HTTPStatus.OK)
-
-    questions = submission_repo.Get_active_OH_questions_for_project(int(project_id))
-    out = []
-    for q in (questions or []):
-        try:
-            user = user_repo.get_user(q.StudentId)
-            student_name = (user.Firstname + " " + user.Lastname) if user else "Unknown"
-        except Exception:
-            student_name = "Unknown"
-        out.append([q.Sqid, q.StudentQuestionscol, fmt_dt(q.TimeSubmitted), student_name])
-
-    return make_response(json.dumps(out), HTTPStatus.OK)
-
-@submission_api.route('/submitOHQuestionRuling', methods=['GET'])
-@jwt_required()
-@inject
-def Submit_OH_Question_Ruling(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    question_id = str(request.args.get("question_id"))
-    ruling = str(request.args.get("ruling"))
-    return make_response(submission_repo.Submit_OH_ruling(question_id,ruling), HTTPStatus.OK)
-
-#dismiss question
-@submission_api.route('/dismissOHQuestion', methods=['GET'])
-@jwt_required()
-@inject
-def Dismiss_OH_Question(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    question_id = str(request.args.get("question_id"))
-    user_id, class_id = submission_repo.Submit_OH_dismiss(question_id)
-    reward_amount = 2
-    submission_repo.add_reward_charge(user_id, class_id, reward_amount)
-    return make_response("ok", HTTPStatus.OK)
-
-@submission_api.route('/getactivequestion', methods=['GET'])
-@jwt_required()
-@inject
-def get_active_Question(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    accepted_only_raw = request.args.get("acceptedOnly", "")
-    accepted_only = str(accepted_only_raw).lower() in ("1", "true", "yes", "y")
-    return make_response(str(submission_repo.get_active_question(current_user.Id, accepted_only)), HTTPStatus.OK)
-
-@submission_api.route('/getAcceptedOHForClass', methods=['GET'])
-@jwt_required()
-@inject
-def get_accepted_oh_for_class(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    """
-    Returns the Sqid of the most recent ACCEPTED (ruling==1, not dismissed)
-    office-hours question for the current user, scoped to the given class_id's
-    current project. If none, returns -1.
-    """
-    class_id_raw = request.args.get("class_id", None)
-    try:
-        class_id = int(class_id_raw) if class_id_raw is not None else None
-    except (TypeError, ValueError):
-        class_id = None
-    qid = submission_repo.get_accepted_oh_for_class(current_user.Id, class_id)
-    return make_response(str(qid if qid is not None else -1), HTTPStatus.OK)
-
 @submission_api.route('/GetSubmissionDetails', methods=['GET'])
 @jwt_required()
 @inject
-def get_remaining_OH_Time(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
+def get_submission_details(project_repo: ProjectRepository = Provide[Container.project_repo]):
     class_id = int(request.args.get("class_id"))
-    submission_details = []
-
-    # Use the current-project ORM object directly (avoids brittle indexing/parsing)
     proj = project_repo.get_current_project_by_class(class_id)
     if proj is None:
-        # no active project → keep array shape consistent for frontend
-        # [remaining_oh_time, days_passed, next_submission_str, project_name, end_time, project_id]
         return make_response(["None", "0", "None", "", "", "-1"], HTTPStatus.OK)
-
-    projectId = int(getattr(proj, "Id", 0) or 0)
-    submission_details.append(str(submission_repo.get_remaining_OH_Time(current_user.Id, projectId)))
-
-    # Compute days since start from proj.Start (datetime or ISO string)
-    start_val = getattr(proj, "Start", None)
-    current_time = datetime.now()
-    start_date = None
-    try:
-        if isinstance(start_val, datetime):
-            start_date = start_val
-        elif isinstance(start_val, str) and start_val.strip():
-            # Handle "YYYY-MM-DDTHH:MM:SS" (optionally with microseconds)
-            s = start_val.strip()
-            if "." in s:
-                s = s.split(".", 1)[0]
-            start_date = datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
-    except Exception:
-        start_date = None
-
-    days_passed = (current_time - start_date).days if start_date else 0
-    submission_details.append(str(days_passed))
-
-    time_until_next_submission = submission_repo.check_timeout(current_user.Id, projectId)[1]
-
-    if time_until_next_submission != "None":
-        hours = time_until_next_submission.seconds // 3600
-        minutes = (time_until_next_submission.seconds % 3600) // 60
-        seconds = time_until_next_submission.seconds % 60
-        time_until_next_submission_str = f"{hours} hours, {minutes} minutes, {seconds} seconds"
-        submission_details.append(time_until_next_submission_str)
-    else:
-        submission_details.append("None")
-
-    # Project name + due date
-    submission_details.append(str(getattr(proj, "Name", "") or ""))
 
     end_val = getattr(proj, "End", None)
     if isinstance(end_val, datetime):
         end_str = end_val.isoformat(timespec="seconds")
     else:
         end_str = str(end_val or "")
-    submission_details.append(end_str)
 
-    submission_details.append(str(projectId))
+    # Preserve the existing array shape used by StudentUpload, but removed timing fields are inert.
+    return make_response([
+        "None",
+        "0",
+        "None",
+        str(getattr(proj, "Name", "") or ""),
+        end_str,
+        str(int(getattr(proj, "Id", 0) or 0)),
+    ], HTTPStatus.OK)
 
-    return make_response(submission_details, HTTPStatus.OK)
-
-@submission_api.route('/get_oh_visits_by_projectId', methods=['POST'])
-@jwt_required()
-@inject
-def get_oh_visits_by_projectId(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    """
-    Helper to get all OHVisits entries for a given project_id.
-    Returns list of OHVisits objects.
-    """
-    input_json = request.get_json()
-    
-    project_id = input_json['project_id'] 
-    
-    visits = submission_repo.get_oh_visits_by_projectId(project_id)
-
-    return make_response(jsonify(visits), HTTPStatus.OK)
 
 @submission_api.route('/submitgrades', methods=['POST'])
 @jwt_required()
@@ -814,7 +592,7 @@ def submit_grades(project_repo: ProjectRepository = Provide[Container.project_re
     userId = data['userId']
     grade = data['grade']
     project_repo.set_student_grade(int(project_id), int(userId), int(grade))
-    return make_response("StudentGrades Submitted", HTTPStatus.OK)
+    return make_response("Grades Submitted", HTTPStatus.OK)
 
 @submission_api.route('/getprojectscores', methods=['GET'])
 @jwt_required()
@@ -838,48 +616,6 @@ def submit_Suggestion(submission_repo: SubmissionRepository = Provide[Container.
     submission_repo.submitSuggestion(current_user.Id ,suggestion)
     return make_response("Suggestion Submitted", HTTPStatus.OK)
 
-@submission_api.route('/GetCharges', methods=['GET'])
-@jwt_required()
-@inject
-def GetCharges(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    class_id = int(request.args.get("class_id"))
-    project = project_repo.get_current_project_by_class(class_id)
-    if project is None:
-        return make_response(json.dumps({
-            "error": f"No current project found for class_id {class_id}"
-        }), HTTPStatus.NOT_FOUND)
-    projectId = project.Id
-    base_charge, reward_charge = submission_repo.get_charges(current_user.Id, class_id, projectId)
-
-    hours_until_recharge = 0
-    minutes_until_recharge = 0
-    seconds_until_recharge = 0
-    if base_charge != 3:
-        time_until_recharge = submission_repo.get_time_until_recharge(current_user.Id, class_id, projectId)
-        # Convert time_until_recharge to hours, minutes, and seconds
-        hours_until_recharge, remainder = divmod(time_until_recharge.total_seconds(), 3600)
-        minutes_until_recharge, seconds_until_recharge = divmod(remainder, 60)
-
-    return make_response(json.dumps({
-        "baseCharge": base_charge,
-        "rewardCharge": reward_charge,
-        "HoursUntilRecharge": str(hours_until_recharge),
-        "MinutesUntilRecharge": str(minutes_until_recharge),
-        "SecondsUntilRecharge": str(seconds_until_recharge)
-    }), HTTPStatus.OK)
-
-@submission_api.route('/ConsumeCharge', methods=['GET'])
-@jwt_required()
-@inject
-def ConsumeCharge(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    try:
-        class_id = int(request.args.get("class_id"))
-        projectId = project_repo.get_current_project_by_class(class_id).Id
-        submission_repo.consume_reward_charge(current_user.Id, class_id, projectId)
-    except Exception as e:
-        print("Error: ", e, flush=True)
-        return make_response("Error: " + str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
-    return make_response("Charge Consumed", HTTPStatus.OK)
 
 @submission_api.route('/log_ui', methods=['POST'])
 @jwt_required()
@@ -891,8 +627,8 @@ def log_ui_click():
     started_state = data.get('started_state', None)
     previous_state_label = data.get('previous_state_label', None)
     next_state_label = data.get('next_state_label', None)
-    practice = parse_bool(data.get('practice', False))
-    practice_problem_id = data.get('practice_problem_id', None)
+    checkpoint = parse_bool(data.get('checkpoint', False))
+    checkpoint_id = data.get('checkpoint_id', None)
 
     username = getattr(current_user, 'Username', None) or 'unknown'
     role = getattr(current_user, 'Role', None) or 0
@@ -904,10 +640,10 @@ def log_ui_click():
 
     line = (
         f"{ts} | user:{username} | role:{role} | class:{class_id} | submission:{submission_id}"
-        f" | action:{action} | practice:{practice}"
+        f" | action:{action} | checkpoint:{checkpoint}"
     )
-    if practice_problem_id not in (None, ''):
-        line += f" | practice_problem_id:{practice_problem_id}"
+    if checkpoint_id not in (None, ''):
+        line += f" | checkpoint_id:{checkpoint_id}"
     if action == 'Diff Finder' and started_state is not None:
         line += f" | started:{bool(started_state)}"
     if previous_state_label not in (None, ''):
@@ -934,7 +670,23 @@ def save_grading(submission_repo: SubmissionRepository = Provide[Container.submi
     error_points = input_json.get('errorPoints')
     error_defs = input_json.get('errorDefs')
     errors = input_json.get('errors')  # Expecting list: [{startLine,endLine,errorId,count}, ...]
-    success = submission_repo.save_manual_grading(submission_id, grade, scoring_mode, error_points, errors, error_defs)
+    checkpoint = str(input_json.get('checkpoint', False)).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+    checkpoint_id_raw = input_json.get('checkpoint_id', None)
+    try:
+        checkpoint_id = int(checkpoint_id_raw) if checkpoint_id_raw not in (None, '') else None
+    except (TypeError, ValueError):
+        checkpoint_id = None
+
+    success = submission_repo.save_manual_grading(
+        submission_id,
+        grade,
+        scoring_mode,
+        error_points,
+        errors,
+        error_defs,
+        checkpoint=checkpoint,
+        checkpoint_id=checkpoint_id,
+    )
 
     # 3. Respond to the frontend
     if success:
@@ -971,7 +723,14 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
     if not user_can_access_project_id(project_id):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
 
-    grade_list = submission_repo.get_project_grade_info(project_id)
+    checkpoint = str(request.args.get("checkpoint", False)).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+    checkpoint_id_raw = request.args.get("checkpoint_id", None)
+    try:
+        checkpoint_id = int(checkpoint_id_raw) if checkpoint_id_raw not in (None, '') else None
+    except (TypeError, ValueError):
+        checkpoint_id = None
+
+    grade_list = submission_repo.get_project_grade_info(project_id, checkpoint=checkpoint, checkpoint_id=checkpoint_id)
     project_name = project_repo.get_selected_project(project_id).Name
 
     sio = StringIO()

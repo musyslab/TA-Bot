@@ -12,12 +12,13 @@ const defaultpagenumber = -1
 export function AdminViewStudentCode() {
 
     const { search } = useLocation()
-    const { id, school_id, class_id, module_id, project_id } = useParams<{
-        id: string
-        school_id: string
-        class_id: string
-        module_id: string
-        project_id: string
+    const { id, school_id, class_id, module_id, project_id, checkpoint_id: route_checkpoint_id } = useParams<{
+        id?: string
+        school_id?: string
+        class_id?: string
+        module_id?: string
+        project_id?: string
+        checkpoint_id?: string
     }>()
 
     const submissionId = id !== undefined ? parseInt(id, 10) : defaultpagenumber
@@ -30,24 +31,33 @@ export function AdminViewStudentCode() {
     const params = new URLSearchParams(search)
     const fromParam = (params.get('from') || '').toLowerCase()
     const fromOfficeHours = fromParam === 'office-hours'
-    const practiceParam = (params.get('practice') || '').toLowerCase()
-    const isPractice = ['1', 'true', 'yes', 'y', 'on'].includes(practiceParam)
+    const fromAdminUpload = fromParam === 'admin-upload'
+    const truthyValues = ['1', 'true', 'yes', 'y', 'on']
+    const checkpointParam = (params.get('checkpoint') || params.get('practice') || '').toLowerCase()
+    const isCheckpoint = !!route_checkpoint_id || truthyValues.includes(checkpointParam)
 
-    const ppidParam = (params.get('practice_problem_id') || '').trim()
-    const parsedPpid = parseInt(ppidParam, 10)
-    const practiceProblemId =
-        isPractice && !Number.isNaN(parsedPpid) && parsedPpid > 0 ? parsedPpid : undefined
+    const checkpointIdParam = (
+        route_checkpoint_id ||
+        params.get('checkpoint_id') ||
+        params.get('practice_problem_id') ||
+        ''
+    ).trim()
+    const parsedCheckpointId = parseInt(checkpointIdParam, 10)
+    const checkpointId =
+        isCheckpoint && !Number.isNaN(parsedCheckpointId) && parsedCheckpointId > 0 ? parsedCheckpointId : undefined
 
     const schoolIdStr = school_id ?? ''
     const classIdStr = class_id ?? ''
     const moduleIdStr = module_id ?? ''
     const projectIdStr = project_id ?? ''
 
-    const classSelectionUrl = `/admin/school/${schoolIdStr}/classes`
+    const hasFullDirectoryPath = !!schoolIdStr && !!classIdStr && !!moduleIdStr && !!projectIdStr
+
+    const classSelectionUrl = hasFullDirectoryPath ? `/admin/school/${schoolIdStr}/classes` : '/admin/schools'
     const moduleListUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/modules`
     const moduleDetailsUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/overview`
-    const studentListUrl = isPractice && practiceProblemId
-        ? `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/project/${projectIdStr}/practice/${practiceProblemId}/submissions`
+    const studentListUrl = isCheckpoint && checkpointId
+        ? `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/project/${projectIdStr}/checkpoint/${checkpointId}/submissions`
         : `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/project/${projectIdStr}/submissions`
 
     useEffect(() => {
@@ -57,8 +67,8 @@ export function AdminViewStudentCode() {
                 `${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
                 {
                     project_id: pid,
-                    practice: isPractice,
-                    practice_problem_id: practiceProblemId ?? null,
+                    checkpoint: isCheckpoint,
+                    checkpoint_id: checkpointId ?? null,
                 },
                 {
                     headers: {
@@ -77,13 +87,13 @@ export function AdminViewStudentCode() {
                 }
             })
             .catch((err) => console.log(err))
-    }, [submissionId, pid, isPractice, practiceProblemId])
+    }, [submissionId, pid, isCheckpoint, checkpointId])
 
     useEffect(() => {
         if (pid < 0) return
         axios
             .get(
-                `${import.meta.env.VITE_API_URL}/projects/get_project_id?id=${pid}${isPractice && practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''
+                `${import.meta.env.VITE_API_URL}/projects/get_project_id?id=${pid}${isCheckpoint && checkpointId ? `&checkpoint_id=${checkpointId}` : ''
                 }`,
                 {
                     headers: {
@@ -110,7 +120,7 @@ export function AdminViewStudentCode() {
                 }
             })
             .catch((err) => console.log(err))
-    }, [pid, isPractice, practiceProblemId])
+    }, [pid, isCheckpoint, checkpointId])
 
     return (
         <div className="page-container" id="admin-view-student-code">
@@ -130,23 +140,25 @@ export function AdminViewStudentCode() {
             <DirectoryBreadcrumbs
                 items={[
                     { label: 'School Selection', to: '/admin/schools' },
-                    { label: 'Class Selection', to: classSelectionUrl },
                     ...(fromOfficeHours
                         ? [{ label: 'Office Hours', to: '/admin/OfficeHours' }]
-                        : [
-                            { label: 'Module List', to: moduleListUrl },
-                            { label: 'Module Details', to: moduleDetailsUrl },
-                            {
-                                label: isPractice ? 'Practice Submissions' : 'Student List',
-                                to: studentListUrl,
-                            },
-                        ]),
+                        : fromAdminUpload || !hasFullDirectoryPath
+                            ? [{ label: 'Admin Upload', to: '/admin/upload' }]
+                            : [
+                                { label: 'Class Selection', to: classSelectionUrl },
+                                { label: 'Module List', to: moduleListUrl },
+                                { label: 'Module Details', to: moduleDetailsUrl },
+                                {
+                                    label: 'Student List',
+                                    to: studentListUrl,
+                                },
+                            ]),
                     { label: 'Code View' },
                 ]}
             />
 
             <div className="pageTitle">
-                {(projectDisplayName || (isPractice ? 'Practice Submission' : 'Main Submission'))}: {studentName || 'Unknown Student'}
+                {(projectDisplayName || (isCheckpoint ? 'Checkpoint Submission' : 'Main Submission'))}: {studentName || 'Unknown Student'}
             </div>
 
             <DiffView submissionId={submissionId} classId={cid} revealHiddenOutput />

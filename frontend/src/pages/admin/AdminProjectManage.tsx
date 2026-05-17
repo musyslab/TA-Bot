@@ -49,7 +49,7 @@ type AdminProjectManageProps = {
 
 const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) => {
 
-    const { id, school_id, class_id, module_id, practice_problem_id } = useParams()
+    const { id, school_id, class_id, module_id, practice_problem_id, checkpoint_id } = useParams()
 
     const [searchParams] = useSearchParams()
 
@@ -138,9 +138,9 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const API = import.meta.env.VITE_API_URL
     const authHeader = { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
     const isPractice = !!practiceMode
-    const practiceProblemId = isPractice && practice_problem_id ? Number(practice_problem_id) : null
+    const practiceProblemId = isPractice && (checkpoint_id || practice_problem_id) ? Number(checkpoint_id || practice_problem_id) : null
     const practiceProblemQuery =
-        isPractice && practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''
+        isPractice && practiceProblemId ? `&checkpoint_id=${practiceProblemId}` : ''
 
     // Testcases must NOT be editable unless solution exists (main or practice)
     const hasSolution =
@@ -234,6 +234,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                     url.searchParams.set('project_id', String(project_id))
                     url.searchParams.set('relpath', name)
                     url.searchParams.set('practice', isPractice ? 'true' : 'false')
+                    if (isPractice && practiceProblemId) url.searchParams.set('checkpoint_id', String(practiceProblemId))
                     const res = await fetch(url, { headers: authHeader })
                     if (!res.ok) return
                     const txt = await res.text()
@@ -339,6 +340,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                     url.searchParams.set('project_id', String(project_id))
                     url.searchParams.set('relpath', name)
                     url.searchParams.set('practice', isPractice ? 'true' : 'false')
+                    if (isPractice && practiceProblemId) url.searchParams.set('checkpoint_id', String(practiceProblemId))
                     const res = await fetch(url, { headers: authHeader })
                     const text = res.ok ? await res.text() : '[Could not load file from server]'
                     return `// ===== ${name} =====\n${text}`
@@ -382,7 +384,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         if (relpath) url.searchParams.set('relpath', relpath)
 
         url.searchParams.set('practice', isPractice ? 'true' : 'false')
-        if (isPractice && practiceProblemId) url.searchParams.set('practice_problem_id', String(practiceProblemId))
+        if (isPractice && practiceProblemId) url.searchParams.set('checkpoint_id', String(practiceProblemId))
 
         const res = await fetch(url, { headers: authHeader })
         if (!res.ok) return
@@ -844,10 +846,11 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             formData.append('file', JsonFile!)
             formData.append('project_id', project_id.toString())
             formData.append('class_id', classId.toString())
+            formData.append('module_id', moduleId.toString())
             formData.append('practice_problems_enabled', 'true')
             formData.append('practice', isPractice ? 'true' : 'false')
             if (isPractice && practiceProblemId) {
-                formData.append('practice_problem_id', String(practiceProblemId))
+                formData.append('checkpoint_id', String(practiceProblemId))
             }
 
             await axios.post(import.meta.env.VITE_API_URL + `/projects/json_add_testcases`, formData, {
@@ -915,6 +918,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             formData.append('end_date', formatDateTimeLocal(ProjectEndDate))
             formData.append('language', ProjectLanguage)
             formData.append('class_id', classId.toString())
+            formData.append('module_id', moduleId.toString())
             formData.append('practice_problems_enabled', 'true')
 
             const res = await axios.post(`${import.meta.env.VITE_API_URL}/projects/create_project`, formData, {
@@ -967,6 +971,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             formData.append('end_date', formatDateTimeLocal(safeProjectEnd))
             formData.append('language', ProjectLanguage)
             formData.append('class_id', classId.toString())
+            formData.append('module_id', moduleId.toString())
             formData.append('practice_problems_enabled', 'true')
 
             await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_project`, formData, {
@@ -1020,7 +1025,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         formData.append('hidden', hidden ? 'true' : 'false')
         formData.append('practice', isPractice ? 'true' : 'false')
         if (isPractice && practiceProblemId) {
-            formData.append('practice_problem_id', String(practiceProblemId))
+            formData.append('checkpoint_id', String(practiceProblemId))
         }
 
         try {
@@ -1169,10 +1174,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             try {
                 setSubmittingProject(true)
                 await axios.post(
-                    `${import.meta.env.VITE_API_URL}/projects/rename_practice_problem`,
+                    `${import.meta.env.VITE_API_URL}/projects/rename_checkpoint`,
                     {
                         project_id,
-                        practice_problem_id: practiceProblemId,
+                        checkpoint_id: practiceProblemId,
                         name: ProjectName,
                     },
                     { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
@@ -1201,10 +1206,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             SolutionFiles.forEach(f => formData.append('solutionFiles', f))
             formData.append('assignmentdesc', AssignmentDesc)
             selectedAddFiles.forEach(f => formData.append('additionalFiles', f))
-            formData.append('practice_problem_id', String(practiceProblemId))
+            formData.append('checkpoint_id', String(practiceProblemId))
             formData.append('name', ProjectName)
 
-            await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_practice_project_files`, formData, {
+            await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_checkpoint_project_files`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
 
@@ -1344,7 +1349,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         formData.append('practice', isPractice ? 'true' : 'false')
 
         if (isPractice && practiceProblemId) {
-            formData.append('practice_problem_id', String(practiceProblemId))
+            formData.append('checkpoint_id', String(practiceProblemId))
         }
 
         if (modalDraft.name === '' || modalDraft.input === '' || modalDraft.description === '') {
@@ -1369,7 +1374,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
     function get_testcase_json() {
         axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`, {
+            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
@@ -1729,7 +1734,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                             e.preventDefault()
                                                             const files = e.dataTransfer.files
                                                             if (files && files.length > 0) {
-                                                                handleSolutionFilesChange({ target: { files } } as any)
+                                                                handleDescFileChange({ target: { files } } as any)
                                                             }
                                                         }}
                                                     >
@@ -2042,7 +2047,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                             e.preventDefault()
                                                             const files = e.dataTransfer.files
                                                             if (files && files.length > 0) {
-                                                                handleDescFileChange({ target: { files } } as any)
+                                                                handleJsonFileChange({ target: { files } } as any)
                                                             }
                                                         }}
                                                     >

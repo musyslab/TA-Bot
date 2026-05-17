@@ -2,9 +2,7 @@ from flask.json import jsonify
 import json
 import os
 import subprocess
-import os.path
-from typing import List
-from subprocess import Popen
+from typing import Optional
 
 from flask_jwt_extended import jwt_required
 from flask_jwt_extended import current_user
@@ -14,44 +12,45 @@ from flask import make_response
 from flask import current_app
 from http import HTTPStatus
 from datetime import datetime
-from flask_cors import cross_origin
-from src.repositories.submission_repository import SubmissionRepository
-from src.repositories.project_repository import ProjectRepository
-from src.repositories.user_repository import UserRepository
-from src.repositories.class_repository import ClassRepository
-from src.repositories.models import Classes
-from src.services.timeout_service import on_timeout
-from tap.parser import Parser
 from dependency_injector.wiring import inject, Provide
+
 from container import Container
 from src.constants import ADMIN_ROLE, TEACHER_ROLE
+from src.repositories.class_repository import ClassRepository
+from src.repositories.models import Checkpoints, Classes
+from src.repositories.project_repository import ProjectRepository
+from src.repositories.submission_repository import SubmissionRepository
+from src.repositories.user_repository import UserRepository
 
-upload_api = Blueprint('upload_api', __name__)
+upload_api = Blueprint("upload_api", __name__)
 
-ext = {"python": [".py", "py"], "java": [".java", "java"], "c": [".c", "c"]}
+ALLOWED_EXTENSIONS_BY_LANGUAGE = {
+    "py": [".py"],
+    "python": [".py"],
+    "python3": [".py"],
+    "java": [".java"],
+    "c": [".c"],
+    "racket": [".rkt"],
+    "rkt": [".rkt"],
+    "scheme": [".rkt"],
+}
 
-def allowed_file(filename):
-    """[function for checking to see if the file is an allowed file type]
+ALLOWED_SOURCE_EXTENSIONS = {".py", ".java", ".c", ".rkt"}
 
-    Args:
-        filename ([string]): [a string version of the filename]
-
-    Returns:
-        [Boolean]: [returns a bool if the file is allowed or not]
-    """
-    if not filename or "." not in filename:
-        return False
-    filetype = filename.rsplit('.', 1)[1].lower()
-    for key in ext:
-        if filetype in ext[key]:
-            return True
-    return False
 
 def parse_int(v, default: int = 0) -> int:
     try:
         return int(str(v).strip())
     except Exception:
         return default
+
+
+def parse_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+
+    s = str(v or "").strip().lower()
+    return s in ("1", "true", "yes", "y", "on")
 
 
 def is_admin_user() -> bool:
@@ -83,6 +82,7 @@ def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
 
 def user_can_access_class_id(class_id: int) -> bool:
     class_id = parse_int(class_id, 0)
+
     if class_id <= 0:
         return False
 
@@ -95,288 +95,517 @@ def user_can_access_class_id(class_id: int) -> bool:
 
     return False
 
-@upload_api.route('/total_students_by_cid', methods=['GET'])
+
+def normalize_grader_language(language: str, solution_root: str = "") -> str:
+    raw = str(language or "").strip().lower()
+
+    aliases = {
+        "python": "py",
+        "python3": "py",
+        "py": "py",
+        "java": "java",
+        "c": "c",
+        "racket": "racket",
+        "rkt": "racket",
+        "scheme": "racket",
+        "scm": "racket",
+    }
+
+    if raw in aliases:
+        return aliases[raw]
+
+    try:
+        candidates = []
+
+        if solution_root and os.path.isdir(solution_root):
+            candidates = [
+                os.path.splitext(name)[1].lower()
+                for name in os.listdir(solution_root)
+            ]
+        elif solution_root:
+            candidates = [os.path.splitext(solution_root)[1].lower()]
+
+        if ".py" in candidates:
+            return "py"
+        if ".java" in candidates:
+            return "java"
+        if ".c" in candidates:
+            return "c"
+        if ".rkt" in candidates:
+            return "racket"
+    except Exception:
+        pass
+
+    return raw or "py"
+
+
+def allowed_file(filename: str) -> bool:
+    if not filename or "." not in filename:
+        return False
+
+    _, extension = os.path.splitext(filename)
+    return extension.lower() in ALLOWED_SOURCE_EXTENSIONS
+
+
+def expected_extensions_for_language(language: str) -> list[str]:
+    raw = str(language or "").strip().lower()
+    normalized = normalize_grader_language(raw)
+
+    if raw in ALLOWED_EXTENSIONS_BY_LANGUAGE:
+        return ALLOWED_EXTENSIONS_BY_LANGUAGE[raw]
+
+    if normalized in ALLOWED_EXTENSIONS_BY_LANGUAGE:
+        return ALLOWED_EXTENSIONS_BY_LANGUAGE[normalized]
+
+    return []
+
+
+def sanitize_fs_name(value: str) -> str:
+    safe = "".join(
+        c if c.isalnum() or c in "-_" else "_"
+        for c in str(value or "").strip()
+    )
+
+    return safe or "unknown"
+
+
+def safe_upload_filename(filename: str) -> str:
+    base = os.path.basename(filename or "")
+    stem, extension = os.path.splitext(base)
+
+    safe_stem = "".join(
+        c if c.isalnum() or c in "-_" else "_"
+        for c in str(stem or "").strip()
+    )
+
+    return f"{safe_stem or 'submission'}{extension.lower()}"
+
+
+def resolve_additional_files_payload(owner, solution_path: str) -> str:
+    try:
+        teacher_base_dir = (
+            solution_path
+            if solution_path and os.path.isdir(solution_path)
+            else os.path.dirname(solution_path or "")
+        )
+
+        raw = str(getattr(owner, "AdditionalFilePath", "") or "").strip()
+
+        if not raw:
+            return json.dumps({"base_dir": teacher_base_dir, "files": []})
+
+        if raw.startswith("[") or raw.startswith("{"):
+            parsed = json.loads(raw)
+        else:
+            parsed = [raw]
+
+        if isinstance(parsed, dict):
+            parsed = parsed.get("files", [])
+
+        abs_list = []
+
+        for path_value in parsed or []:
+            if not path_value:
+                continue
+
+            path_text = str(path_value)
+
+            if os.path.isabs(path_text):
+                abs_list.append(path_text)
+            else:
+                abs_list.append(
+                    os.path.join(teacher_base_dir, os.path.basename(path_text))
+                )
+
+        return json.dumps({"base_dir": teacher_base_dir, "files": abs_list})
+    except Exception:
+        return ""
+
+
+def load_grader_status(json_out: str) -> tuple[bool, dict]:
+    status = False
+    testcase_results = {"Passed": [], "Failed": []}
+
+    try:
+        with open(json_out, "r", encoding="utf-8", errors="replace") as f:
+            payload = json.load(f) or {}
+
+        passed = []
+        failed = []
+
+        for result in payload.get("results", []):
+            name = str((result or {}).get("name", "") or "")
+
+            if bool((result or {}).get("passed", False)):
+                passed.append(name)
+            else:
+                failed.append(name)
+
+        status = len(failed) == 0
+        testcase_results = {"Passed": passed, "Failed": failed}
+    except Exception:
+        pass
+
+    return status, testcase_results
+
+
+@upload_api.route("/total_students_by_cid", methods=["GET"])
 @jwt_required()
 @inject
 def total_students(user_repo: UserRepository = Provide[Container.user_repo]):
     if not is_staff_user():
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
-    class_id = request.args.get('class_id')
+        return make_response({"message": "Access Denied"}, HTTPStatus.UNAUTHORIZED)
+
+    class_id = request.args.get("class_id")
+
     if not user_can_access_class_id(parse_int(class_id, 0)):
-        return make_response({'message': 'Access Denied'}, HTTPStatus.FORBIDDEN)
+        return make_response({"message": "Access Denied"}, HTTPStatus.FORBIDDEN)
+
     users = user_repo.get_all_users_by_cid(class_id)
+
     list_of_user_info = []
+
     for user in users:
-        list_of_user_info.append({"name": user.Firstname + " " + user.Lastname, "mscsnet": user.Username, "id": user.Id})
+        list_of_user_info.append(
+            {
+                "name": user.Firstname + " " + user.Lastname,
+                "mscsnet": user.Username,
+                "id": user.Id,
+            }
+        )
+
     return jsonify(list_of_user_info)
 
-@upload_api.route('/', methods=['POST'])
+
+@upload_api.route("/", methods=["POST"])
 @jwt_required()
 @inject
 def file_upload(
     user_repository: UserRepository = Provide[Container.user_repo],
     submission_repo: SubmissionRepository = Provide[Container.submission_repo],
     project_repo: ProjectRepository = Provide[Container.project_repo],
-    class_repo: ClassRepository = Provide[Container.class_repo]
+    class_repo: ClassRepository = Provide[Container.class_repo],
 ):
-    """[summary]
+    class_id = request.form.get("class_id", "").strip()
 
-    Args:
-        submission_repository (ASubmissionRepository): [the existing submissions directory and all the functions in it]
-        project_repository (AProjectRepository): [the existing projects directory and all the functions in it]
+    if not class_id:
+        return make_response({"message": "Missing class_id"}, HTTPStatus.BAD_REQUEST)
 
-    Returns:
-        [HTTP]: [a pass or fail HTTP message]
-    """
+    class_id_int = parse_int(class_id, 0)
 
-    class_id = request.form['class_id']
-    practice_raw = (request.form.get("practice", "") or "").strip().lower()
-    is_practice = practice_raw in ("1", "true", "yes", "y", "on")
-    ppid_raw = (request.form.get("practice_problem_id", "") or "").strip()
-    practice_problem_id = int(ppid_raw) if ppid_raw.isdigit() else None
+    if class_id_int <= 0:
+        return make_response({"message": "Invalid class_id"}, HTTPStatus.BAD_REQUEST)
+
+    is_staff_upload = is_staff_user()
+
+    if "student_id" in request.form and not is_staff_upload:
+        return make_response({"message": "Access Denied"}, HTTPStatus.FORBIDDEN)
+
+    if is_staff_upload and not user_can_access_class_id(class_id_int):
+        return make_response({"message": "Access Denied"}, HTTPStatus.FORBIDDEN)
 
     username = current_user.Username
     user_id = current_user.Id
+
     if "student_id" in request.form:
-        username = user_repository.get_user_by_id(int(request.form["student_id"]))
-        user_id = user_repository.getUserByName(username).Id
+        student_id = parse_int(request.form.get("student_id"), 0)
+
+        if student_id <= 0:
+            return make_response(
+                {"message": "Invalid student_id"},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        user_lookup = user_repository.get_user_by_id(student_id)
+        username = getattr(user_lookup, "Username", user_lookup)
+
+        if not username:
+            return make_response(
+                {"message": "Student not found"},
+                HTTPStatus.NOT_FOUND,
+            )
+
+        user_obj = user_repository.getUserByName(username)
+
+        if not user_obj:
+            return make_response(
+                {"message": "Student not found"},
+                HTTPStatus.NOT_FOUND,
+            )
+
+        user_id = user_obj.Id
 
     project = None
+
     if "project_id" in request.form:
-        project = project_repo.get_selected_project(int(request.form["project_id"]))
+        project_id = parse_int(request.form.get("project_id"), 0)
+
+        if project_id <= 0:
+            return make_response(
+                {"message": "Invalid project_id"},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        project = project_repo.get_selected_project(project_id)
     else:
         project = project_repo.get_current_project_by_class(class_id)
 
-    # Practice mode uses PracticeProjects (if enabled), but still ties to the same main project Id.
-    pp = None
-    if is_practice and project is not None:
-        try:
-            if practice_problem_id:
-                pp = project_repo.get_practice_problem(int(practice_problem_id))
-                # Safety: ensure this practice problem belongs to the selected project
-                if not pp or int(getattr(pp, "ProjectId", 0) or 0) != int(project.Id):
-                    pp = None
-            if pp is None:
-                # Back-compat: if client did not send a practice_problem_id
-                pp = project_repo.get_practice_project(int(project.Id))
-            if not (pp and bool(getattr(pp, "Enabled", False))):
-                pp = None
-        except Exception:
-            pp = None
-
     if project is None:
-        message = {
-            'message': 'No active project'
-        }
-        return make_response(message, HTTPStatus.NOT_ACCEPTABLE)
+        return make_response(
+            {"message": "No active project"},
+            HTTPStatus.NOT_ACCEPTABLE,
+        )
 
-    # Check to see if student is able to upload or still on timeout
-    if not is_staff_upload:
-        class_id = request.form['class_id']
+    if int(getattr(project, "ClassId", 0) or 0) != class_id_int:
+        return make_response(
+            {"message": "Project does not belong to this class"},
+            HTTPStatus.BAD_REQUEST,
+        )
 
-    # Accept either legacy single-file field ("file") or new multi-file field ("files")
-    upload_files = request.files.getlist('files')
+    checkpoint_id = parse_int(request.form.get("checkpoint_id", ""), 0)
+    is_checkpoint = parse_bool(request.form.get("checkpoint", "")) or checkpoint_id > 0
+
+    checkpoint: Optional[Checkpoints] = None
+
+    if is_checkpoint:
+        if checkpoint_id <= 0:
+            return make_response(
+                {"message": "Missing checkpoint_id"},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        checkpoint = project_repo.get_checkpoint(checkpoint_id)
+
+        if checkpoint is None:
+            return make_response(
+                {"message": "Checkpoint not found"},
+                HTTPStatus.NOT_FOUND,
+            )
+
+        if int(getattr(checkpoint, "ProjectId", 0) or 0) != int(project.Id):
+            return make_response(
+                {"message": "Checkpoint does not belong to this project"},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        if not bool(getattr(checkpoint, "Enabled", True)):
+            return make_response(
+                {"message": "Checkpoint is disabled"},
+                HTTPStatus.FORBIDDEN,
+            )
+
+    upload_files = request.files.getlist("files")
+
     if not upload_files:
-        single = request.files.get('file')
+        single = request.files.get("file")
+
         if single and single.filename:
             upload_files = [single]
+
     upload_files = [f for f in upload_files if f and f.filename]
+
     if not upload_files:
-        message = {'message': 'No selected file'}
-        return make_response(message, HTTPStatus.BAD_REQUEST)
+        return make_response({"message": "No selected file"}, HTTPStatus.BAD_REQUEST)
 
-    eff_language = (pp.Language if (pp and getattr(pp, "Language", None)) else project.Language) or ""
-    proj_lang = eff_language.strip().lower()
-    if proj_lang == "java":
-        bad = [f.filename for f in upload_files if os.path.splitext(f.filename)[1].lower() != ".java"]
-        if bad:
-            message = {'message': 'Selected project expects Java: upload one or more .java files.'}
-            return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
-    elif proj_lang == "python":
-        if len(upload_files) != 1 or os.path.splitext(upload_files[0].filename)[1].lower() != ".py":
-            message = {
-                'message': 'Selected project expects Python: upload a .py file.'
-            }
-            return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+    if not all(allowed_file(f.filename) for f in upload_files):
+        return make_response(
+            {"message": "Unsupported file type"},
+            HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+        )
 
-    classname = class_repo.get_class_name_withId(class_id)
+    owner = checkpoint if checkpoint is not None else project
 
-    student_base = current_app.config['STUDENT_FILES_DIR']
-
-    # student-files/<projecttimestamp__projectname>/<username>/<submissiontimestamp>/...
-    eff_solutionpath = (pp.solutionpath if (pp and getattr(pp, "solutionpath", None)) else project.solutionpath) or ""
-    teacher_proj_dir = os.path.dirname(eff_solutionpath) if not os.path.isdir(eff_solutionpath) else eff_solutionpath
-
-    teacher_folder_name = os.path.basename(teacher_proj_dir)
-    project_bucket = os.path.join(student_base, teacher_folder_name)
-
-    # Inline replacement for _sanitize_fs(username)
-    safe_username = "".join(
-        c if (c.isalnum() or c in "-_") else "_"
-        for c in (username or "").strip()
+    effective_language = (
+        getattr(owner, "Language", None)
+        or getattr(project, "Language", None)
+        or ""
     )
 
+    solution_path = ""
+
+    try:
+        solution_path = project_repo.get_project_path(
+            int(project.Id),
+            checkpoint_id=(checkpoint_id if is_checkpoint else None),
+        )
+    except Exception:
+        solution_path = ""
+
+    if not solution_path:
+        solution_path = str(getattr(owner, "solutionpath", "") or "")
+
+    if not solution_path:
+        return make_response(
+            {
+                "message": (
+                    "Checkpoint has no solution files"
+                    if is_checkpoint
+                    else "Assignment has no solution files"
+                )
+            },
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    grader_language = normalize_grader_language(effective_language, solution_path)
+    expected_extensions = expected_extensions_for_language(effective_language)
+
+    if not expected_extensions:
+        expected_extensions = expected_extensions_for_language(grader_language)
+
+    if not expected_extensions:
+        return make_response(
+            {"message": "Unsupported language"},
+            HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+        )
+
+    submitted_extensions = [
+        os.path.splitext(f.filename)[1].lower()
+        for f in upload_files
+    ]
+
+    if grader_language == "java":
+        invalid_java_files = [
+            f.filename
+            for f in upload_files
+            if os.path.splitext(f.filename)[1].lower() != ".java"
+        ]
+
+        if invalid_java_files:
+            return make_response(
+                {
+                    "message": (
+                        "Selected project expects Java: upload one or more .java files."
+                    )
+                },
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+            )
+    else:
+        if len(upload_files) != 1:
+            return make_response(
+                {
+                    "message": (
+                        "Only Java projects support multi-file student uploads."
+                    )
+                },
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+            )
+
+        if submitted_extensions[0] not in expected_extensions:
+            readable = ", ".join(expected_extensions)
+            return make_response(
+                {
+                    "message": (
+                        f"Selected project expects {readable}: upload the correct file type."
+                    )
+                },
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+            )
+
+    class_repo.get_class_name_withId(class_id)
+
+    student_base = current_app.config["STUDENT_FILES_DIR"]
+
+    teacher_solution_dir = (
+        solution_path
+        if os.path.isdir(solution_path)
+        else os.path.dirname(solution_path)
+    )
+
+    teacher_folder_name = os.path.basename(teacher_solution_dir)
+
+    if not teacher_folder_name:
+        teacher_folder_name = sanitize_fs_name(str(getattr(project, "Name", "project")))
+
+    if is_checkpoint:
+        project_bucket = os.path.join(
+            student_base,
+            teacher_folder_name,
+            f"checkpoint_{checkpoint_id}",
+        )
+    else:
+        project_bucket = os.path.join(student_base, teacher_folder_name)
+
+    safe_username = sanitize_fs_name(username)
     user_bucket = os.path.join(project_bucket, safe_username)
     os.makedirs(user_bucket, exist_ok=True)
 
-    if upload_files and all(allowed_file(f.filename) for f in upload_files):
-        language = (eff_language or "").lower()
+    ts_now = datetime.now()
+    ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
+    dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
 
-        # Per-submission timestamp for filenames
-        ts_now = datetime.now()
-        ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
-        dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
+    outputpath = project_bucket
+    submission_dir = os.path.join(user_bucket, ts_stamp)
+    os.makedirs(submission_dir, exist_ok=True)
 
-        # Step 1: Save student upload(s) into a submission directory (language-independent layout)
-        outputpath = project_bucket
-        submission_dir = os.path.join(user_bucket, ts_stamp)
-        os.makedirs(submission_dir, exist_ok=True)
+    for upload_file in upload_files:
+        safe_filename = safe_upload_filename(upload_file.filename)
+        destination = os.path.join(submission_dir, safe_filename)
+        upload_file.save(destination)
 
-        for f in upload_files:
-            # Inline replacement for _safe_upload_filename(f.filename)
-            base = os.path.basename(f.filename or "")
-            stem, extn = os.path.splitext(base)
-
-            safe_stem = "".join(
-                c if (c.isalnum() or c in "-_") else "_"
-                for c in (stem or "").strip()
-            )
-            safe_filename = f"{safe_stem}{extn.lower()}"
-
-            dst = os.path.join(submission_dir, safe_filename)
-            f.save(dst)
-
-        # Always pass the submission directory to the grader (single or multi-file)
-        path = submission_dir
-
-        # Step 2: Run grade.py
-        if is_practice and not practice_problem_id:
-            return make_response({'message': 'Missing practice_problem_id for practice submission'}, HTTPStatus.BAD_REQUEST)
-
+    try:
         testcase_info_json = project_repo.testcases_to_json(
-            project.Id,
-            practice_problem_id=(practice_problem_id if is_practice else None),
+            int(project.Id),
+            checkpoint_id=(checkpoint_id if is_checkpoint else None),
+        )
+    except TypeError:
+        testcase_info_json = project_repo.testcases_to_json(int(project.Id))
+
+    grading_script = "/tabot-files/grading-scripts/grade.py"
+    project_id_arg = str(project.Id)
+    class_id_arg = str(class_id)
+
+    add_payload = resolve_additional_files_payload(owner, solution_path)
+
+    cmd = [
+        "python",
+        grading_script,
+        str(username),
+        grader_language,
+        str(testcase_info_json),
+        submission_dir,
+        add_payload,
+        project_id_arg,
+        class_id_arg,
+    ]
+
+    result = subprocess.run(cmd, cwd=outputpath)
+
+    if result.returncode != 0:
+        return make_response(
+            {"message": "Error in running grading script!"},
+            HTTPStatus.INTERNAL_SERVER_ERROR,
         )
 
-        grading_script = "/tabot-files/grading-scripts/grade.py"
-        project_id_arg = str(project.Id)
-        class_id_arg = str(class_id)
+    json_out = os.path.join(submission_dir, "testcases.json")
 
-        # Include teacher-provided "additional files" in the Judge0 sandbox for student runs.
-        # DB stores basenames (or JSON list). Resolve them to absolute paths under the teacher solution folder.
-        add_payload = ""
-        try:
-            sol_root = eff_solutionpath
-            teacher_base_dir = sol_root if os.path.isdir(sol_root) else os.path.dirname(sol_root)
+    if not os.path.exists(json_out):
+        alternate_json_out = os.path.join(submission_dir, f"{username}.json")
 
-            raw = (getattr(pp, "AdditionalFilePath", "") if pp else getattr(project, "AdditionalFilePath", "")) or ""
-            raw = raw.strip()
-            if raw.startswith("[") or raw.startswith("{"):
-                lst = json.loads(raw)
-            else:
-                lst = [raw] if raw else []
+        if os.path.exists(alternate_json_out):
+            json_out = alternate_json_out
 
-            abs_list = []
-            for p in (lst or []):
-                if not p:
-                    continue
-                if os.path.isabs(p):
-                    abs_list.append(p)
-                else:
-                    abs_list.append(os.path.join(teacher_base_dir, os.path.basename(p)))
+    status, testcase_results = load_grader_status(json_out)
 
-            # Pass both base_dir (for resolving testcase-level basenames) and project files list
-            add_payload = json.dumps({"base_dir": teacher_base_dir, "files": abs_list})
-        except Exception:
-            add_payload = ""
+    submission_id = submission_repo.create_submission(
+        user_id=user_id,
+        output=json_out,
+        codepath=submission_dir,
+        time=dt_string,
+        project_id=project.Id,
+        status=status,
+        errorcount=0,
+        testcase_results=testcase_results,
+        is_checkpoint=is_checkpoint,
+        checkpoint_id=(checkpoint_id if is_checkpoint else None),
+    )
 
-        cmd = [
-            "python", grading_script,
-            username,
-            eff_language,
-            str(testcase_info_json),
-            path,
-            add_payload,
-            project_id_arg,
-            class_id_arg
-        ]
-        result = subprocess.run(cmd, cwd=outputpath)
+    if not is_staff_upload and not is_checkpoint:
+        submission_repo.consume_charge(user_id, class_id, project.Id, submission_id)
 
-        if result.returncode != 0:
-            message = {
-                'message': 'Error in running grading script!'
-            }
-            return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
+    message = {
+        "message": "Success",
+        "remainder": 10,
+        "sid": submission_id,
+    }
 
-        # Step 3: Read grader JSON output from:
-        # student-files/<project>/<username>/<submissiontimestamp>/testcases.json
-        json_out = os.path.join(submission_dir, "testcases.json")
-        if not os.path.exists(json_out):
-            # Back-compat with older output naming
-            alt = os.path.join(submission_dir, f"{username}.json")
-            if os.path.exists(alt):
-                json_out = alt
-
-        status = False
-        TestCaseResults = {"Passed": [], "Failed": []}
-        try:
-            # Inline replacement for _load_grader_json and _status_and_buckets
-            with open(json_out, "r", encoding="utf-8", errors="replace") as f:
-                payload = json.load(f) or {}
-
-            passed, failed = [], []
-            for r in (payload or {}).get("results", []):
-                name = str((r or {}).get("name", "") or "")
-                if bool((r or {}).get("passed", False)):
-                    passed.append(name)
-                else:
-                    failed.append(name)
-
-            status = (len(failed) == 0)
-            TestCaseResults = {"Passed": passed, "Failed": failed}
-        except Exception:
-            pass
-
-        submissionId = submission_repo.create_submission(
-            user_id=user_id,
-            output=json_out,
-            codepath=submission_dir,
-            time=dt_string,
-            project_id=project.Id,
-            status=status,
-            errorcount=0,
-            testcase_results=TestCaseResults,
-            is_practice=is_practice,
-            practice_problem_id=(practice_problem_id if is_practice else None),
-        )
-
-        # Practice bonus: passing a practice problem grants +1 FastPass once per problem.
-        try:
-            if is_practice and status and practice_problem_id and pp is not None:
-                submission_repo.award_practice_bonus(
-                    user_id=int(user_id),
-                    class_id=int(class_id),
-                    project_id=int(project.Id),
-                    practice_problem_id=int(practice_problem_id),
-                    submission_id=int(submissionId),
-                )
-        except Exception:
-            pass
-
-        # Admin uploads and practice submissions should not consume charges.
-        if not is_staff_upload and not is_practice:
-            submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
-
-        message = {
-            'message': 'Success',
-            'remainder': 10,
-            "sid": submissionId,
-        }
-
-        return make_response(message, HTTPStatus.OK)
-
-    message = {'message': 'Unsupported file type'}
-    return make_response(message, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+    return make_response(message, HTTPStatus.OK)

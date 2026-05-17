@@ -105,17 +105,17 @@ class App extends Component {
                         </ProtectedRoute>
                     } />
 
-                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/practice/:practice_problem_id/submissions" element={
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/checkpoint/:checkpoint_id/submissions" element={
                         <ProtectedRoute>
                             <AdminStudentList />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/practice/:practice_problem_id/manage" element={
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/checkpoint/:checkpoint_id/manage" element={
                         <ProtectedRoute>
                             <AdminProjectManage practiceMode />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/practice/select" element={
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/checkpoint/select" element={
                         <ProtectedRoute>
                             <AdminPracticeSelect />
                         </ProtectedRoute>
@@ -126,7 +126,17 @@ class App extends Component {
                             <AdminGrading />
                         </ProtectedRoute>
                     } />
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/grade/:id" element={
+                        <ProtectedRoute>
+                            <AdminGrading />
+                        </ProtectedRoute>
+                    } />
                     <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:project_id/codeview/:id" element={
+                        <ProtectedRoute>
+                            <AdminViewStudentCode />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/codeview/:id" element={
                         <ProtectedRoute>
                             <AdminViewStudentCode />
                         </ProtectedRoute>
@@ -157,21 +167,6 @@ class App extends Component {
                             <Navigate to={redirectLegacyAdminRoute()} replace />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/module/:module_id/project/:id/practice/:practice_problem_id/submissions" element={
-                        <ProtectedRoute>
-                            <Navigate to={redirectLegacyAdminRoute()} replace />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/admin/:class_id/module/:module_id/project/:id/practice/:practice_problem_id/manage" element={
-                        <ProtectedRoute>
-                            <Navigate to={redirectLegacyAdminRoute()} replace />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/admin/:class_id/module/:module_id/project/:id/practice/select" element={
-                        <ProtectedRoute>
-                            <Navigate to={redirectLegacyAdminRoute()} replace />
-                        </ProtectedRoute>
-                    } />
                     <Route path="/admin/:class_id/module/:module_id/project/:project_id/grade/:id" element={
                         <ProtectedRoute>
                             <Navigate to={redirectLegacyAdminRoute()} replace />
@@ -198,16 +193,6 @@ class App extends Component {
                             <Navigate to={redirectLegacyAdminRoute()} replace />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:id/practice/:practice_problem_id" element={
-                        <ProtectedRoute>
-                            <Navigate to={redirectLegacyAdminRoute()} replace />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/admin/:class_id/project/:id/practice/select" element={
-                        <ProtectedRoute>
-                            <Navigate to={redirectLegacyAdminRoute()} replace />
-                        </ProtectedRoute>
-                    } />
                     <Route path="/admin/:class_id/project/:project_id/grade/:id" element={
                         <ProtectedRoute>
                             <Navigate to={redirectLegacyAdminRoute()} replace />
@@ -215,7 +200,12 @@ class App extends Component {
                     } />
                     <Route path="/admin/:class_id/project/:project_id/codeview/:id" element={
                         <ProtectedRoute>
-                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                            <AdminViewStudentCode />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:project_id/checkpoint/:checkpoint_id/codeview/:id" element={
+                        <ProtectedRoute>
+                            <AdminViewStudentCode />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/plagiarism" element={
@@ -264,27 +254,38 @@ class App extends Component {
                             <StudentUpload />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/practice/select" element={
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/code/:id?" element={
+                        <ProtectedRoute>
+                            <StudentOutputDiff />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/select" element={
                         <ProtectedRoute>
                             <StudentPracticeSelect />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/practice/:practice_problem_id/upload" element={
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/upload" element={
                         <ProtectedRoute>
                             <StudentUpload />
                         </ProtectedRoute>
                     } />
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/code/:id?" element={
+                        <ProtectedRoute>
+                            <StudentOutputDiff />
+                        </ProtectedRoute>
+                    } />
+
                     <Route path="/student/:class_id/upload" element={
                         <ProtectedRoute>
                             <StudentUpload />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/:class_id/practice" element={
+                    <Route path="/student/:class_id/checkpoint" element={
                         <ProtectedRoute>
                             <StudentPracticeSelect />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/:class_id/practice/:practice_problem_id/upload" element={
+                    <Route path="/student/:class_id/checkpoint/:checkpoint_id/upload" element={
                         <ProtectedRoute>
                             <StudentUpload />
                         </ProtectedRoute>

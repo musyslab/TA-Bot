@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, abort
-from flask_jwt_extended import jwt_required, current_user
+from flask_jwt_extended import jwt_required, current_user, get_current_user
 from dependency_injector.wiring import inject, Provide
 from container import Container
 
@@ -72,6 +72,33 @@ def serialize_school(school):
     }
 
 
+def serialize_class_sections(classes_list):
+    class_ids = [cls.Id for cls in classes_list]
+
+    labs_by_class = {class_id: [] for class_id in class_ids}
+    lectures_by_class = {class_id: [] for class_id in class_ids}
+
+    if class_ids:
+        labs = Labs.query.filter(Labs.ClassId.in_(class_ids)).order_by(Labs.Name.asc()).all()
+        lectures = LectureSections.query.filter(LectureSections.ClassId.in_(class_ids)).order_by(LectureSections.Name.asc()).all()
+
+        for lab in labs:
+            labs_by_class.setdefault(lab.ClassId, []).append({"name": lab.Name, "id": lab.Id})
+
+        for lecture in lectures:
+            lectures_by_class.setdefault(lecture.ClassId, []).append({"name": lecture.Name, "id": lecture.Id})
+
+    return [
+        {
+            "name": cls.Name,
+            "id": cls.Id,
+            "labs": labs_by_class.get(cls.Id, []),
+            "lectures": lectures_by_class.get(cls.Id, []),
+        }
+        for cls in classes_list
+    ]
+
+
 @class_api.route('/all', methods=['GET'])
 @jwt_required()
 @inject
@@ -138,57 +165,42 @@ def validate_class_access(class_id,
 
 
 @class_api.route('/sections', methods=['GET'])
-@jwt_required()
+@jwt_required(optional=True)
 @inject
 def get_class_labs(class_repo: ClassRepository = Provide[Container.class_repo],
                    class_service: class_service = Provide[Container.class_service]):
+    user = get_current_user()
     school_id = parse_optional_int(request.args.get("school_id"))
-
-    if school_id and school_id > 0 and not class_service.user_can_access_school(current_user, school_id, class_repo):
-        abort(403)
-
-    accessible_classes = class_service.get_assigned_classes(current_user, class_repo)
-    accessible_class_ids = {
-        extract_class_id(class_item)
-        for class_item in accessible_classes
-    }
 
     classes_query = Classes.query.order_by(Classes.Name.asc())
 
     if school_id and school_id > 0:
+        school = Schools.query.filter(Schools.Id == school_id).first()
+
+        if school is None:
+            abort(404)
+
         classes_query = classes_query.filter(Classes.SchoolId == school_id)
 
-    classes_list = [
-        cls
-        for cls in classes_query.all()
-        if cls.Id in accessible_class_ids
-    ]
-    class_ids = [cls.Id for cls in classes_list]
+    classes_list = classes_query.all()
 
-    labs_by_class = {class_id: [] for class_id in class_ids}
-    lectures_by_class = {class_id: [] for class_id in class_ids}
+    if user is not None:
+        if school_id and school_id > 0 and not class_service.user_can_access_school(user, school_id, class_repo):
+            abort(403)
 
-    if class_ids:
-        labs = Labs.query.filter(Labs.ClassId.in_(class_ids)).order_by(Labs.Name.asc()).all()
-        lectures = LectureSections.query.filter(LectureSections.ClassId.in_(class_ids)).order_by(LectureSections.Name.asc()).all()
-
-        for lab in labs:
-            labs_by_class.setdefault(lab.ClassId, []).append({"name": lab.Name, "id": lab.Id})
-
-        for lecture in lectures:
-            lectures_by_class.setdefault(lecture.ClassId, []).append({"name": lecture.Name, "id": lecture.Id})
-
-    holder = [
-        {
-            "name": cls.Name,
-            "id": cls.Id,
-            "labs": labs_by_class.get(cls.Id, []),
-            "lectures": lectures_by_class.get(cls.Id, []),
+        accessible_classes = class_service.get_assigned_classes(user, class_repo)
+        accessible_class_ids = {
+            extract_class_id(class_item)
+            for class_item in accessible_classes
         }
-        for cls in classes_list
-    ]
 
-    return jsonify(holder)
+        classes_list = [
+            cls
+            for cls in classes_list
+            if cls.Id in accessible_class_ids
+        ]
+
+    return jsonify(serialize_class_sections(classes_list))
 
 
 @class_api.route('/id/<class_id>', methods=['GET'])

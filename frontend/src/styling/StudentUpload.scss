@@ -5,7 +5,7 @@
 /* Single-panel layout */
 .student-upload-shell {
     width: 95%;
-    margin: 0px auto 24px;
+    margin: 0 auto 24px;
     display: block;
     max-width: none;
     padding: 0;
@@ -27,18 +27,14 @@
 /* Shared panel styling */
 .panel {
     background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 16px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(198, 208, 222, 0.9);
+    border-radius: 30px;
+    box-shadow: 0 20px 58px rgba(20, 35, 60, 0.1);
     overflow: hidden;
 }
 
 .panel-header {
-    padding: 14px 14px 10px;
-    border-bottom: 1px solid #eef2f7;
-    background: #d1d5db;
-    border: 1px solid #9ca3af;
-    border-radius: 16px;
+    border: 0;
 }
 
 .panel-header--compact {
@@ -65,11 +61,14 @@
 }
 
 .panel-title--project {
-    font-size: 30px !important;
-    font-weight: 700 !important;
-    line-height: 1.05;
-    text-align: center;
     width: 100%;
+    margin: 0;
+    font-size: clamp(1.8rem, 4vw, 2.75rem) !important;
+    line-height: 1.05;
+    font-weight: 950 !important;
+    letter-spacing: -0.045em;
+    color: #0f172a;
+    overflow-wrap: anywhere;
 }
 
 .panel-subtitle {
@@ -86,11 +85,66 @@
     }
 }
 
+.assignment-quest-hero {
+    margin: 0;
+    padding: 1rem 1.15rem;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 28px;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow:
+        0 18px 44px rgba(15, 23, 42, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(520px, 0.95fr);
+    align-items: center;
+    gap: 1rem;
+    overflow: hidden;
+    position: relative;
+}
+
+.assignment-quest-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.assignment-quest-label {
+    width: fit-content;
+    margin-bottom: 0.65rem;
+    border-radius: 999px;
+    padding: 7px 11px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    font-size: 0.72rem;
+    font-weight: 950;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.assignment-quest-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.75rem;
+    color: #475569;
+    font-weight: 750;
+    line-height: 1.45;
+}
+
+.assignment-quest-meta-row span {
+    border-radius: 999px;
+    padding: 7px 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
 .assignment-actions {
-    margin: 0 auto;
+    margin-top: 1rem;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 10px;
     flex-wrap: wrap;
 }
@@ -104,38 +158,106 @@
 }
 
 .assignment-download,
-.presentation-download {
+.presentation-download,
+.previous-submission-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-
-    padding: 6px 10px;
+    min-height: 40px;
+    padding: 9px 13px;
     border-radius: 9999px;
-    border: 1px solid #d1d5db;
-    background: #ffffff;
-    color: #111827;
-    font-weight: 900;
-    cursor: pointer;
-
-    &:hover:not(:disabled) {
-        background: #f3f4f6;
-    }
-
-    &:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-}
-
-.presentation-download {
-    border-color: #bfdbfe;
+    border: 1px solid #bfdbfe;
     background: #eff6ff;
     color: #1d4ed8;
+    font-weight: 950;
+    text-decoration: none;
+    cursor: pointer;
+    box-shadow: 0 8px 18px rgba(20, 35, 60, 0.08);
+    transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 
     &:hover:not(:disabled) {
         background: #dbeafe;
+        transform: translateY(-1px);
+        box-shadow: 0 12px 24px rgba(20, 35, 60, 0.12);
     }
+
+    &:disabled,
+    &.is-disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+    }
+}
+
+.assignment-quest-side {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    align-items: stretch;
+    gap: 12px;
+    min-width: 0;
+}
+
+.assignment-quest-progress-card,
+.previous-submission-card {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    gap: 9px;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.84);
+    border: 1px solid rgba(216, 226, 239, 0.9);
+    padding: 14px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    min-width: 0;
+}
+
+.assignment-quest-progress-ring {
+    width: 92px;
+    height: 92px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background:
+        radial-gradient(circle at center, white 58%, transparent 59%),
+        conic-gradient(#10b981 0 var(--progress-percent, 0%), #e2e8f0 var(--progress-percent, 0%) 100%);
+}
+
+.assignment-quest-progress-ring span {
+    color: #132238;
+    font-weight: 950;
+    font-size: 1.25rem;
+}
+
+.assignment-quest-progress-title,
+.previous-submission-title {
+    color: #18263a;
+    font-weight: 950;
+}
+
+.previous-submission-card {
+    align-content: center;
+}
+
+.previous-submission-card p {
+    margin: 4px 0 0;
+    color: #5a6b80;
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.previous-submission-button {
+    width: 100%;
+}
+
+.previous-submission-button.is-disabled {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #64748b;
 }
 
 .due-pill {
@@ -148,6 +270,35 @@
     border: 1px solid #fecaca;
     color: #991b1b;
     font-weight: 900;
+}
+
+@media (max-width: 1080px) {
+    .assignment-quest-hero {
+        grid-template-columns: 1fr;
+    }
+
+    .assignment-actions {
+        justify-content: center;
+    }
+
+    .assignment-quest-copy {
+        align-items: center;
+        text-align: center;
+    }
+
+    .assignment-quest-meta-row {
+        justify-content: center;
+    }
+
+    .assignment-quest-side {
+        grid-template-columns: repeat(2, minmax(220px, 1fr));
+    }
+}
+
+@media (max-width: 620px) {
+    .assignment-quest-side {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Office Hours banner (kept) */
@@ -669,7 +820,7 @@
     }
 }
 
-/* Responsive tightening while keeping two columns (panel-status stays on the right) */
+/* Responsive tightening while keeping two columns when space allows */
 @media (max-width: 920px) {
     .panel-title--project {
         font-size: 26px !important;

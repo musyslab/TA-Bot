@@ -73,7 +73,8 @@ type ProjectSetupStatus = {
 type ModuleOverviewResponse = {
     module: ModuleObject;
     project: ProjectObject;
-    practiceProblems: PracticeProblemRow[];
+    checkpoints?: PracticeProblemRow[];
+    practiceProblems?: PracticeProblemRow[];
 };
 
 type PathSegment = {
@@ -99,7 +100,7 @@ const getSetupMissingItems = (status: ProjectSetupStatus): string[] => {
         missingItems.push("solution");
     }
 
-    if (status.testcaseCount <= 1) {
+    if (status.testcaseCount < 1) {
         missingItems.push("test cases");
     }
 
@@ -258,9 +259,11 @@ export default function AdminModuleDetails() {
         try {
             const res = await axios.get(url, { headers: authHeader() });
             const data = res.data as ModuleOverviewResponse;
-            const rows = Array.isArray(data.practiceProblems)
-                ? data.practiceProblems
-                : [];
+            const rows = Array.isArray(data.checkpoints)
+                ? data.checkpoints
+                : Array.isArray(data.practiceProblems)
+                    ? data.practiceProblems
+                    : [];
             const nextProject = data.project || null;
 
             hydrateState(
@@ -338,7 +341,7 @@ export default function AdminModuleDetails() {
 
     const mainProjectReady = useMemo(() => {
         return (
-            !!project?.HasSolutionProgram && Number(project?.TestcaseCount || 0) > 1
+            !!project?.HasSolutionProgram && Number(project?.TestcaseCount || 0) >= 1
         );
     }, [project]);
 
@@ -553,9 +556,9 @@ export default function AdminModuleDetails() {
         try {
             setSavingPracticeNameId(practiceProblemId);
             await axios.post(
-                `${import.meta.env.VITE_API_URL}/projects/update_practice_problem_name`,
+                `${import.meta.env.VITE_API_URL}/projects/update_checkpoint_name`,
                 {
-                    practice_problem_id: practiceProblemId,
+                    checkpoint_id: practiceProblemId,
                     name: trimmed,
                 },
                 { headers: authHeader() },
@@ -635,7 +638,7 @@ export default function AdminModuleDetails() {
             const orderedIds = checkpointDrafts.map((pp) => pp.id);
 
             await axios.post(
-                `${import.meta.env.VITE_API_URL}/projects/reorder_practice_problems`,
+                `${import.meta.env.VITE_API_URL}/projects/reorder_checkpoints`,
                 {
                     project_id: project.Id,
                     ordered_ids: orderedIds,
@@ -680,7 +683,7 @@ export default function AdminModuleDetails() {
         try {
             setAddingCheckpoint(true);
             await axios.post(
-                `${import.meta.env.VITE_API_URL}/projects/create_practice_problem`,
+                `${import.meta.env.VITE_API_URL}/projects/create_checkpoint`,
                 {
                     project_id: project.Id,
                     name: generatedName,
@@ -723,9 +726,9 @@ export default function AdminModuleDetails() {
         try {
             setDeletingCheckpointId(practiceProblemId);
             await axios.post(
-                `${import.meta.env.VITE_API_URL}/projects/delete_practice_problem`,
+                `${import.meta.env.VITE_API_URL}/projects/delete_checkpoint`,
                 {
-                    practice_problem_id: practiceProblemId,
+                    checkpoint_id: practiceProblemId,
                 },
                 { headers: authHeader() },
             );
@@ -761,7 +764,7 @@ export default function AdminModuleDetails() {
         status: ProjectSetupStatus,
         manageUrl: string,
     ) => {
-        const testcasesReady = status.testcaseCount > 1;
+        const testcasesReady = status.testcaseCount >= 1;
 
         const items = [
             {
@@ -1136,7 +1139,7 @@ export default function AdminModuleDetails() {
 
                                         <Link
                                             className="review-submissions-action"
-                                            to={`${projectBaseUrl}/practice/${pp.id}/submissions`}
+                                            to={`${projectBaseUrl}/checkpoint/${pp.id}/submissions`}
                                         >
                                             <FaEye aria-hidden="true" />
                                             Review Submissions
@@ -1145,7 +1148,7 @@ export default function AdminModuleDetails() {
 
                                     {renderSetupIndicators(
                                         checkpointSetupStatus,
-                                        `${projectBaseUrl}/practice/${pp.id}/manage`,
+                                        `${projectBaseUrl}/checkpoint/${pp.id}/manage`,
                                     )}
                                 </article>
                             );
