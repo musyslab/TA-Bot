@@ -79,6 +79,10 @@ type NewUserSource = "pam" | "oauth" | null;
 
 const GOOGLE_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 
+const ENABLE_GOOGLE_LOGIN = false;
+const ENABLE_MICROSOFT_LOGIN = false;
+const ENABLE_CAMPUS_LOGIN = true;
+
 function loadGoogleScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (window.google?.accounts?.id) {
@@ -249,14 +253,22 @@ function Login() {
   useEffect(() => {
     axios
       .get(`${apiBase}/auth/oauth/config`)
-      .then((res) => setOAuthConfig(res.data as OAuthConfig))
+      .then((res) => {
+        const config = res.data as OAuthConfig;
+
+        setOAuthConfig({
+          ...config,
+          google_enabled: ENABLE_GOOGLE_LOGIN && config.google_enabled,
+          microsoft_enabled: ENABLE_MICROSOFT_LOGIN && config.microsoft_enabled,
+        });
+      })
       .catch(() => {
         setOAuthConfig({
           google_client_id: "",
-          google_enabled: false,
+          google_enabled: ENABLE_GOOGLE_LOGIN,
           microsoft_client_id: "",
           microsoft_authority: "",
-          microsoft_enabled: false,
+          microsoft_enabled: ENABLE_MICROSOFT_LOGIN,
         });
       });
   }, [apiBase]);
@@ -335,6 +347,11 @@ function Login() {
   const handlePasswordSubmit = async (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
 
+    if (!ENABLE_CAMPUS_LOGIN) {
+      setErrorMessage("Campus login is currently disabled.");
+      return;
+    }
+
     setErrorMessage("");
     setIsLoading(true);
 
@@ -363,6 +380,11 @@ function Login() {
   };
 
   const handleMicrosoftLogin = async () => {
+    if (!ENABLE_MICROSOFT_LOGIN) {
+      setErrorMessage("Microsoft login is currently disabled.");
+      return;
+    }
+
     if (!oauthConfig?.microsoft_enabled || !oauthConfig.microsoft_client_id || !oauthConfig.microsoft_authority) {
       setErrorMessage("Microsoft login is not configured.");
       return;
@@ -685,7 +707,6 @@ function Login() {
       <div className="login-shell">
         <div className="login-card">
           <h1 className="login-title">Login to MAAT</h1>
-          <p className="login-subtitle">Use your campus password, Google, or Microsoft.</p>
 
           <div className="oauth-section">
             {oauthConfig?.google_enabled ? (
@@ -702,57 +723,59 @@ function Login() {
             ) : null}
           </div>
 
-          {oauthConfig?.google_enabled || oauthConfig?.microsoft_enabled ? (
+          {ENABLE_CAMPUS_LOGIN && (oauthConfig?.google_enabled || oauthConfig?.microsoft_enabled) ? (
             <div className="login-divider">
               <span>or use your campus account</span>
             </div>
           ) : null}
 
-          <form className="login-form" onSubmit={handlePasswordSubmit}>
-            <div className="form-group">
-              <label className="form-label" htmlFor="username">
-                Username
-              </label>
-              <div className="input-with-icon">
-                <FaUser className="input-with-icon__icon" aria-hidden="true" />
-                <input
-                  id="username"
-                  name="username"
-                  type="text"
-                  required
-                  placeholder="Username"
-                  autoComplete="username"
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="form-input"
-                  value={username}
-                />
+          {ENABLE_CAMPUS_LOGIN ? (
+            <form className="login-form" onSubmit={handlePasswordSubmit}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="username">
+                  Username
+                </label>
+                <div className="input-with-icon">
+                  <FaUser className="input-with-icon__icon" aria-hidden="true" />
+                  <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    required
+                    placeholder="Username"
+                    autoComplete="username"
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="form-input"
+                    value={username}
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="password">
-                Password
-              </label>
-              <div className="input-with-icon">
-                <FaLock className="input-with-icon__icon" aria-hidden="true" />
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  placeholder="Password"
-                  autoComplete="current-password"
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="form-input"
-                  value={password}
-                />
+              <div className="form-group">
+                <label className="form-label" htmlFor="password">
+                  Password
+                </label>
+                <div className="input-with-icon">
+                  <FaLock className="input-with-icon__icon" aria-hidden="true" />
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    required
+                    placeholder="Password"
+                    autoComplete="current-password"
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="form-input"
+                    value={password}
+                  />
+                </div>
               </div>
-            </div>
 
-            <button className="btn btn--primary login-form__submit" type="submit" disabled={isLoading}>
-              {isLoading ? "Logging in..." : "Login"}
-            </button>
-          </form>
+              <button className="btn btn--primary login-form__submit" type="submit" disabled={isLoading}>
+                {isLoading ? "Logging in..." : "Login"}
+              </button>
+            </form>
+          ) : null}
 
           {errorMessage ? (
             <div className="alert alert--error" role="alert" aria-live="assertive">
@@ -761,7 +784,7 @@ function Login() {
           ) : null}
 
           <div className="login-links">
-            Create a manual account{" "}
+            Create an account{" "}
             <a
               className="login-links__link"
               href="https://docs.google.com/document/d/1QT--iGWE-y1Ix8GknsMAoiIKyZJcO_yEOhMBg0WFpyU/edit?usp=sharing"
