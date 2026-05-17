@@ -1,4 +1,3 @@
-
 from abc import ABC, abstractmethod
 import os
 import random
@@ -166,82 +165,84 @@ class ProjectRepository():
             .filter(PracticeProblems.ProjectId == int(project_id))
             .scalar()
         )
-        return int(max_num or 0) + 1000
-
-    def reorder_practice_problems(self, project_id: int, ordered_ids: list[int]):
-        active_rows = (
+        total_rows = (
             PracticeProblems.query
-            .filter(
-                PracticeProblems.ProjectId == int(project_id),
-                PracticeProblems.Enabled == True,
-            )
+            .filter(PracticeProblems.ProjectId == int(project_id))
+            .count()
+        )
+        return int(max_num or 0) + int(total_rows or 0) + 1000
+
+    def _practice_problem_rows_for_project(self, project_id: int):
+        return (
+            PracticeProblems.query
+            .filter(PracticeProblems.ProjectId == int(project_id))
             .order_by(PracticeProblems.PracticeNumber.asc(), PracticeProblems.Id.asc())
             .all()
         )
 
-        inactive_rows = (
-            PracticeProblems.query
-            .filter(
-                PracticeProblems.ProjectId == int(project_id),
-                PracticeProblems.Enabled == False,
-            )
-            .order_by(PracticeProblems.Id.asc())
-            .all()
-        )
+    def _write_practice_problem_order(self, project_id: int, ordered_active_ids: list[int]):
+        all_rows = self._practice_problem_rows_for_project(project_id)
+        active_rows = [row for row in all_rows if bool(getattr(row, "Enabled", True))]
+        inactive_rows = [row for row in all_rows if not bool(getattr(row, "Enabled", True))]
 
         active_by_id = {int(row.Id): row for row in active_rows}
-        ordered_unique_ids: list[int] = []
+        ordered_rows = []
         seen: set[int] = set()
 
-        for raw_id in ordered_ids or []:
+        for raw_id in ordered_active_ids or []:
             try:
                 row_id = int(raw_id)
             except Exception:
                 continue
 
-            if row_id in active_by_id and row_id not in seen:
-                ordered_unique_ids.append(row_id)
+            row = active_by_id.get(row_id)
+            if row is not None and row_id not in seen:
+                ordered_rows.append(row)
                 seen.add(row_id)
 
         for row in active_rows:
             row_id = int(row.Id)
             if row_id not in seen:
-                ordered_unique_ids.append(row_id)
+                ordered_rows.append(row)
                 seen.add(row_id)
 
-        # MySQL enforces the ProjectId + PracticeNumber unique constraint after
-        # each row update. A direct swap such as 1 -> 2 and 2 -> 1 can fail
-        # mid-flush, so move every row for this project into a temporary, unique
-        # number range first, then write the final compact sequence.
+        final_rows = [*ordered_rows, *inactive_rows]
+
+        # PracticeProblems has a unique ProjectId + PracticeNumber constraint.
+        # MySQL checks that uniqueness row by row during a flush, so swapping
+        # numbers directly can silently leave the UI looking like it saved while
+        # the next reload falls back to the old order. Move every row for the
+        # project into a guaranteed-unused range first, flush that state, then
+        # write the final compact sequence.
         scratch_base = self._next_practice_number_scratch_base(project_id)
-        for index, row in enumerate([*active_rows, *inactive_rows], start=1):
+        for index, row in enumerate(all_rows, start=1):
             row.PracticeNumber = scratch_base + index
 
         db.session.flush()
 
-        for index, row_id in enumerate(ordered_unique_ids, start=1):
-            active_by_id[row_id].PracticeNumber = index
-
-        for index, row in enumerate(inactive_rows, start=1):
-            row.PracticeNumber = scratch_base + len(active_rows) + index
-
-        db.session.commit()
-        return self.list_practice_problems(project_id)
-
-    def renumber_practice_problems(self, project_id: int):
-        rows = self.list_practice_problems(project_id)
-        scratch_base = self._next_practice_number_scratch_base(project_id)
-
-        for index, row in enumerate(rows, start=1):
-            row.PracticeNumber = scratch_base + index
-
-        db.session.flush()
-
-        for index, row in enumerate(rows, start=1):
+        for index, row in enumerate(final_rows, start=1):
             row.PracticeNumber = index
 
         db.session.commit()
-        return rows
+        return ordered_rows
+
+    def reorder_practice_problems(self, project_id: int, ordered_ids: list[int]):
+        try:
+            return self._write_practice_problem_order(project_id, ordered_ids)
+        except Exception:
+            db.session.rollback()
+            raise
+
+    def renumber_practice_problems(self, project_id: int):
+        try:
+            rows = self.list_practice_problems(project_id)
+            return self._write_practice_problem_order(
+                project_id,
+                [int(row.Id) for row in rows],
+            )
+        except Exception:
+            db.session.rollback()
+            raise
 
     def delete_practice_problem(self, practice_problem_id: int):
         pp = PracticeProblems.query.filter(PracticeProblems.Id == int(practice_problem_id)).first()
@@ -573,6 +574,26 @@ class ProjectRepository():
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
         db.session.delete(testcase)
         db.session.commit()
+
+    def count_testcases(self, project_id: int, practice_problem_id: Optional[int] = None) -> int:
+        q = Testcases.query.filter(Testcases.ProjectId == int(project_id))
+        if practice_problem_id:
+            q = q.filter(Testcases.PracticeProblemId == int(practice_problem_id))
+        else:
+            q = q.filter(Testcases.PracticeProblemId.is_(None))
+        return int(q.count() or 0)
+
+    def count_testcases_by_practice_problem(self, project_id: int) -> Dict[int, int]:
+        rows = (
+            db.session.query(Testcases.PracticeProblemId, func.count(Testcases.Id))
+            .filter(
+                Testcases.ProjectId == int(project_id),
+                Testcases.PracticeProblemId.isnot(None),
+            )
+            .group_by(Testcases.PracticeProblemId)
+            .all()
+        )
+        return {int(ppid): int(count or 0) for ppid, count in rows if ppid is not None}
 
     def testcases_to_json(self, project_id: int, practice_problem_id: Optional[int] = None) -> str:
         testcase_holder: Dict[int, list] = {}

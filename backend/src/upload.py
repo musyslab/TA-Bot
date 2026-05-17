@@ -19,11 +19,12 @@ from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.user_repository import UserRepository
 from src.repositories.class_repository import ClassRepository
+from src.repositories.models import Classes
 from src.services.timeout_service import on_timeout
 from tap.parser import Parser
 from dependency_injector.wiring import inject, Provide
 from container import Container
-from src.constants import ADMIN_ROLE
+from src.constants import ADMIN_ROLE, TEACHER_ROLE
 
 upload_api = Blueprint('upload_api', __name__)
 
@@ -46,16 +47,66 @@ def allowed_file(filename):
             return True
     return False
 
+def parse_int(v, default: int = 0) -> int:
+    try:
+        return int(str(v).strip())
+    except Exception:
+        return default
+
+
+def is_admin_user() -> bool:
+    return int(getattr(current_user, "Role", -1) or -1) == ADMIN_ROLE
+
+
+def is_teacher_user() -> bool:
+    return int(getattr(current_user, "Role", -1) or -1) == TEACHER_ROLE
+
+
+def is_staff_user() -> bool:
+    return is_admin_user() or is_teacher_user()
+
+
+def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
+    if class_item is None or class_item.Tid is None:
+        return False
+
+    teacher_ids = [
+        token
+        for token in "".join(
+            character if character.isdigit() else " "
+            for character in str(class_item.Tid)
+        ).split()
+    ]
+
+    return str(teacher_id) in teacher_ids
+
+
+def user_can_access_class_id(class_id: int) -> bool:
+    class_id = parse_int(class_id, 0)
+    if class_id <= 0:
+        return False
+
+    if is_admin_user():
+        return Classes.query.filter(Classes.Id == class_id).first() is not None
+
+    if is_teacher_user():
+        class_item = Classes.query.filter(Classes.Id == class_id).first()
+        return teacher_id_is_on_class(int(current_user.Id), class_item)
+
+    return False
+
 @upload_api.route('/total_students_by_cid', methods=['GET'])
 @jwt_required()
 @inject
 def total_students(user_repo: UserRepository = Provide[Container.user_repo]):
-    if current_user.Role != ADMIN_ROLE:
+    if not is_staff_user():
         message = {
             'message': 'Access Denied'
         }
         return make_response(message, HTTPStatus.UNAUTHORIZED)
     class_id = request.args.get('class_id')
+    if not user_can_access_class_id(parse_int(class_id, 0)):
+        return make_response({'message': 'Access Denied'}, HTTPStatus.FORBIDDEN)
     users = user_repo.get_all_users_by_cid(class_id)
     list_of_user_info = []
     for user in users:
@@ -123,7 +174,7 @@ def file_upload(
         return make_response(message, HTTPStatus.NOT_ACCEPTABLE)
 
     # Check to see if student is able to upload or still on timeout
-    if current_user.Role != ADMIN_ROLE:
+    if not is_staff_upload:
         class_id = request.form['class_id']
 
     # Accept either legacy single-file field ("file") or new multi-file field ("files")
@@ -316,7 +367,7 @@ def file_upload(
             pass
 
         # Admin uploads and practice submissions should not consume charges.
-        if current_user.Role != ADMIN_ROLE and not is_practice:
+        if not is_staff_upload and not is_practice:
             submission_repo.consume_charge(user_id, class_id, project.Id, submissionId)
 
         message = {

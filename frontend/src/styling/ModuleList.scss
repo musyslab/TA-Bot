@@ -51,7 +51,9 @@
         border: 1px solid #dbe2ea;
         border-radius: 24px;
         background:
-            radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 30%),
+            radial-gradient(circle at top right,
+                rgba(37, 99, 235, 0.12),
+                transparent 30%),
             linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
         box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
     }
@@ -246,8 +248,7 @@
         border: 1px solid #dbe2ea;
         border-left: 6px solid #6366f1;
         border-radius: 18px;
-        background:
-            linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
         box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
         cursor: pointer;
         transition:
@@ -272,12 +273,23 @@
         &.is-active {
             border-left-color: #22c55e;
             background:
-                radial-gradient(circle at top right, rgba(34, 197, 94, 0.12), transparent 28%),
+                radial-gradient(circle at top right,
+                    rgba(34, 197, 94, 0.12),
+                    transparent 28%),
                 linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
         }
 
         &.is-ended {
             border-left-color: #94a3b8;
+        }
+
+        &.is-editing {
+            cursor: default;
+            align-items: stretch;
+
+            &:hover {
+                transform: none;
+            }
         }
     }
 
@@ -365,7 +377,18 @@
     .module-list-card-actions {
         display: flex;
         justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 0.6rem;
         min-width: 150px;
+    }
+
+    .module-list-edit-panel {
+        grid-column: 1 / -1;
+        padding: 1rem;
+        border: 1px solid #dbe2ea;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
     }
 
     .calendar-create-card {
@@ -375,7 +398,9 @@
         border: 1px solid #dbe2ea;
         border-radius: 22px;
         background:
-            radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 28%),
+            radial-gradient(circle at top right,
+                rgba(37, 99, 235, 0.1),
+                transparent 28%),
             linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
         box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
     }
@@ -418,7 +443,8 @@
 
     .calendar-create-grid {
         display: grid;
-        grid-template-columns: minmax(240px, 1.2fr) minmax(240px, 1fr) minmax(240px, 1fr);
+        grid-template-columns: minmax(240px, 1.2fr) minmax(240px, 1fr) minmax(240px,
+                1fr);
         gap: 0.9rem;
         align-items: end;
     }
@@ -1008,6 +1034,20 @@
 
         .calendar-project {
             text-align: center;
+        }
+    }
+
+    @media (max-width: 780px) {
+        .module-list-card.is-editing {
+            grid-template-columns: 1fr;
+        }
+
+        .module-list-card-actions {
+            justify-content: flex-start;
+        }
+
+        .module-list-edit-panel {
+            padding: 0.85rem;
         }
     }
 

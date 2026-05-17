@@ -1,19 +1,21 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, abort
 from flask_jwt_extended import jwt_required, current_user
 from dependency_injector.wiring import inject, Provide
 from container import Container
 
 from src.repositories.class_repository import ClassRepository
-from src.repositories.models import Classes, Labs, LectureSections
+from src.repositories.models import Classes, Labs, LectureSections, Schools
 from src.services import class_service
 
 class_api = Blueprint('class_api', __name__)
+
 
 def parse_optional_int(value):
     try:
         return int(value)
     except (TypeError, ValueError):
         return None
+
 
 def extract_class_id(item) -> int:
     try:
@@ -23,92 +25,188 @@ def extract_class_id(item) -> int:
     except (TypeError, ValueError):
         return 0
 
-def serialize_class(item):
-    class_id = extract_class_id(item)
-    cls = Classes.query.filter(Classes.Id == class_id).first()
 
-    if cls is not None:
-        return {
-            "id": cls.Id,
-            "name": cls.Name,
-            "school_id": cls.SchoolId,
-            "school_name": cls.School.Name if cls.School else "",
-        }
+def serialize_class(item, school_names_by_id=None):
+    school_names_by_id = school_names_by_id or {}
 
     if isinstance(item, dict):
+        school_id = parse_optional_int(item.get("school_id") or item.get("SchoolId"))
         return {
-            "id": class_id,
+            "id": extract_class_id(item),
             "name": item.get("name") or item.get("Name") or "",
-            "school_id": parse_optional_int(item.get("school_id") or item.get("SchoolId")),
-            "school_name": item.get("school_name") or item.get("SchoolName") or "",
+            "school_id": school_id,
+            "school_name": item.get("school_name") or item.get("SchoolName") or school_names_by_id.get(school_id, ""),
         }
 
+    school_id = parse_optional_int(getattr(item, "school_id", None) or getattr(item, "SchoolId", None))
     return {
-        "id": class_id,
+        "id": extract_class_id(item),
         "name": getattr(item, "name", None) or getattr(item, "Name", "") or "",
-        "school_id": parse_optional_int(getattr(item, "school_id", None) or getattr(item, "SchoolId", None)),
-        "school_name": getattr(item, "school_name", None) or getattr(item, "SchoolName", "") or "",
+        "school_id": school_id,
+        "school_name": school_names_by_id.get(school_id, ""),
     }
+
+
+def serialize_classes(class_items):
+    school_ids = {
+        parse_optional_int(getattr(class_item, "SchoolId", None))
+        for class_item in class_items
+        if parse_optional_int(getattr(class_item, "SchoolId", None)) is not None
+    }
+    school_names_by_id = {}
+
+    if school_ids:
+        schools = Schools.query.filter(Schools.Id.in_(school_ids)).all()
+        school_names_by_id = {school.Id: school.Name for school in schools}
+
+    return [serialize_class(class_item, school_names_by_id) for class_item in class_items]
+
+
+def serialize_school(school):
+    if school is None:
+        return None
+
+    return {
+        "id": school.Id,
+        "name": school.Name,
+    }
+
 
 @class_api.route('/all', methods=['GET'])
 @jwt_required()
 @inject
 def get_classes_and_ids(class_repo: ClassRepository = Provide[Container.class_repo],
                         class_service: class_service = Provide[Container.class_service]):
-    classes_list = []
     school_id = parse_optional_int(request.args.get("school_id"))
-    is_filtered = request.args.get('filter') == "true"
-    if is_filtered:
-        classes_list = class_service.get_assigned_classes(current_user, class_repo)
-    else:
-        classes_list = class_service.get_assigned_classes(current_user, class_repo)
+    include_school = str(request.args.get("include_school", "")).strip().lower() in ("1", "true", "yes", "y", "on")
+    selected_school = None
 
     if school_id and school_id > 0:
-        allowed_class_ids = {
-            cls.Id for cls in Classes.query.filter(Classes.SchoolId == school_id).all()
-        }
+        selected_school = Schools.query.filter(Schools.Id == school_id).first()
+
+        if selected_school is None:
+            abort(404)
+
+        if not class_service.user_can_access_school(current_user, school_id, class_repo):
+            abort(403)
+
+    classes_list = class_service.get_assigned_classes(current_user, class_repo)
+
+    if school_id and school_id > 0:
         classes_list = [
             class_item
             for class_item in classes_list
-            if extract_class_id(class_item) in allowed_class_ids
+            if parse_optional_int(getattr(class_item, "SchoolId", None)) == school_id
         ]
 
-    return jsonify([serialize_class(class_item) for class_item in classes_list])
+    serialized_classes = serialize_classes(classes_list)
+    serialized_classes.sort(key=lambda class_item: class_item["name"])
 
-@class_api.route('/sections', methods=['GET'])
-def get_class_labs():
+    if include_school:
+        return jsonify({
+            "school": serialize_school(selected_school),
+            "classes": serialized_classes,
+        })
+
+    return jsonify(serialized_classes)
+
+
+@class_api.route('/id/<class_id>/access', methods=['GET'])
+@jwt_required()
+@inject
+def validate_class_access(class_id,
+                          class_repo: ClassRepository = Provide[Container.class_repo],
+                          class_service: class_service = Provide[Container.class_service]):
+    parsed_class_id = parse_optional_int(class_id)
     school_id = parse_optional_int(request.args.get("school_id"))
 
+    if parsed_class_id is None:
+        abort(404)
+
+    class_item = class_repo.get_class_by_id(parsed_class_id)
+
+    if class_item is None:
+        abort(404)
+
+    if school_id is not None and class_item.SchoolId != school_id:
+        abort(403)
+
+    if not class_service.user_can_access_class_item(current_user, class_item, class_repo):
+        abort(403)
+
+    return jsonify(serialize_class(class_item))
+
+
+@class_api.route('/sections', methods=['GET'])
+@jwt_required()
+@inject
+def get_class_labs(class_repo: ClassRepository = Provide[Container.class_repo],
+                   class_service: class_service = Provide[Container.class_service]):
+    school_id = parse_optional_int(request.args.get("school_id"))
+
+    if school_id and school_id > 0 and not class_service.user_can_access_school(current_user, school_id, class_repo):
+        abort(403)
+
+    accessible_classes = class_service.get_assigned_classes(current_user, class_repo)
+    accessible_class_ids = {
+        extract_class_id(class_item)
+        for class_item in accessible_classes
+    }
+
     classes_query = Classes.query.order_by(Classes.Name.asc())
+
     if school_id and school_id > 0:
         classes_query = classes_query.filter(Classes.SchoolId == school_id)
 
-    holder = []
-    for cls in classes_query.all():
-        class_lab = [
-            {"name": lab.Name, "id": lab.Id}
-            for lab in Labs.query.filter(Labs.ClassId == cls.Id).order_by(Labs.Name.asc()).all()
-        ]
-        class_lectures = [
-            {"name": lecture.Name, "id": lecture.Id}
-            for lecture in LectureSections.query.filter(LectureSections.ClassId == cls.Id)
-            .order_by(LectureSections.Name.asc())
-            .all()
-        ]
+    classes_list = [
+        cls
+        for cls in classes_query.all()
+        if cls.Id in accessible_class_ids
+    ]
+    class_ids = [cls.Id for cls in classes_list]
 
-        holder.append({
+    labs_by_class = {class_id: [] for class_id in class_ids}
+    lectures_by_class = {class_id: [] for class_id in class_ids}
+
+    if class_ids:
+        labs = Labs.query.filter(Labs.ClassId.in_(class_ids)).order_by(Labs.Name.asc()).all()
+        lectures = LectureSections.query.filter(LectureSections.ClassId.in_(class_ids)).order_by(LectureSections.Name.asc()).all()
+
+        for lab in labs:
+            labs_by_class.setdefault(lab.ClassId, []).append({"name": lab.Name, "id": lab.Id})
+
+        for lecture in lectures:
+            lectures_by_class.setdefault(lecture.ClassId, []).append({"name": lecture.Name, "id": lecture.Id})
+
+    holder = [
+        {
             "name": cls.Name,
             "id": cls.Id,
-            "labs": class_lab,
-            "lectures": class_lectures
-        })
+            "labs": labs_by_class.get(cls.Id, []),
+            "lectures": lectures_by_class.get(cls.Id, []),
+        }
+        for cls in classes_list
+    ]
 
     return jsonify(holder)
 
+
 @class_api.route('/id/<class_id>', methods=['GET'])
+@jwt_required()
 @inject
-def get_class_name_from_id(class_id, class_repository: ClassRepository = Provide[Container.class_repo]):
-    class_name = [{
-        "name": class_repository.get_class_name_withId(class_id)
-    }]
-    return jsonify(class_name)
+def get_class_name_from_id(class_id,
+                           class_repository: ClassRepository = Provide[Container.class_repo],
+                           class_service: class_service = Provide[Container.class_service]):
+    parsed_class_id = parse_optional_int(class_id)
+
+    if parsed_class_id is None:
+        abort(404)
+
+    class_item = class_repository.get_class_by_id(parsed_class_id)
+
+    if not class_service.user_can_access_class_item(current_user, class_item, class_repository):
+        abort(403)
+
+    return jsonify([{
+        "name": class_item.Name
+    }])

@@ -230,15 +230,11 @@ export default function StudentModuleDetails() {
         setErrorMessage("")
 
         axios
-            .get(`${import.meta.env.VITE_API_URL}/projects/get_modules_by_class_id_student?id=${classId}`, {
+            .get(`${import.meta.env.VITE_API_URL}/projects/get_module_overview_student?module_id=${moduleId}`, {
                 headers: authHeader()
             })
             .then((res) => {
-                const modules: ModuleObject[] = (res.data as any[]).map(
-                    (item: any) => typeof item === "string" ? JSON.parse(item) as ModuleObject : item as ModuleObject
-                )
-
-                const selectedModule = modules.find((item) => Number(item.Id) === moduleId) || null
+                const selectedModule = res.data?.module || null
 
                 if (!selectedModule) {
                     setModule(null)
@@ -249,27 +245,8 @@ export default function StudentModuleDetails() {
                 }
 
                 setModule(selectedModule)
-
-                if (!selectedModule.MainProjectId) {
-                    setPracticeProblems([])
-                    setIsLoading(false)
-                    return
-                }
-
-                axios
-                    .get(`${import.meta.env.VITE_API_URL}/projects/list_practice_problems_student?project_id=${selectedModule.MainProjectId}`, {
-                        headers: authHeader()
-                    })
-                    .then((practiceRes) => {
-                        setPracticeProblems(practiceRes.data?.problems || [])
-                        setIsLoading(false)
-                    })
-                    .catch((err) => {
-                        console.log(err)
-                        setPracticeProblems([])
-                        setErrorMessage("Loaded the module, but could not load practice problems.")
-                        setIsLoading(false)
-                    })
+                setPracticeProblems(res.data?.practiceProblems || [])
+                setIsLoading(false)
             })
             .catch((err) => {
                 console.log(err)

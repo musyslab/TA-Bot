@@ -1,4 +1,10 @@
-import { CSSProperties, KeyboardEvent, useEffect, useMemo, useState } from "react";
+import {
+    CSSProperties,
+    KeyboardEvent,
+    useEffect,
+    useMemo,
+    useState,
+} from "react";
 import axios from "axios";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -10,6 +16,7 @@ import {
     FaChevronLeft,
     FaChevronRight,
     FaListUl,
+    FaEdit,
     FaPlusCircle,
     FaSave,
     FaTimes,
@@ -120,7 +127,10 @@ const getInjectedTimes = (dateValue: Date | null): Date[] => {
     return [endOfDay];
 };
 
-const getDateRangeHighlightDates = (start: Date | null, end: Date | null): Date[] => {
+const getDateRangeHighlightDates = (
+    start: Date | null,
+    end: Date | null,
+): Date[] => {
     if (!start || !end || start.getTime() > end.getTime()) return [];
 
     return eachDayOfInterval({ start, end });
@@ -154,17 +164,23 @@ const getFullyBlockedDates = (ranges: DateRange[]): Date[] => {
     return dates;
 };
 
-const dateOverlapsRange = (date: Date, ranges: DateRange[]): boolean => (
-    ranges.some((range) => date > range.start && date < range.end)
-);
+const dateOverlapsRange = (date: Date, ranges: DateRange[]): boolean =>
+    ranges.some((range) => date > range.start && date < range.end);
 
-const dateRangeOverlapsRanges = (start: Date | null, end: Date | null, ranges: DateRange[]): boolean => {
+const dateRangeOverlapsRanges = (
+    start: Date | null,
+    end: Date | null,
+    ranges: DateRange[],
+): boolean => {
     if (!start || !end) return false;
 
     return ranges.some((range) => start < range.end && end > range.start);
 };
 
-const moveDateToFirstAvailableTime = (date: Date | null, ranges: DateRange[]): Date | null => {
+const moveDateToFirstAvailableTime = (
+    date: Date | null,
+    ranges: DateRange[],
+): Date | null => {
     if (!date || !dateOverlapsRange(date, ranges)) return date;
 
     const candidate = new Date(date);
@@ -200,12 +216,16 @@ function DateTimeField({
     const selectedDate = parseDateTimeLocal(value);
 
     return (
-        <div className={`form-field input-field datetime-field${hasError ? " input-error" : ""}`}>
+        <div
+            className={`form-field input-field datetime-field${hasError ? " input-error" : ""}`}
+        >
             <label>{label}</label>
 
             <DatePicker
                 selected={selectedDate}
-                onChange={(date: Date | null) => onChange(date ? formatDateTimeLocal(date) : "")}
+                onChange={(date: Date | null) =>
+                    onChange(date ? formatDateTimeLocal(date) : "")
+                }
                 showTimeSelect
                 timeFormat="h:mm aa"
                 timeIntervals={15}
@@ -232,7 +252,11 @@ function DateTimeField({
 }
 
 export default function AdminModuleList() {
-    const { school_id, class_id, id } = useParams<{ school_id: string; class_id: string; id: string }>();
+    const { school_id, class_id, id } = useParams<{
+        school_id: string;
+        class_id: string;
+        id: string;
+    }>();
     const navigate = useNavigate();
     const schoolId = school_id || "";
     const classId = class_id || id || "";
@@ -240,9 +264,19 @@ export default function AdminModuleList() {
     const [modules, setModules] = useState<ModuleObject[]>([]);
     const [calendarDate, setCalendarDate] = useState<Date>(new Date());
     const [showCreateModule, setShowCreateModule] = useState(false);
+    const [editingModuleId, setEditingModuleId] = useState<number | null>(null);
+    const [editModuleName, setEditModuleName] = useState("");
+    const [editModuleStart, setEditModuleStart] = useState("");
+    const [editModuleEnd, setEditModuleEnd] = useState("");
+    const [savingEditModule, setSavingEditModule] = useState(false);
+    const [editOverlapError, setEditOverlapError] = useState(false);
     const [newModuleName, setNewModuleName] = useState("");
-    const [newModuleStart, setNewModuleStart] = useState(formatDateTimeLocal(defaultModuleStart()));
-    const [newModuleEnd, setNewModuleEnd] = useState(formatDateTimeLocal(defaultModuleEnd()));
+    const [newModuleStart, setNewModuleStart] = useState(
+        formatDateTimeLocal(defaultModuleStart()),
+    );
+    const [newModuleEnd, setNewModuleEnd] = useState(
+        formatDateTimeLocal(defaultModuleEnd()),
+    );
     const [savingModule, setSavingModule] = useState(false);
     const [overlapError, setOverlapError] = useState(false);
     const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
@@ -252,11 +286,10 @@ export default function AdminModuleList() {
         return Number.isNaN(d.getTime()) ? null : d;
     };
 
-    const sameDay = (a: Date, b: Date): boolean => (
-        a.getFullYear() === b.getFullYear()
-        && a.getMonth() === b.getMonth()
-        && a.getDate() === b.getDate()
-    );
+    const sameDay = (a: Date, b: Date): boolean =>
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
 
     const startOfDay = (d: Date): Date => {
         const next = new Date(d);
@@ -270,12 +303,11 @@ export default function AdminModuleList() {
         return next;
     };
 
-    const formatMonthTitle = (date: Date): string => (
+    const formatMonthTitle = (date: Date): string =>
         new Intl.DateTimeFormat("en-US", {
             month: "long",
             year: "numeric",
-        }).format(date)
-    );
+        }).format(date);
 
     const formatTime = (value: string): string => {
         const d = parseDate(value);
@@ -312,7 +344,9 @@ export default function AdminModuleList() {
         }).format(d);
     };
 
-    const getModuleStatus = (module: ModuleObject): "active" | "upcoming" | "ended" => {
+    const getModuleStatus = (
+        module: ModuleObject,
+    ): "active" | "upcoming" | "ended" => {
         const startMs = Date.parse(module.Start);
         const endMs = Date.parse(module.End);
         if (Number.isNaN(startMs) || Number.isNaN(endMs)) return "upcoming";
@@ -346,13 +380,14 @@ export default function AdminModuleList() {
         return start <= endOfDay(date) && end >= startOfDay(date);
     };
 
-    const clamp = (value: number, min: number, max: number): number => (
-        Math.min(Math.max(value, min), max)
-    );
+    const clamp = (value: number, min: number, max: number): number =>
+        Math.min(Math.max(value, min), max);
 
     const getDayIndexWithinWeek = (date: Date, weekStart: Date): number => {
         const dayMs = 24 * 60 * 60 * 1000;
-        return Math.floor((startOfDay(date).getTime() - startOfDay(weekStart).getTime()) / dayMs);
+        return Math.floor(
+            (startOfDay(date).getTime() - startOfDay(weekStart).getTime()) / dayMs,
+        );
     };
 
     const getModuleDateLabel = (module: ModuleObject): string => {
@@ -377,12 +412,17 @@ export default function AdminModuleList() {
         }
 
         axios
-            .get(`${import.meta.env.VITE_API_URL}/projects/get_modules_by_class_id?id=${classId}`, {
-                headers: authHeader(),
-            })
+            .get(
+                `${import.meta.env.VITE_API_URL}/projects/get_modules_by_class_id?id=${classId}`,
+                {
+                    headers: authHeader(),
+                },
+            )
             .then((res) => {
-                const parsed: ModuleObject[] = (res.data as any[]).map(
-                    (item: any) => typeof item === "string" ? JSON.parse(item) as ModuleObject : item as ModuleObject
+                const parsed: ModuleObject[] = (res.data as any[]).map((item: any) =>
+                    typeof item === "string"
+                        ? (JSON.parse(item) as ModuleObject)
+                        : (item as ModuleObject),
                 );
 
                 setModules(parsed);
@@ -393,7 +433,13 @@ export default function AdminModuleList() {
                     .sort((a, b) => a.getTime() - b.getTime())[0];
 
                 if (firstModuleDate) {
-                    setCalendarDate(new Date(firstModuleDate.getFullYear(), firstModuleDate.getMonth(), 1));
+                    setCalendarDate(
+                        new Date(
+                            firstModuleDate.getFullYear(),
+                            firstModuleDate.getMonth(),
+                            1,
+                        ),
+                    );
                 }
             })
             .catch((err) => {
@@ -431,25 +477,58 @@ export default function AdminModuleList() {
             .filter((range): range is DateRange => !!range);
     }, [modules]);
 
-    const newModuleStartDate = useMemo(() => parseDateTimeLocal(newModuleStart), [newModuleStart]);
-    const newModuleEndDate = useMemo(() => parseDateTimeLocal(newModuleEnd), [newModuleEnd]);
+    const getModuleConflictRanges = (excludedModuleId?: number): DateRange[] => {
+        return modules
+            .filter((module) => module.Id !== excludedModuleId)
+            .map((module) => {
+                const start = parseDate(module.Start);
+                const end = parseDate(module.End);
 
-    const highlightedNewModuleDates = useMemo(() => (
-        getDateRangeHighlightDates(newModuleStartDate, newModuleEndDate)
-    ), [newModuleStartDate, newModuleEndDate]);
+                return start && end ? { start, end } : null;
+            })
+            .filter((range): range is DateRange => !!range);
+    };
 
-    const blockedNewModuleDates = useMemo(() => (
-        getFullyBlockedDates(moduleConflictRanges)
-    ), [moduleConflictRanges]);
-
-    const handleNewModuleTimeColors = (time: Date): string | null => (
-        dateOverlapsRange(time, moduleConflictRanges) ? "react-datepicker__time--highlighted-red" : null
+    const newModuleStartDate = useMemo(
+        () => parseDateTimeLocal(newModuleStart),
+        [newModuleStart],
     );
+    const newModuleEndDate = useMemo(
+        () => parseDateTimeLocal(newModuleEnd),
+        [newModuleEnd],
+    );
+    const editModuleStartDate = useMemo(
+        () => parseDateTimeLocal(editModuleStart),
+        [editModuleStart],
+    );
+    const editModuleEndDate = useMemo(
+        () => parseDateTimeLocal(editModuleEnd),
+        [editModuleEnd],
+    );
+
+    const highlightedNewModuleDates = useMemo(
+        () => getDateRangeHighlightDates(newModuleStartDate, newModuleEndDate),
+        [newModuleStartDate, newModuleEndDate],
+    );
+
+    const blockedNewModuleDates = useMemo(
+        () => getFullyBlockedDates(moduleConflictRanges),
+        [moduleConflictRanges],
+    );
+
+    const handleNewModuleTimeColors = (time: Date): string | null =>
+        dateOverlapsRange(time, moduleConflictRanges)
+            ? "react-datepicker__time--highlighted-red"
+            : null;
 
     const setNewModuleDate = (dateValue: string, isStart: boolean) => {
         let finalDate = parseDateTimeLocal(dateValue);
-        const previousDate = parseDateTimeLocal(isStart ? newModuleStart : newModuleEnd);
-        const isNewDay = !previousDate || (finalDate && finalDate.toDateString() !== previousDate.toDateString());
+        const previousDate = parseDateTimeLocal(
+            isStart ? newModuleStart : newModuleEnd,
+        );
+        const isNewDay =
+            !previousDate ||
+            (finalDate && finalDate.toDateString() !== previousDate.toDateString());
 
         if (finalDate && isNewDay) {
             finalDate = moveDateToFirstAvailableTime(finalDate, moduleConflictRanges);
@@ -464,12 +543,134 @@ export default function AdminModuleList() {
         const startToCheck = isStart ? finalDate : newModuleStartDate;
         const endToCheck = isStart ? newModuleEndDate : finalDate;
         setOverlapError(
-            !!finalDate
-            && (
-                dateOverlapsRange(finalDate, moduleConflictRanges)
-                || dateRangeOverlapsRanges(startToCheck, endToCheck, moduleConflictRanges)
-            )
+            !!finalDate &&
+            (dateOverlapsRange(finalDate, moduleConflictRanges) ||
+                dateRangeOverlapsRanges(
+                    startToCheck,
+                    endToCheck,
+                    moduleConflictRanges,
+                )),
         );
+    };
+
+    const beginModuleEdit = (module: ModuleObject) => {
+        setShowCreateModule(false);
+        setEditingModuleId(module.Id);
+        setEditModuleName(module.Name);
+        setEditModuleStart(formatDateTimeLocal(new Date(module.Start)));
+        setEditModuleEnd(formatDateTimeLocal(new Date(module.End)));
+        setEditOverlapError(false);
+    };
+
+    const cancelModuleEdit = () => {
+        if (savingEditModule) return;
+
+        setEditingModuleId(null);
+        setEditModuleName("");
+        setEditModuleStart("");
+        setEditModuleEnd("");
+        setEditOverlapError(false);
+    };
+
+    const setEditModuleDate = (dateValue: string, isStart: boolean) => {
+        const conflictRanges = getModuleConflictRanges(
+            editingModuleId ?? undefined,
+        );
+        let finalDate = parseDateTimeLocal(dateValue);
+        const previousDate = parseDateTimeLocal(
+            isStart ? editModuleStart : editModuleEnd,
+        );
+        const isNewDay =
+            !previousDate ||
+            (finalDate && finalDate.toDateString() !== previousDate.toDateString());
+
+        if (finalDate && isNewDay) {
+            finalDate = moveDateToFirstAvailableTime(finalDate, conflictRanges);
+        }
+
+        if (isStart) {
+            setEditModuleStart(finalDate ? formatDateTimeLocal(finalDate) : "");
+        } else {
+            setEditModuleEnd(finalDate ? formatDateTimeLocal(finalDate) : "");
+        }
+
+        const startToCheck = isStart ? finalDate : editModuleStartDate;
+        const endToCheck = isStart ? editModuleEndDate : finalDate;
+        setEditOverlapError(
+            !!finalDate &&
+            (dateOverlapsRange(finalDate, conflictRanges) ||
+                dateRangeOverlapsRanges(startToCheck, endToCheck, conflictRanges)),
+        );
+    };
+
+    const saveModuleEdit = async () => {
+        if (editingModuleId === null) return;
+
+        const trimmedName = editModuleName.trim();
+        if (!trimmedName || !editModuleStart || !editModuleEnd) {
+            window.alert("Please enter a module name, start date, and end date.");
+            return;
+        }
+
+        const start = new Date(editModuleStart);
+        const end = new Date(editModuleEnd);
+
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+            window.alert("Please enter valid dates.");
+            return;
+        }
+
+        if (start.getTime() >= end.getTime()) {
+            window.alert("The module end date must be after the start date.");
+            return;
+        }
+
+        const conflictRanges = getModuleConflictRanges(editingModuleId);
+        if (dateRangeOverlapsRanges(start, end, conflictRanges)) {
+            window.alert(
+                "The selected dates overlap with an existing module. Please adjust your dates.",
+            );
+            setEditOverlapError(true);
+            return;
+        }
+
+        try {
+            setSavingEditModule(true);
+            await axios.post(
+                `${import.meta.env.VITE_API_URL}/projects/update_module`,
+                {
+                    module_id: editingModuleId,
+                    name: trimmedName,
+                    start_date: editModuleStart,
+                    end_date: editModuleEnd,
+                },
+                { headers: authHeader() },
+            );
+
+            setModules((current) =>
+                current.map((module) =>
+                    module.Id === editingModuleId
+                        ? {
+                            ...module,
+                            Name: trimmedName,
+                            Start: editModuleStart,
+                            End: editModuleEnd,
+                        }
+                        : module,
+                ),
+            );
+            setEditingModuleId(null);
+            setEditModuleName("");
+            setEditModuleStart("");
+            setEditModuleEnd("");
+            setEditOverlapError(false);
+            loadModules();
+        } catch (err) {
+            console.log(err);
+            window.alert("Could not save the module.");
+        } finally {
+            setSavingEditModule(false);
+        }
     };
 
     const calendarDays = useMemo<CalendarDay[]>(() => {
@@ -520,7 +721,11 @@ export default function AdminModuleList() {
                     const startsBeforeWeek = start < weekStart;
                     const endsAfterWeek = end > weekEnd;
 
-                    const startColumn = clamp(getDayIndexWithinWeek(start, weekStart), 0, 6);
+                    const startColumn = clamp(
+                        getDayIndexWithinWeek(start, weekStart),
+                        0,
+                        6,
+                    );
                     const endColumn = clamp(getDayIndexWithinWeek(end, weekStart), 0, 6);
                     const span = Math.max(1, endColumn - startColumn + 1);
 
@@ -554,11 +759,15 @@ export default function AdminModuleList() {
     }, [calendarDays, sortedModules]);
 
     const goToPreviousMonth = () => {
-        setCalendarDate((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1));
+        setCalendarDate(
+            (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1),
+        );
     };
 
     const goToNextMonth = () => {
-        setCalendarDate((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1));
+        setCalendarDate(
+            (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1),
+        );
     };
 
     const goToToday = () => {
@@ -576,7 +785,10 @@ export default function AdminModuleList() {
         navigate(`${getAdminClassBasePath()}/module/${moduleId}/overview`);
     };
 
-    const handleModuleCardKeyDown = (event: KeyboardEvent<HTMLElement>, moduleId: number) => {
+    const handleModuleCardKeyDown = (
+        event: KeyboardEvent<HTMLElement>,
+        moduleId: number,
+    ) => {
         if (event.key !== "Enter" && event.key !== " ") return;
 
         event.preventDefault();
@@ -604,7 +816,9 @@ export default function AdminModuleList() {
         }
 
         if (dateRangeOverlapsRanges(start, end, moduleConflictRanges)) {
-            window.alert("The selected dates overlap with an existing module. Please adjust your dates.");
+            window.alert(
+                "The selected dates overlap with an existing module. Please adjust your dates.",
+            );
             setOverlapError(true);
             return;
         }
@@ -619,7 +833,7 @@ export default function AdminModuleList() {
                     start_date: newModuleStart,
                     end_date: newModuleEnd,
                 },
-                { headers: authHeader() }
+                { headers: authHeader() },
             );
 
             const moduleId = Number(res.data?.module_id ?? res.data?.id ?? res.data);
@@ -661,7 +875,9 @@ export default function AdminModuleList() {
                     { label: "School Selection", to: "/admin/schools" },
                     {
                         label: "Class Selection",
-                        to: schoolId ? `/admin/school/${schoolId}/classes` : "/admin/schools",
+                        to: schoolId
+                            ? `/admin/school/${schoolId}/classes`
+                            : "/admin/schools",
                     },
                     { label: "Module List" },
                 ]}
@@ -673,10 +889,15 @@ export default function AdminModuleList() {
                 <button
                     className="button button-create-assignment"
                     type="button"
-                    onClick={() => setShowCreateModule((current) => !current)}
+                    onClick={() => {
+                        cancelModuleEdit();
+                        setShowCreateModule((current) => !current);
+                    }}
                 >
                     <FaPlusCircle aria-hidden="true" />
-                    <span className="button-text">{showCreateModule ? "Close create module" : "Create new module"}</span>
+                    <span className="button-text">
+                        {showCreateModule ? "Close create module" : "Create new module"}
+                    </span>
                 </button>
 
                 <div className="module-view-toggle" aria-label="Module view selector">
@@ -705,9 +926,7 @@ export default function AdminModuleList() {
                         <div>
                             <span className="calendar-create-eyebrow">New Module</span>
                             <h2>Create module details</h2>
-                            <p>
-                                Choose the name, start date, and end date for this module.
-                            </p>
+                            <p>Choose the name, start date, and end date for this module.</p>
                         </div>
                     </div>
 
@@ -774,7 +993,8 @@ export default function AdminModuleList() {
             )}
 
             <p className="projects-subtitle">
-                Select a module from the list to see more details, or switch to calendar view.
+                Select a module from the list to see more details, or switch to calendar
+                view.
             </p>
 
             {viewMode === "list" && sortedModules.length > 0 && (
@@ -789,31 +1009,68 @@ export default function AdminModuleList() {
                         {sortedModules.map((module) => {
                             const status = getModuleStatus(module);
                             const active = status === "active";
+                            const isEditing = editingModuleId === module.Id;
+                            const editConflictRanges = getModuleConflictRanges(module.Id);
+                            const editChanged =
+                                isEditing &&
+                                (editModuleName.trim() !== module.Name.trim() ||
+                                    editModuleStart !==
+                                    formatDateTimeLocal(new Date(module.Start)) ||
+                                    editModuleEnd !== formatDateTimeLocal(new Date(module.End)));
 
                             return (
                                 <article
-                                    className={`module-list-card is-${status}`}
+                                    className={[
+                                        "module-list-card",
+                                        `is-${status}`,
+                                        isEditing ? "is-editing" : "",
+                                    ]
+                                        .join(" ")
+                                        .trim()}
                                     key={module.Id}
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => openModule(module.Id)}
-                                    onKeyDown={(event) => handleModuleCardKeyDown(event, module.Id)}
-                                    aria-label={`Open ${module.Name}`}
+                                    role={isEditing ? undefined : "button"}
+                                    tabIndex={isEditing ? undefined : 0}
+                                    onClick={() => {
+                                        if (!isEditing) {
+                                            openModule(module.Id);
+                                        }
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (!isEditing) {
+                                            handleModuleCardKeyDown(event, module.Id);
+                                        }
+                                    }}
+                                    aria-label={isEditing ? undefined : `Open ${module.Name}`}
                                 >
                                     <div className="module-list-card-main">
                                         <div className="module-list-card-title-row">
                                             <h3>{module.Name}</h3>
                                             <span className={`module-status-badge is-${status}`}>
-                                                {active ? "● " : ""}{getModuleStatusLabel(module)}
+                                                {active ? "● " : ""}
+                                                {getModuleStatusLabel(module)}
                                             </span>
                                         </div>
 
                                         <div className="module-list-card-dates">
-                                            {formatDate12h(module.Start)} - {formatDate12h(module.End)}
+                                            {formatDate12h(module.Start)} -{" "}
+                                            {formatDate12h(module.End)}
                                         </div>
                                     </div>
 
                                     <div className="module-list-card-actions">
+                                        <button
+                                            type="button"
+                                            className="project-action project-action-secondary"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                beginModuleEdit(module);
+                                            }}
+                                            disabled={savingEditModule}
+                                        >
+                                            <FaEdit aria-hidden="true" />
+                                            Edit Module
+                                        </button>
+
                                         <button
                                             type="button"
                                             className="project-action project-action-primary"
@@ -825,6 +1082,92 @@ export default function AdminModuleList() {
                                             Open Module
                                         </button>
                                     </div>
+
+                                    {isEditing ? (
+                                        <div
+                                            className="module-list-edit-panel"
+                                            onClick={(event) => event.stopPropagation()}
+                                        >
+                                            <div className="calendar-create-grid">
+                                                <div className="form-field input-field module-name-field">
+                                                    <label>Module Name</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editModuleName}
+                                                        onChange={(event) =>
+                                                            setEditModuleName(event.currentTarget.value)
+                                                        }
+                                                    />
+                                                </div>
+
+                                                <DateTimeField
+                                                    label="Start Date"
+                                                    value={editModuleStart}
+                                                    onChange={(value) => setEditModuleDate(value, true)}
+                                                    highlightedDates={getDateRangeHighlightDates(
+                                                        editModuleStartDate,
+                                                        editModuleEndDate,
+                                                    )}
+                                                    blockedDates={getFullyBlockedDates(
+                                                        editConflictRanges,
+                                                    )}
+                                                    timeClassName={(time) =>
+                                                        dateOverlapsRange(time, editConflictRanges)
+                                                            ? "react-datepicker__time--highlighted-red"
+                                                            : null
+                                                    }
+                                                    selectsStart
+                                                    startDate={editModuleStartDate}
+                                                    endDate={editModuleEndDate}
+                                                    hasError={editOverlapError}
+                                                />
+
+                                                <DateTimeField
+                                                    label="End Date"
+                                                    value={editModuleEnd}
+                                                    onChange={(value) => setEditModuleDate(value, false)}
+                                                    highlightedDates={getDateRangeHighlightDates(
+                                                        editModuleStartDate,
+                                                        editModuleEndDate,
+                                                    )}
+                                                    blockedDates={getFullyBlockedDates(
+                                                        editConflictRanges,
+                                                    )}
+                                                    timeClassName={(time) =>
+                                                        dateOverlapsRange(time, editConflictRanges)
+                                                            ? "react-datepicker__time--highlighted-red"
+                                                            : null
+                                                    }
+                                                    selectsEnd
+                                                    startDate={editModuleStartDate}
+                                                    endDate={editModuleEndDate}
+                                                    hasError={editOverlapError}
+                                                />
+                                            </div>
+
+                                            <div className="project-detail-edit-actions">
+                                                <button
+                                                    type="button"
+                                                    className="project-action project-action-primary"
+                                                    onClick={saveModuleEdit}
+                                                    disabled={savingEditModule || !editChanged}
+                                                >
+                                                    <FaSave aria-hidden="true" />
+                                                    {savingEditModule ? "Saving..." : "Save Module"}
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    className="project-action project-action-secondary"
+                                                    onClick={cancelModuleEdit}
+                                                    disabled={savingEditModule}
+                                                >
+                                                    <FaTimes aria-hidden="true" />
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : null}
                                 </article>
                             );
                         })}
@@ -835,18 +1178,32 @@ export default function AdminModuleList() {
             {viewMode === "calendar" && (
                 <section className="calendar-shell" aria-label="Module calendar">
                     <div className="calendar-toolbar">
-                        <button type="button" className="button calendar-nav-button" onClick={goToPreviousMonth}>
+                        <button
+                            type="button"
+                            className="button calendar-nav-button"
+                            onClick={goToPreviousMonth}
+                        >
                             <FaChevronLeft aria-hidden="true" />
                             <span>Previous</span>
                         </button>
 
-                        <div className="calendar-month-title">{formatMonthTitle(calendarDate)}</div>
+                        <div className="calendar-month-title">
+                            {formatMonthTitle(calendarDate)}
+                        </div>
 
                         <div className="calendar-toolbar-right">
-                            <button type="button" className="button calendar-today-button" onClick={goToToday}>
+                            <button
+                                type="button"
+                                className="button calendar-today-button"
+                                onClick={goToToday}
+                            >
                                 Today
                             </button>
-                            <button type="button" className="button calendar-nav-button" onClick={goToNextMonth}>
+                            <button
+                                type="button"
+                                className="button calendar-nav-button"
+                                onClick={goToNextMonth}
+                            >
                                 <span>Next</span>
                                 <FaChevronRight aria-hidden="true" />
                             </button>
@@ -865,7 +1222,7 @@ export default function AdminModuleList() {
                         {calendarWeeks.map((week) => {
                             const maxEventRow = week.segments.reduce(
                                 (max, segment) => Math.max(max, segment.row + 1),
-                                0
+                                0,
                             );
 
                             const weekStyle = {
@@ -883,14 +1240,20 @@ export default function AdminModuleList() {
                                                     "calendar-day",
                                                     day.isCurrentMonth ? "" : "is-outside-month",
                                                     today ? "is-today" : "",
-                                                ].join(" ").trim()}
+                                                ]
+                                                    .join(" ")
+                                                    .trim()}
                                                 key={day.key}
                                             >
-                                                <div className="calendar-day-number">{day.date.getDate()}</div>
+                                                <div className="calendar-day-number">
+                                                    {day.date.getDate()}
+                                                </div>
 
                                                 <div className="calendar-mobile-projects">
                                                     {sortedModules
-                                                        .filter((module) => moduleOccursOnDate(module, day.date))
+                                                        .filter((module) =>
+                                                            moduleOccursOnDate(module, day.date),
+                                                        )
                                                         .map((module) => {
                                                             const active = isModuleActiveNow(module);
 
@@ -902,7 +1265,9 @@ export default function AdminModuleList() {
                                                                     onClick={() => openModule(module.Id)}
                                                                     title={module.Name}
                                                                 >
-                                                                    <span className="calendar-project-name">{module.Name}</span>
+                                                                    <span className="calendar-project-name">
+                                                                        {module.Name}
+                                                                    </span>
                                                                     <span className="calendar-project-meta">
                                                                         {getModuleDateLabel(module)}
                                                                         {active ? " • Active" : ""}
@@ -916,7 +1281,10 @@ export default function AdminModuleList() {
                                     })}
 
                                     {week.segments.length > 0 && (
-                                        <div className="calendar-week-events" aria-label="Modules for this week">
+                                        <div
+                                            className="calendar-week-events"
+                                            aria-label="Modules for this week"
+                                        >
                                             {week.segments.map((segment) => {
                                                 const active = isModuleActiveNow(segment.module);
 
@@ -927,9 +1295,13 @@ export default function AdminModuleList() {
                                                             "calendar-project",
                                                             "calendar-project-span",
                                                             active ? "is-active" : "",
-                                                            segment.startsBeforeWeek ? "continues-from-left" : "",
+                                                            segment.startsBeforeWeek
+                                                                ? "continues-from-left"
+                                                                : "",
                                                             segment.endsAfterWeek ? "continues-to-right" : "",
-                                                        ].join(" ").trim()}
+                                                        ]
+                                                            .join(" ")
+                                                            .trim()}
                                                         key={`${week.key}-${segment.module.Id}-${segment.startColumn}-${segment.row}`}
                                                         onClick={() => openModule(segment.module.Id)}
                                                         title={segment.module.Name}
@@ -938,7 +1310,9 @@ export default function AdminModuleList() {
                                                             gridRow: `${segment.row + 1}`,
                                                         }}
                                                     >
-                                                        <span className="calendar-project-name">{segment.module.Name}</span>
+                                                        <span className="calendar-project-name">
+                                                            {segment.module.Name}
+                                                        </span>
                                                         <span className="calendar-project-meta">
                                                             {getModuleDateLabel(segment.module)}
                                                             {active ? " • Active" : ""}
@@ -956,9 +1330,7 @@ export default function AdminModuleList() {
             )}
 
             {sortedModules.length === 0 && (
-                <div className="empty-projects">
-                    No modules found for this class.
-                </div>
+                <div className="empty-projects">No modules found for this class.</div>
             )}
         </div>
     );

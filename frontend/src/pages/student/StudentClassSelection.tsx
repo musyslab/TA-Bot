@@ -17,6 +17,17 @@ interface SchoolObject {
     Name: string
 }
 
+interface ClassListResponse {
+    school?: {
+        id: number
+        name: string
+    }
+    classes?: Array<{
+        id: number
+        name: string
+    }>
+}
+
 interface ClassState {
     classes: Array<ClassObject>
     selectedSchoolId: number
@@ -29,8 +40,6 @@ interface StudentClassSelectionProps {
     schoolIdFromUrl: string
     navigate: NavigateFunction
 }
-
-const STUDENT_SELECTED_SCHOOL_STORAGE_KEY = "STUDENT_SELECTED_SCHOOL"
 
 class StudentClassSelectionInner extends Component<StudentClassSelectionProps, ClassState> {
     constructor(props: StudentClassSelectionProps) {
@@ -45,63 +54,23 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
     }
 
     componentDidMount() {
-        const schoolId = Number(this.props.schoolIdFromUrl)
-
-        if (!schoolId || Number.isNaN(schoolId)) {
-            this.setState({
-                classes: [],
-                selectedSchoolId: -1,
-                selectedSchoolName: "",
-                errorMessage: "Please select a school first.",
-                isLoading: false
-            })
-            return
-        }
-
-        const storedSchool = this.getStoredSelectedSchool()
-
-        if (storedSchool && storedSchool.Id === schoolId) {
-            this.loadClassesForSchool(storedSchool)
-            return
-        }
-
-        this.loadSchoolAndClasses(schoolId)
+        this.loadSchoolAndClassesFromUrl()
     }
 
     componentDidUpdate(prevProps: StudentClassSelectionProps) {
         if (prevProps.schoolIdFromUrl === this.props.schoolIdFromUrl) return
+        this.loadSchoolAndClassesFromUrl()
+    }
 
+    loadSchoolAndClassesFromUrl = () => {
         const schoolId = Number(this.props.schoolIdFromUrl)
 
         if (!schoolId || Number.isNaN(schoolId)) {
-            this.setState({
-                classes: [],
-                selectedSchoolId: -1,
-                selectedSchoolName: "",
-                errorMessage: "Please select a school first.",
-                isLoading: false
-            })
+            this.props.navigate("/student/schools", { replace: true })
             return
         }
 
         this.loadSchoolAndClasses(schoolId)
-    }
-
-    getStoredSelectedSchool = (): SchoolObject | null => {
-        const storedValue = localStorage.getItem(STUDENT_SELECTED_SCHOOL_STORAGE_KEY)
-        if (!storedValue) return null
-
-        try {
-            const parsed = JSON.parse(storedValue) as SchoolObject
-
-            if (!parsed || typeof parsed.Id !== "number" || !parsed.Name) {
-                return null
-            }
-
-            return parsed
-        } catch {
-            return null
-        }
     }
 
     loadSchoolAndClasses = (schoolId: number) => {
@@ -114,60 +83,19 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
         })
 
         axios
-            .get(import.meta.env.VITE_API_URL + `/schools/all`)
-            .then(res => {
-                const schools: SchoolObject[] = res.data.map(
-                    (obj: { id: number; name: string }) => ({
-                        Id: obj.id,
-                        Name: obj.name
-                    })
-                )
-
-                const matchingSchool = schools.find((schoolObj: SchoolObject) => schoolObj.Id === schoolId)
-
-                if (!matchingSchool) {
-                    this.setState({
-                        classes: [],
-                        selectedSchoolId: schoolId,
-                        selectedSchoolName: "",
-                        errorMessage: "The selected school could not be found.",
-                        isLoading: false
-                    })
-                    return
-                }
-
-                localStorage.setItem(STUDENT_SELECTED_SCHOOL_STORAGE_KEY, JSON.stringify(matchingSchool))
-                this.loadClassesForSchool(matchingSchool)
-            })
-            .catch(err => {
-                console.error(err)
-                this.setState({
-                    classes: [],
-                    selectedSchoolId: schoolId,
-                    selectedSchoolName: "",
-                    errorMessage: "Could not load the selected school.",
-                    isLoading: false
-                })
-            })
-    }
-
-    loadClassesForSchool = (schoolObj: SchoolObject) => {
-        this.setState({
-            classes: [],
-            selectedSchoolId: schoolObj.Id,
-            selectedSchoolName: schoolObj.Name,
-            errorMessage: "",
-            isLoading: true
-        })
-
-        axios
-            .get(import.meta.env.VITE_API_URL + `/class/all?filter=true&school_id=${schoolObj.Id}`, {
+            .get(import.meta.env.VITE_API_URL + `/class/all?school_id=${schoolId}&include_school=true`, {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
                 }
             })
             .then(res => {
-                const classes: ClassObject[] = res.data.map(
+                const payload: ClassListResponse = res.data || {}
+                const schoolObj: SchoolObject = {
+                    Id: payload.school?.id || schoolId,
+                    Name: payload.school?.name || ""
+                }
+                const classRows = Array.isArray(payload.classes) ? payload.classes : []
+                const classes: ClassObject[] = classRows.map(
                     (obj: { id: number; name: string }) => ({
                         Id: obj.id,
                         Name: obj.name
@@ -188,10 +116,16 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
             })
             .catch(err => {
                 console.error(err)
+
+                if (err.response && (err.response.status === 403 || err.response.status === 404)) {
+                    this.props.navigate("/student/schools", { replace: true })
+                    return
+                }
+
                 this.setState({
                     classes: [],
-                    selectedSchoolId: schoolObj.Id,
-                    selectedSchoolName: schoolObj.Name,
+                    selectedSchoolId: schoolId,
+                    selectedSchoolName: "",
                     errorMessage: "Could not load classes for the selected school.",
                     isLoading: false
                 })

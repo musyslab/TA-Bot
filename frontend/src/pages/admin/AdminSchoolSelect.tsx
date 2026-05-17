@@ -16,8 +16,6 @@ interface SchoolState {
     errorMessage: string
 }
 
-const ADMIN_SELECTED_SCHOOL_STORAGE_KEY = "ADMIN_SELECTED_SCHOOL"
-
 interface AdminSchoolSelectProps {
     navigate: NavigateFunction
 }
@@ -33,7 +31,11 @@ class AdminSchoolSelectInner extends Component<AdminSchoolSelectProps, SchoolSta
 
     componentDidMount() {
         axios
-            .get(import.meta.env.VITE_API_URL + `/schools/all`)
+            .get(import.meta.env.VITE_API_URL + `/schools/all`, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
+                }
+            })
             .then(res => {
                 const schools: SchoolObject[] = res.data.map(
                     (obj: { id: number; name: string }) => ({
@@ -55,7 +57,6 @@ class AdminSchoolSelectInner extends Component<AdminSchoolSelectProps, SchoolSta
     }
 
     handleSchoolSelect = (schoolObj: SchoolObject) => {
-        localStorage.setItem(ADMIN_SELECTED_SCHOOL_STORAGE_KEY, JSON.stringify(schoolObj))
         this.props.navigate(`/admin/school/${schoolObj.Id}/classes`)
     }
 

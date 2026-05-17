@@ -24,8 +24,6 @@ class MenuComponent extends Component<MenuComponentProps> {
     handleLogout = () => {
         localStorage.removeItem("AUTOTA_AUTH_TOKEN");
         localStorage.removeItem("AUTOTA_USER_ROLE");
-        localStorage.removeItem("ADMIN_SELECTED_SCHOOL");
-        localStorage.removeItem("STUDENT_SELECTED_SCHOOL");
         window.location.replace("/login");
     };
 
@@ -50,7 +48,7 @@ class MenuComponent extends Component<MenuComponentProps> {
             return null;
         }
 
-        return role === 1 ? "/admin/schools" : "/student/schools";
+        return role > 0 ? "/admin/schools" : "/student/schools";
     }
 
     handleDashboard = () => {
@@ -76,21 +74,22 @@ class MenuComponent extends Component<MenuComponentProps> {
             .then((res) => {
                 const role = parseInt(res.data, 10);
                 localStorage.setItem("AUTOTA_USER_ROLE", String(role));
-                const path = role === 1 ? "/admin/schools" : "/student/schools";
+                const path = role > 0 ? "/admin/schools" : "/student/schools";
                 window.location.replace(path);
             })
             .catch(() => {
                 localStorage.removeItem("AUTOTA_AUTH_TOKEN");
                 localStorage.removeItem("AUTOTA_USER_ROLE");
-                localStorage.removeItem("ADMIN_SELECTED_SCHOOL");
-                localStorage.removeItem("STUDENT_SELECTED_SCHOOL");
                 window.location.replace("/login");
             });
     };
 
     getClassIdFromUrl(): string | null {
-        const match = window.location.pathname.match(/^\/student\/(\d+)(?:\/|$)/);
-        return match ? match[1] : null;
+        const nestedMatch = window.location.pathname.match(/^\/student\/school\/\d+\/class\/(\d+)(?:\/|$)/);
+        if (nestedMatch) return nestedMatch[1];
+
+        const legacyMatch = window.location.pathname.match(/^\/student\/(\d+)(?:\/|$)/);
+        return legacyMatch ? legacyMatch[1] : null;
     }
 
     render() {

@@ -17,7 +17,10 @@ import "../../styling/HomePage.scss";
 function HomePage() {
   const isLoggedIn = Boolean(localStorage.getItem("AUTOTA_AUTH_TOKEN"));
   const storedRole = localStorage.getItem("AUTOTA_USER_ROLE");
-  const dashboardPath = storedRole === "1" ? "/admin/schools" : "/student/schools";
+  const numericRole = storedRole === null ? null : parseInt(storedRole, 10);
+  const dashboardPath = numericRole !== null && !Number.isNaN(numericRole) && numericRole > 0
+    ? "/admin/schools"
+    : "/student/schools";
 
   return (
     <div className="home-page">

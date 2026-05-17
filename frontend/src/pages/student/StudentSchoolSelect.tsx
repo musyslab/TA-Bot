@@ -21,8 +21,6 @@ interface StudentSchoolSelectProps {
     navigate: NavigateFunction
 }
 
-const STUDENT_SELECTED_SCHOOL_STORAGE_KEY = "STUDENT_SELECTED_SCHOOL"
-
 class StudentSchoolSelectInner extends Component<StudentSchoolSelectProps, SchoolState> {
     constructor(props: StudentSchoolSelectProps) {
         super(props)
@@ -34,7 +32,11 @@ class StudentSchoolSelectInner extends Component<StudentSchoolSelectProps, Schoo
 
     componentDidMount() {
         axios
-            .get(import.meta.env.VITE_API_URL + `/schools/all`)
+            .get(import.meta.env.VITE_API_URL + `/schools/all`, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+                }
+            })
             .then(res => {
                 const schools: SchoolObject[] = res.data.map(
                     (obj: { id: number; name: string }) => ({
@@ -56,7 +58,6 @@ class StudentSchoolSelectInner extends Component<StudentSchoolSelectProps, Schoo
     }
 
     handleSchoolSelect = (schoolObj: SchoolObject) => {
-        localStorage.setItem(STUDENT_SELECTED_SCHOOL_STORAGE_KEY, JSON.stringify(schoolObj))
         this.props.navigate(`/student/school/${schoolObj.Id}/classes`)
     }
 

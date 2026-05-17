@@ -1,44 +1,38 @@
 
-import ast
-from collections import defaultdict
-from io import BytesIO
-from src.repositories.database import db
+import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
-import os.path
-from typing import List
-import zipfile
-import stat
 import sys
-import requests
-from subprocess import Popen
-from src.repositories.class_repository import ClassRepository
-from src.repositories.user_repository import UserRepository
-from src.repositories.submission_repository import SubmissionRepository, PracticeBonusAwards
-from src.repositories.models import Submissions, Projects, PracticeProblems, Classes, Modules
-from flask import Blueprint, Response, send_file, current_app
-from flask import make_response
-from http import HTTPStatus
-from injector import inject
-from flask_jwt_extended import jwt_required
-from flask_jwt_extended import current_user
-from src.repositories.project_repository import ProjectRepository
-from src.services.dataService import all_submissions 
-from src.models.ProjectJson import ProjectJson
-from src.constants import ADMIN_ROLE
-from flask import jsonify
-from flask import request
-from dependency_injector.wiring import inject, Provide
-from container import Container
+from collections import defaultdict
 from datetime import datetime
-import itertools
-import importlib.util
-from werkzeug.utils import secure_filename
+from http import HTTPStatus
+from io import BytesIO
 from urllib.parse import quote
+
+from dependency_injector.wiring import Provide, inject
+from flask import Blueprint, Response, jsonify, make_response, request
+from flask_jwt_extended import current_user, jwt_required
 from sqlalchemy import func
+from werkzeug.utils import secure_filename
+
+from container import Container
+from src.constants import ADMIN_ROLE, TEACHER_ROLE
+from src.repositories.class_repository import ClassRepository
+from src.repositories.database import db
+from src.repositories.models import (
+    ClassAssignments,
+    Classes,
+    Modules,
+    PracticeProblems,
+    Projects,
+    Submissions,
+)
+from src.repositories.project_repository import ProjectRepository
+from src.repositories.submission_repository import PracticeBonusAwards, SubmissionRepository
+from src.repositories.user_repository import UserRepository
 
 projects_api = Blueprint('projects_api', __name__)
 
@@ -51,11 +45,257 @@ def parse_int(v, default: int = 0) -> int:
     except Exception:
         return default
 
+DEFAULT_CHECKPOINT_NAME_RE = re.compile(r"^(checkpoint|practice problem)\s+\d+$", re.IGNORECASE)
+
+def default_checkpoint_name(number: int) -> str:
+    return f"Checkpoint {int(number)}"
+
+def should_renumber_default_checkpoint_name(name: str) -> bool:
+    return bool(DEFAULT_CHECKPOINT_NAME_RE.match(str(name or "").strip()))
+
+def normalize_default_checkpoint_names(project_repo: ProjectRepository, rows):
+    normalized_rows = []
+
+    for index, row in enumerate(rows or []):
+        next_name = default_checkpoint_name(index + 1)
+        current_name = str(getattr(row, "Name", "") or "").strip()
+
+        if should_renumber_default_checkpoint_name(current_name) and current_name != next_name:
+            try:
+                project_repo.update_practice_problem_name(int(row.Id), next_name)
+                setattr(row, "Name", next_name)
+            except Exception as exc:
+                print(
+                    f"[practice_problem] could not normalize checkpoint name for {getattr(row, 'Id', '')}: {exc}",
+                    flush=True,
+                )
+
+        normalized_rows.append(row)
+
+    return normalized_rows
+
 def parse_bool(v) -> bool:
     if isinstance(v, bool):
         return v
     s = str(v or "").strip().lower()
     return s in ("1", "true", "yes", "y", "on")
+
+def is_admin_user() -> bool:
+    return int(getattr(current_user, "Role", -1) or -1) == ADMIN_ROLE
+
+
+def is_teacher_user() -> bool:
+    return int(getattr(current_user, "Role", -1) or -1) == TEACHER_ROLE
+
+
+def is_staff_user() -> bool:
+    return is_admin_user() or is_teacher_user()
+
+
+def access_denied_response(status=HTTPStatus.UNAUTHORIZED):
+    return make_response({'message': 'Access Denied'}, status)
+
+def source_file_names(path_value: str) -> list[str]:
+    if not path_value:
+        return []
+
+    try:
+        if os.path.isdir(path_value):
+            names = []
+            for filename in sorted(os.listdir(path_value)):
+                full_path = os.path.join(path_value, filename)
+                if os.path.isfile(full_path):
+                    _, ext = os.path.splitext(filename)
+                    if ext.lower() in ALLOWED_SOURCE_EXTS:
+                        names.append(filename)
+            return names
+
+        _, ext = os.path.splitext(path_value)
+        return [os.path.basename(path_value)] if ext.lower() in ALLOWED_SOURCE_EXTS else []
+    except Exception:
+        return []
+
+
+def project_setup_status(
+    project_repo: ProjectRepository,
+    project_id: int,
+    practice_problem_id: int | None = None,
+    testcase_count: int | None = None,
+):
+    if testcase_count is None:
+        try:
+            testcase_count = project_repo.count_testcases(
+                int(project_id),
+                practice_problem_id=(int(practice_problem_id) if practice_problem_id else None),
+            )
+        except Exception:
+            testcase_count = 0
+
+    try:
+        solution_path = project_repo.get_project_path(
+            int(project_id),
+            practice_problem_id=(int(practice_problem_id) if practice_problem_id else None),
+        )
+        has_solution_program = len(source_file_names(solution_path)) > 0
+    except Exception:
+        has_solution_program = False
+
+    return {
+        "HasSolutionProgram": bool(has_solution_program),
+        "HasTestcases": int(testcase_count or 0) > 0,
+        "TestcaseCount": int(testcase_count or 0),
+    }
+
+
+def practice_submission_count_map(project_id: int) -> dict[int, int]:
+    try:
+        if hasattr(Submissions, "PracticeProblemId"):
+            rows = (
+                db.session.query(
+                    Submissions.PracticeProblemId,
+                    func.count(func.distinct(Submissions.User)),
+                )
+                .filter(Submissions.Project == int(project_id), Submissions.IsPractice == True)
+                .group_by(Submissions.PracticeProblemId)
+                .all()
+            )
+            return {int(ppid): int(count or 0) for ppid, count in rows if ppid is not None}
+    except Exception:
+        pass
+    return {}
+
+
+def practice_unique_user_counts(project_ids: list[int]) -> dict[int, int]:
+    ids = [int(pid) for pid in (project_ids or []) if int(pid or 0) > 0]
+    if not ids:
+        return {}
+
+    try:
+        rows = (
+            db.session.query(
+                Submissions.Project,
+                func.count(func.distinct(Submissions.User)),
+            )
+            .filter(Submissions.Project.in_(ids), Submissions.IsPractice == True)
+            .group_by(Submissions.Project)
+            .all()
+        )
+        return {int(project_id): int(count or 0) for project_id, count in rows if project_id is not None}
+    except Exception:
+        return {}
+
+
+def main_completed_project_ids(project_ids: list[int]) -> set[int]:
+    ids = [int(pid) for pid in (project_ids or []) if int(pid or 0) > 0]
+    if not ids:
+        return set()
+
+    try:
+        rows = (
+            db.session.query(Submissions.Project)
+            .filter(
+                Submissions.Project.in_(ids),
+                Submissions.User == int(current_user.Id),
+                Submissions.IsPractice == False,
+                Submissions.IsPassing == True,
+            )
+            .distinct()
+            .all()
+        )
+        return {int(row[0]) for row in rows if row and row[0] is not None}
+    except Exception:
+        return set()
+
+def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
+    if class_item is None or class_item.Tid is None:
+        return False
+
+    teacher_ids = [
+        token
+        for token in "".join(
+            character if character.isdigit() else " "
+            for character in str(class_item.Tid)
+        ).split()
+    ]
+
+    return str(teacher_id) in teacher_ids
+
+
+def user_can_access_class_id(class_id: int) -> bool:
+    class_id = parse_int(class_id, 0)
+    if class_id <= 0:
+        return False
+
+    if is_admin_user():
+        return Classes.query.filter(Classes.Id == class_id).first() is not None
+
+    if is_teacher_user():
+        class_item = Classes.query.filter(Classes.Id == class_id).first()
+        return teacher_id_is_on_class(int(current_user.Id), class_item)
+
+    return False
+
+
+def user_can_access_project_id(project_id: int) -> bool:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return False
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    return user_can_access_class_id(int(getattr(project, "ClassId", 0) or 0))
+
+
+def user_can_access_module_id(module_id: int) -> bool:
+    module_id = parse_int(module_id, 0)
+    if module_id <= 0:
+        return False
+
+    module = Modules.query.filter(Modules.Id == module_id).first()
+    if module is None:
+        return False
+
+    return user_can_access_class_id(int(getattr(module, "ClassId", 0) or 0))
+
+
+def user_can_access_practice_problem_id(practice_problem_id: int) -> bool:
+    practice_problem_id = parse_int(practice_problem_id, 0)
+    if practice_problem_id <= 0:
+        return False
+
+    practice_problem = PracticeProblems.query.filter(PracticeProblems.Id == practice_problem_id).first()
+    if practice_problem is None:
+        return False
+
+    return user_can_access_project_id(int(getattr(practice_problem, "ProjectId", 0) or 0))
+
+
+def user_can_access_student_id(student_id: int) -> bool:
+    student_id = parse_int(student_id, 0)
+    if student_id <= 0:
+        return False
+
+    if is_admin_user():
+        return True
+
+    if not is_teacher_user():
+        return False
+
+    assignments = ClassAssignments.query.filter(ClassAssignments.UserId == student_id).all()
+    return any(user_can_access_class_id(int(assignment.ClassId)) for assignment in assignments)
+
+
+def filter_projects_for_current_user(projects):
+    if is_admin_user():
+        return projects
+
+    return [
+        project
+        for project in projects
+        if user_can_access_class_id(int(getattr(project, "ClassId", 0) or 0))
+    ]
 
 def opt_int(raw) -> int | None:
     s = str(raw or "").strip()
@@ -79,7 +319,7 @@ def json_list_field(raw: str) -> list[str]:
         return []
 
 
-def _project_module(project):
+def project_module(project):
     if not project:
         return None
     module = getattr(project, "Module", None)
@@ -90,12 +330,12 @@ def _project_module(project):
         return Modules.query.filter(Modules.Id == int(module_id)).first()
     return None
 
-def _project_start(project):
-    module = _project_module(project)
+def project_start(project):
+    module = project_module(project)
     return getattr(module, "Start", None) if module else None
 
-def _project_end(project):
-    module = _project_module(project)
+def project_end(project):
+    module = project_module(project)
     return getattr(module, "End", None) if module else None
 
 def count_practice_unique_users(project_id: int) -> int:
@@ -172,16 +412,111 @@ def seed_version_dir(dest_dir: str, *, seed_from_dir: str | None, seed_solution_
         if p and os.path.isfile(p):
             shutil.copy2(p, os.path.join(dest_dir, os.path.basename(p)))
 
+def module_payload(
+    module,
+    project_repo: ProjectRepository,
+    submission_repo: SubmissionRepository,
+    total_submission_counts: dict[int, int] | None = None,
+    practice_total_counts: dict[int, int] | None = None,
+    main_completed_project_ids: set[int] | None = None,
+):
+    project = project_repo.get_main_project_for_module(int(module.Id)) if module else None
+    total_submissions = 0
+    practice_total = 0
+    main_completed = False
+
+    if project:
+        project_id = int(project.Id)
+
+        try:
+            if total_submission_counts is None:
+                total_submission_counts = submission_repo.get_total_submission_for_all_projects()
+            total_submissions = int(total_submission_counts.get(project_id, 0) or 0)
+        except Exception:
+            total_submissions = 0
+
+        try:
+            if practice_total_counts is None:
+                practice_total = count_practice_unique_users(project_id)
+            else:
+                practice_total = int(practice_total_counts.get(project_id, 0) or 0)
+        except Exception:
+            practice_total = 0
+
+        try:
+            if main_completed_project_ids is not None:
+                main_completed = project_id in main_completed_project_ids
+            else:
+                main_completed = bool(
+                    Submissions.query.filter(
+                        Submissions.Project == project_id,
+                        Submissions.User == int(current_user.Id),
+                        Submissions.IsPractice == False,
+                        Submissions.IsPassing == True,
+                    ).first()
+                )
+        except Exception:
+            main_completed = False
+
+    return {
+        "Id": module.Id,
+        "ClassId": module.ClassId,
+        "Name": module.Name,
+        "Start": module.Start.strftime("%x %X") if module.Start else "",
+        "End": module.End.strftime("%x %X") if module.End else "",
+        "MainProjectId": getattr(project, "Id", None),
+        "TotalSubmissions": total_submissions,
+        "PracticeTotalSubmissions": int(practice_total),
+        "PracticeProblemsEnabled": True,
+        "MainCompleted": main_completed,
+    }
+
+
+def project_payload(
+    project,
+    submission_repo: SubmissionRepository,
+    project_repo: ProjectRepository,
+    total_submission_counts: dict[int, int] | None = None,
+    practice_total_counts: dict[int, int] | None = None,
+):
+    if not project:
+        return None
+
+    project_id = int(project.Id)
+
+    try:
+        if total_submission_counts is None:
+            total_submission_counts = submission_repo.get_total_submission_for_all_projects()
+        total_submissions = int(total_submission_counts.get(project_id, 0) or 0)
+    except Exception:
+        total_submissions = 0
+
+    try:
+        if practice_total_counts is None:
+            practice_total = count_practice_unique_users(project_id)
+        else:
+            practice_total = int(practice_total_counts.get(project_id, 0) or 0)
+    except Exception:
+        practice_total = 0
+
+    return {
+        "Id": project.Id,
+        "Name": project.Name,
+        "Start": project_start(project).strftime("%x %X") if project_start(project) else "",
+        "End": project_end(project).strftime("%x %X") if project_end(project) else "",
+        "TotalSubmissions": total_submissions,
+        "PracticeTotalSubmissions": int(practice_total),
+        "PracticeProblemsEnabled": True,
+        **project_setup_status(project_repo, project_id),
+    }
+
 @projects_api.route('/all_projects', methods=['GET'])
 @jwt_required()
 @inject
 def all_projects(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
-    data = project_repo.get_all_projects()
+    if not is_staff_user():
+        return access_denied_response()
+    data = filter_projects_for_current_user(project_repo.get_all_projects())
     new_projects = []
     thisdic = submission_repo.get_total_submission_for_all_projects()
     for proj in data:
@@ -191,8 +526,8 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
         new_projects.append(json.dumps({
             "Id": proj.Id,
             "Name": proj.Name,
-            "Start": _project_start(proj).strftime("%x %X") if _project_start(proj) else "",
-            "End": _project_end(proj).strftime("%x %X") if _project_end(proj) else "",
+            "Start": project_start(proj).strftime("%x %X") if project_start(proj) else "",
+            "End": project_end(proj).strftime("%x %X") if project_end(proj) else "",
             "TotalSubmissions": int(thisdic.get(proj.Id, 0) or 0),
             "PracticeTotalSubmissions": int(practice_total),
             "PracticeProblemsEnabled": True,
@@ -204,8 +539,8 @@ def all_projects(project_repo: ProjectRepository = Provide[Container.project_rep
 @jwt_required()
 @inject
 def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     pid = parse_int(data.get("project_id", 0), 0)
@@ -213,6 +548,8 @@ def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Cont
 
     if pid <= 0:
         return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     try:
         project_repo.set_practice_problems_enabled(pid, True)
@@ -224,47 +561,42 @@ def set_practice_problems_enabled(project_repo: ProjectRepository = Provide[Cont
 @jwt_required()
 @inject
 def list_practice_problems(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
     pid = parse_int(request.args.get("project_id", ""), 0)
     if pid <= 0:
         return jsonify({'problems': []})
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     rows = project_repo.list_practice_problems(int(pid))
     return jsonify({
         'problems': [
             {
                 'id': int(r.Id),
-                'number': int(getattr(r, "PracticeNumber", i + 1)),
-                'name': (getattr(r, "Name", "") or f"Practice Problem {int(getattr(r, 'PracticeNumber', i + 1))}"),
+                'number': i + 1,
+                'name': (getattr(r, "Name", "") or f"Practice Problem {i + 1}"),
                 'enabled': bool(getattr(r, "Enabled", True)),
             }
             for i, r in enumerate(rows)
         ]
     })
 
-@projects_api.route('/list_practice_problems_student', methods=['GET'])
-@jwt_required()
-@inject
-def list_practice_problems_student(project_repo: ProjectRepository = Provide[Container.project_repo]):
+def student_practice_problem_rows(project_repo: ProjectRepository, project_id: int):
     """
-    Student-safe practice problem list.
-    Returns only enabled practice problems. Practice problems are always enabled at the project level.
+    Student-safe practice problem rows with completion and reward flags.
+    Kept as a helper so the student module overview can return the module and
+    checkpoint data in one request instead of requiring a second page load call.
     """
-    project_id = parse_int(request.args.get("project_id", ""), 0)
-    if project_id <= 0:
-        return jsonify({'problems': []})
-
     rows = project_repo.list_practice_problems(project_id)
 
-    # solved: student has at least one passing submission for that practice problem
     solved_ids = set()
     try:
         if hasattr(Submissions, "IsPractice") and hasattr(Submissions, "PracticeProblemId"):
             solved_rows = (
                 db.session.query(Submissions.PracticeProblemId)
                 .filter(
-                    Submissions.Project == project_id,
-                    Submissions.User == current_user.Id,
+                    Submissions.Project == int(project_id),
+                    Submissions.User == int(current_user.Id),
                     Submissions.IsPractice == True,
                     Submissions.IsPassing == True,
                     Submissions.PracticeProblemId.isnot(None),
@@ -276,7 +608,6 @@ def list_practice_problems_student(project_repo: ProjectRepository = Provide[Con
     except Exception:
         solved_ids = set()
 
-    # rewarded: bonus charge already granted for that practice problem
     rewarded_ids = set()
     try:
         PracticeBonusAwards.__table__.create(db.engine, checkfirst=True)
@@ -300,21 +631,36 @@ def list_practice_problems_student(project_repo: ProjectRepository = Provide[Con
             continue
         out.append({
             'id': int(r.Id),
-            'number': int(getattr(r, "PracticeNumber", i + 1)),
-            'name': (getattr(r, "Name", "") or f"Practice Problem {int(getattr(r, 'PracticeNumber', i + 1))}"),
+            'number': i + 1,
+            'name': (getattr(r, "Name", "") or f"Practice Problem {i + 1}"),
             'enabled': True,
             'solved': (int(r.Id) in solved_ids),
             'rewarded': (int(r.Id) in rewarded_ids),
         })
 
-    return jsonify({'problems': out})
+    return out
+
+
+@projects_api.route('/list_practice_problems_student', methods=['GET'])
+@jwt_required()
+@inject
+def list_practice_problems_student(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    """
+    Student-safe practice problem list.
+    Returns only enabled practice problems. Practice problems are always enabled at the project level.
+    """
+    project_id = parse_int(request.args.get("project_id", ""), 0)
+    if project_id <= 0:
+        return jsonify({'problems': []})
+
+    return jsonify({'problems': student_practice_problem_rows(project_repo, project_id)})
 
 @projects_api.route('/create_practice_problem', methods=['POST'])
 @jwt_required()
 @inject
 def create_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
     data = request.get_json(silent=True) or {}
 
     pid = parse_int(data.get("project_id", 0), 0)
@@ -322,13 +668,15 @@ def create_practice_problem(project_repo: ProjectRepository = Provide[Container.
     name = str(data.get('name', '') or '').strip()
     if pid <= 0:
         return make_response({'message': 'Invalid project_id'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     if not name:
         try:
             next_number = len(project_repo.list_practice_problems(pid)) + 1
-            name = f"Checkpoint {next_number}"
+            name = default_checkpoint_name(next_number)
         except Exception:
-            name = "Checkpoint"
+            name = default_checkpoint_name(1)
 
     new_id = project_repo.create_practice_problem(pid, name=name)
     if not new_id:
@@ -339,8 +687,8 @@ def create_practice_problem(project_repo: ProjectRepository = Provide[Container.
 @jwt_required()
 @inject
 def reorder_practice_problems(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     pid = parse_int(data.get("project_id", 0), 0)
@@ -348,6 +696,8 @@ def reorder_practice_problems(project_repo: ProjectRepository = Provide[Containe
 
     if pid <= 0 or not isinstance(ordered_ids_raw, list):
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     ordered_ids = [parse_int(item, 0) for item in ordered_ids_raw]
     ordered_ids = [item for item in ordered_ids if item > 0]
@@ -359,8 +709,8 @@ def reorder_practice_problems(project_repo: ProjectRepository = Provide[Containe
             'problems': [
                 {
                     'id': int(r.Id),
-                    'number': int(getattr(r, "PracticeNumber", i + 1)),
-                    'name': (getattr(r, "Name", "") or f"Checkpoint {int(getattr(r, 'PracticeNumber', i + 1))}"),
+                    'number': i + 1,
+                    'name': (getattr(r, "Name", "") or default_checkpoint_name(i + 1)),
                     'enabled': bool(getattr(r, "Enabled", True)),
                 }
                 for i, r in enumerate(rows)
@@ -374,19 +724,38 @@ def reorder_practice_problems(project_repo: ProjectRepository = Provide[Containe
 @jwt_required()
 @inject
 def delete_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     practice_problem_id = parse_int(data.get("practice_problem_id", 0), 0)
 
     if practice_problem_id <= 0:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_practice_problem_id(practice_problem_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     try:
-        pp = project_repo.delete_practice_problem(practice_problem_id)
+        pp = project_repo.get_practice_problem(practice_problem_id)
         if not pp:
             return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+
+        project_id = int(getattr(pp, "ProjectId", 0) or 0)
+        existing_rows = project_repo.list_practice_problems(project_id) if project_id > 0 else []
+        if len(existing_rows) <= 1:
+            return make_response(
+                {'message': 'A module must have at least one checkpoint'},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        deleted = project_repo.delete_practice_problem(practice_problem_id)
+        if not deleted:
+            return make_response({'message': 'Practice problem not found'}, HTTPStatus.NOT_FOUND)
+
+        remaining_rows = project_repo.list_practice_problems(project_id)
+        remaining_ids = [int(row.Id) for row in remaining_rows]
+        if remaining_ids:
+            remaining_rows = project_repo.reorder_practice_problems(project_id, remaining_ids)
         return jsonify({'ok': True})
     except Exception as exc:
         print(exc, flush=True)
@@ -396,14 +765,16 @@ def delete_practice_problem(project_repo: ProjectRepository = Provide[Container.
 @jwt_required()
 @inject
 def list_solution_files(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     pid = parse_int(request.args.get("id", ""), 0)
     ppid = opt_int(request.args.get("practice_problem_id", ""))
 
     if pid <= 0:
         return make_response([], HTTPStatus.OK)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     p = project_repo.get_project_path(pid, practice_problem_id=ppid)
     if not p:
@@ -437,8 +808,8 @@ def check_time_conflict(project_repo: ProjectRepository = Provide[Container.proj
       }
     Returns: { "conflict": bool, "conflicts": [ {id,name,start,end}, ... ] }
     """
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     pid = int(str(data.get('project_id', 0)) or 0)
@@ -448,6 +819,10 @@ def check_time_conflict(project_repo: ProjectRepository = Provide[Container.proj
 
     if not class_id or not start_s or not end_s:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_class_id(parse_int(class_id, 0)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+    if pid > 0 and not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     try:
         start_dt = datetime.fromisoformat(start_s)
@@ -488,14 +863,13 @@ def check_time_conflict(project_repo: ProjectRepository = Provide[Container.proj
 @jwt_required()
 @inject
 def run_plagiarism(user_repo: UserRepository = Provide[Container.user_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
     
     input_json = request.get_json()
     projectid = input_json['project_id']
+    if not user_can_access_project_id(projectid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     # Fetch language from projects DB and pass it through
     proj = project_repo.get_selected_project(projectid)
@@ -622,10 +996,29 @@ def past_submissions():
         for pp in PracticeProblems.query.filter(PracticeProblems.Id.in_(list(pp_ids))).all():
             pp_map[int(getattr(pp, "Id", 0) or 0)] = pp
 
+    practice_number_by_project_and_id = {}
+    for pid in proj_ids:
+        try:
+            rows = (
+                PracticeProblems.query
+                .filter(
+                    PracticeProblems.ProjectId == int(pid),
+                    PracticeProblems.Enabled == True,
+                )
+                .order_by(PracticeProblems.PracticeNumber.asc(), PracticeProblems.Id.asc())
+                .all()
+            )
+            practice_number_by_project_and_id[int(pid)] = {
+                int(getattr(row, "Id", 0) or 0): index
+                for index, row in enumerate(rows or [], start=1)
+            }
+        except Exception:
+            practice_number_by_project_and_id[int(pid)] = {}
+
     practices_by_project = defaultdict(list)
     for (pid, ppid), s in latest_practice.items():
         pp = pp_map.get(ppid)
-        number = int(getattr(pp, "PracticeNumber", 0) or 0) if pp else 0
+        number = int(practice_number_by_project_and_id.get(pid, {}).get(ppid, 0) or 0)
         name = str(getattr(pp, "Name", "") or "") if pp else ""
         if not name:
             name = f"Practice Problem {number}" if number else "Practice Problem"
@@ -652,8 +1045,8 @@ def past_submissions():
             "projectName": str(getattr(p, "Name", "") or ""),
             "classId": str(cid),
             "className": class_name_by_id.get(cid, ""),
-            "start": iso(_project_start(p)),
-            "end": iso(_project_end(p)),
+            "start": iso(project_start(p)),
+            "end": iso(project_end(p)),
             "main": None if not main_s else {
                 "submissionId": int(getattr(main_s, "Id", 0) or 0),
                 "time": iso(getattr(main_s, "Time", "")),
@@ -676,8 +1069,8 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
         # normalize and remove unsafe chars; also collapse spaces
         return secure_filename(s or "").replace(" ", "_")
 
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     # Validate solution files (multi-file)
     solution_uploads = request.files.getlist('solutionFiles')
@@ -691,6 +1084,8 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     name = request.form.get('name', '')
     language = request.form.get('language', '')
     class_id = request.form.get('class_id', '')
+    if not user_can_access_class_id(parse_int(class_id, 0)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     practice_enabled = True
     module_id = request.form.get('module_id', '').strip()
 
@@ -752,7 +1147,7 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
             if not existing_practice:
                 project_repo.create_practice_problem(
                     new_project_id_int,
-                    name="Practice Problem 1"
+                    name=default_checkpoint_name(1)
                 )
         except Exception as e:
             print(
@@ -773,13 +1168,15 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     def safe_name(s: str) -> str:
         return secure_filename(s or "").replace(" ", "_")
 
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     pid_str = request.form.get("id", "").strip()
     if not pid_str.isdigit():
         return make_response({'message': 'Invalid or missing project id'}, HTTPStatus.BAD_REQUEST)
     pid = int(pid_str)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     name = request.form.get('name', '')
     language = request.form.get('language', '')
@@ -1125,12 +1522,14 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
 @inject
 def list_source_files(project_repo: ProjectRepository = Provide[Container.project_repo]):
     """Return list of previewable source files for a project (relative paths if a directory)."""
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     pid = parse_int(request.args.get("project_id", ""), 0)
     if pid <= 0:
         return make_response({'message': 'Missing project_id'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     ppid = opt_int(request.args.get("practice_problem_id", ""))
     root = project_repo.get_project_path(int(pid), practice_problem_id=ppid)
@@ -1158,13 +1557,15 @@ def list_source_files(project_repo: ProjectRepository = Provide[Container.projec
 @inject
 def get_source_file(project_repo: ProjectRepository = Provide[Container.project_repo]):
     """Return the text content of a source file for preview."""
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     pid = parse_int(request.args.get("project_id", ""), 0)
     relpath = request.args.get('relpath', '')
     if pid <= 0:
         return make_response({'message': 'Missing project_id'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
     ppid = int(ppid_raw) if ppid_raw.isdigit() else None
@@ -1208,16 +1609,15 @@ def get_source_file(project_repo: ProjectRepository = Provide[Container.project_
 @jwt_required()
 @inject
 def get_project(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     pid_raw = (request.args.get('id') or '').strip()
     if not pid_raw.isdigit():
         return make_response(json.dumps({}), HTTPStatus.OK)
     pid = int(pid_raw)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     ppid = opt_int(request.args.get("practice_problem_id", ""))
     project_info = project_repo.get_project(pid, practice_problem_id=ppid)
 
@@ -1227,31 +1627,45 @@ def get_project(project_repo: ProjectRepository = Provide[Container.project_repo
 @jwt_required()
 @inject
 def get_testcases(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     project_id = parse_int(request.args.get("id", ""), 0)
+    if not user_can_access_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     ppid = opt_int(request.args.get("practice_problem_id", ""))
     testcases = project_repo.get_testcases(int(project_id), practice_problem_id=ppid)
  
     return make_response(json.dumps(testcases), HTTPStatus.OK)
 
 
+@projects_api.route('/count_testcases', methods=['GET'])
+@jwt_required()
+@inject
+def count_testcases(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if not is_staff_user():
+        return access_denied_response()
+
+    project_id = parse_int(request.args.get("id", ""), 0)
+    if not user_can_access_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    ppid = opt_int(request.args.get("practice_problem_id", ""))
+    count = project_repo.count_testcases(int(project_id), practice_problem_id=ppid)
+    return jsonify({"count": int(count)})
+
+
 @projects_api.route('/json_add_testcases', methods=['POST'])
 @jwt_required()
 @inject   
 def json_add_testcases(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     file = request.files['file']
     project_id = request.form["project_id"]
+    if not user_can_access_project_id(parse_int(project_id, 0)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     ppid = opt_int(request.form.get("practice_problem_id", ""))
 
     # Require a solution root for whichever scope we're writing testcases into (main or practice)
@@ -1293,11 +1707,8 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
 @jwt_required()
 @inject   
 def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     # Grab all fields safely (defaults prevent NameError)
     id_val = request.form.get('id', '').strip()
@@ -1323,6 +1734,10 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
 
     hidden = parse_bool(request.form.get("hidden", ""))
     practice_problem_id = int(ppid_raw) if (ppid_raw or "").isdigit() else None
+    if not user_can_access_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+    if not user_can_access_class_id(class_id_int):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     # Do not allow testcase edits/creates unless solution files exist (main or practice)
     sol = project_repo.get_project_path(int(project_id), practice_problem_id=practice_problem_id)
@@ -1370,104 +1785,54 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
 @jwt_required()
 @inject
 def remove_testcase(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'Access Denied'
-        }
-        return make_response(message, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     if 'id' in request.form:
-        id_val=request.form['id']
+        id_val = request.form['id']
+    else:
+        return make_response({'message': 'Missing testcase id'}, HTTPStatus.BAD_REQUEST)
+    testcase = project_repo.get_testcase(parse_int(id_val, 0)) if hasattr(project_repo, 'get_testcase') else None
+    if testcase is not None and not user_can_access_project_id(int(getattr(testcase, 'ProjectId', 0) or 0)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     project_repo.remove_testcase(id_val)
     return make_response("Testcase Removed", HTTPStatus.OK)
-    
-
-def _module_payload(module, project_repo: ProjectRepository, submission_repo: SubmissionRepository):
-    project = project_repo.get_main_project_for_module(int(module.Id)) if module else None
-    total_submissions = 0
-    practice_total = 0
-    main_completed = False
-    if project:
-        try:
-            totals = submission_repo.get_total_submission_for_all_projects()
-            total_submissions = int(totals.get(project.Id, 0) or 0)
-        except Exception:
-            total_submissions = 0
-
-        try:
-            practice_total = count_practice_unique_users(int(project.Id))
-        except Exception:
-            practice_total = 0
-
-        try:
-            main_completed = bool(
-                Submissions.query.filter(
-                    Submissions.Project == int(project.Id),
-                    Submissions.User == int(current_user.Id),
-                    Submissions.IsPractice == False,
-                    Submissions.IsPassing == True,
-                ).first()
-            )
-        except Exception:
-            main_completed = False          
-
-    return {
-        "Id": module.Id,
-        "ClassId": module.ClassId,
-        "Name": module.Name,
-        "Start": module.Start.strftime("%x %X") if module.Start else "",
-        "End": module.End.strftime("%x %X") if module.End else "",
-        "MainProjectId": getattr(project, "Id", None),
-        "TotalSubmissions": total_submissions,
-        "PracticeTotalSubmissions": int(practice_total),
-        "PracticeProblemsEnabled": True,
-        "MainCompleted": main_completed,
-    }
-
-def _project_payload(project, submission_repo: SubmissionRepository, project_repo: ProjectRepository):
-    if not project:
-        return None
-
-    try:
-        totals = submission_repo.get_total_submission_for_all_projects()
-        total_submissions = int(totals.get(project.Id, 0) or 0)
-    except Exception:
-        total_submissions = 0
-
-    try:
-        practice_total = count_practice_unique_users(int(project.Id))
-    except Exception:
-        practice_total = 0
-
-    return {
-        "Id": project.Id,
-        "Name": project.Name,
-        "Start": _project_start(project).strftime("%x %X") if _project_start(project) else "",
-        "End": _project_end(project).strftime("%x %X") if _project_end(project) else "",
-        "TotalSubmissions": total_submissions,
-        "PracticeTotalSubmissions": int(practice_total),
-        "PracticeProblemsEnabled": True,
-    }
 
 @projects_api.route('/get_modules_by_class_id', methods=['GET'])
 @jwt_required()
 @inject
 def get_modules_by_class_id(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     class_id = request.args.get('id')
+    if not user_can_access_class_id(parse_int(class_id, 0)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     modules = project_repo.get_modules_by_class_id(class_id)
+    module_projects = [project_repo.get_main_project_for_module(int(module.Id)) for module in modules]
+    project_ids = [int(project.Id) for project in module_projects if project is not None]
+    total_submission_counts = submission_repo.get_total_submission_for_all_projects()
+    practice_total_counts = practice_unique_user_counts(project_ids)
+    main_completed_ids = main_completed_project_ids(project_ids)
 
-
-    return jsonify([_module_payload(module, project_repo, submission_repo) for module in modules])
+    return jsonify([
+        module_payload(
+            module,
+            project_repo,
+            submission_repo,
+            total_submission_counts=total_submission_counts,
+            practice_total_counts=practice_total_counts,
+            main_completed_project_ids=main_completed_ids,
+        )
+        for module in modules
+    ])
 
 @projects_api.route('/create_module', methods=['POST'])
 @jwt_required()
 @inject
 def create_module(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     name = str(data.get('name', '')).strip()
@@ -1477,6 +1842,8 @@ def create_module(project_repo: ProjectRepository = Provide[Container.project_re
 
     if not name or not class_id or not start_date or not end_date:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_class_id(parse_int(class_id, 0)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     try:
         module_id = project_repo.create_module(
@@ -1500,15 +1867,50 @@ def get_modules_by_class_id_student(project_repo: ProjectRepository = Provide[Co
         return jsonify([])
 
     modules = project_repo.get_modules_by_class_id(class_id)
+    module_projects = [project_repo.get_main_project_for_module(int(module.Id)) for module in modules]
+    project_ids = [int(project.Id) for project in module_projects if project is not None]
+    total_submission_counts = submission_repo.get_total_submission_for_all_projects()
+    practice_total_counts = practice_unique_user_counts(project_ids)
+    main_completed_ids = main_completed_project_ids(project_ids)
 
-    return jsonify([_module_payload(module, project_repo, submission_repo) for module in modules])
+    return jsonify([
+        module_payload(
+            module,
+            project_repo,
+            submission_repo,
+            total_submission_counts=total_submission_counts,
+            practice_total_counts=practice_total_counts,
+            main_completed_project_ids=main_completed_ids,
+        )
+        for module in modules
+    ])
+
+@projects_api.route('/get_module_overview_student', methods=['GET'])
+@jwt_required()
+@inject
+def get_module_overview_student(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    module_id = parse_int(request.args.get('module_id', 0), 0)
+    if module_id <= 0:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+
+    module = project_repo.get_module(module_id)
+    if not module:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+
+    project = project_repo.get_main_project_for_module(int(module.Id))
+    practice_rows = student_practice_problem_rows(project_repo, int(project.Id)) if project else []
+
+    return jsonify({
+        "module": module_payload(module, project_repo, submission_repo),
+        "practiceProblems": practice_rows,
+    })
 
 @projects_api.route('/update_module', methods=['POST'])
 @jwt_required()
 @inject
 def update_module(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     module_id = int(str(data.get('module_id', 0)) or 0)
@@ -1518,6 +1920,8 @@ def update_module(project_repo: ProjectRepository = Provide[Container.project_re
 
     if module_id <= 0 or not name or not start_date or not end_date:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_module_id(module_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     module = project_repo.update_module(
         module_id,
@@ -1535,11 +1939,15 @@ def update_module(project_repo: ProjectRepository = Provide[Container.project_re
 @jwt_required()
 @inject
 def get_module_overview(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     module_id = int(str(request.args.get('module_id', 0)) or 0)
     project_id = int(str(request.args.get('project_id', 0)) or 0)
+    if module_id > 0 and not user_can_access_module_id(module_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+    if project_id > 0 and not user_can_access_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     module = project_repo.get_module(module_id) if module_id > 0 else None
     if not module and project_id > 0:
@@ -1552,39 +1960,54 @@ def get_module_overview(project_repo: ProjectRepository = Provide[Container.proj
     if not project:
         return make_response({'message': 'Main project not found'}, HTTPStatus.NOT_FOUND)
 
+    project_id = int(project.Id)
+    total_submission_counts = submission_repo.get_total_submission_for_all_projects()
+    practice_total_counts = practice_unique_user_counts([project_id])
+    main_completed_ids = main_completed_project_ids([project_id])
+
     practice_rows = []
     try:
-        problems = project_repo.list_practice_problems(int(project.Id))
-        counts = {}
-        try:
-            if hasattr(Submissions, "PracticeProblemId"):
-                rows = (
-                    db.session.query(
-                        Submissions.PracticeProblemId,
-                        func.count(func.distinct(Submissions.User))
-                    )
-                    .filter(Submissions.Project == int(project.Id), Submissions.IsPractice == True)
-                    .group_by(Submissions.PracticeProblemId)
-                    .all()
-                )
-                counts = {str(int(ppid)): int(cnt or 0) for ppid, cnt in rows if ppid is not None}
-        except Exception:
-            counts = {}
+        problems = project_repo.list_practice_problems(project_id)
+        submission_counts = practice_submission_count_map(project_id)
+        testcase_counts = project_repo.count_testcases_by_practice_problem(project_id)
 
         for idx, pp in enumerate(problems):
+            pp_id = int(pp.Id)
+            setup_status = project_setup_status(
+                project_repo,
+                project_id,
+                practice_problem_id=pp_id,
+                testcase_count=int(testcase_counts.get(pp_id, 0) or 0),
+            )
             practice_rows.append({
-                "id": int(pp.Id),
-                "number": int(getattr(pp, "PracticeNumber", idx + 1) or idx + 1),
+                "id": pp_id,
+                "number": idx + 1,
                 "name": str(getattr(pp, "Name", "") or f"Practice Problem {idx + 1}"),
                 "enabled": bool(getattr(pp, "Enabled", True)),
-                "submissions": int(counts.get(str(pp.Id), 0)),
+                "submissions": int(submission_counts.get(pp_id, 0) or 0),
+                "hasSolutionProgram": bool(setup_status["HasSolutionProgram"]),
+                "hasTestcases": bool(setup_status["HasTestcases"]),
+                "testcaseCount": int(setup_status["TestcaseCount"]),
             })
     except Exception:
         practice_rows = []
 
     return jsonify({
-        "module": _module_payload(module, project_repo, submission_repo),
-        "project": _project_payload(project, submission_repo, project_repo),
+        "module": module_payload(
+            module,
+            project_repo,
+            submission_repo,
+            total_submission_counts=total_submission_counts,
+            practice_total_counts=practice_total_counts,
+            main_completed_project_ids=main_completed_ids,
+        ),
+        "project": project_payload(
+            project,
+            submission_repo,
+            project_repo,
+            total_submission_counts=total_submission_counts,
+            practice_total_counts=practice_total_counts,
+        ),
         "practiceProblems": practice_rows,
     })
 
@@ -1592,8 +2015,8 @@ def get_module_overview(project_repo: ProjectRepository = Provide[Container.proj
 @jwt_required()
 @inject
 def update_project_name(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     project_id = int(str(data.get('project_id', 0)) or 0)
@@ -1601,6 +2024,8 @@ def update_project_name(project_repo: ProjectRepository = Provide[Container.proj
 
     if project_id <= 0 or not name:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     project = project_repo.update_project_name(project_id, name)
     if not project:
@@ -1612,8 +2037,8 @@ def update_project_name(project_repo: ProjectRepository = Provide[Container.proj
 @jwt_required()
 @inject
 def update_practice_problem_name(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     practice_problem_id = int(str(data.get('practice_problem_id', 0)) or 0)
@@ -1621,6 +2046,8 @@ def update_practice_problem_name(project_repo: ProjectRepository = Provide[Conta
 
     if practice_problem_id <= 0 or not name:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_practice_problem_id(practice_problem_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     pp = project_repo.update_practice_problem_name(practice_problem_id, name)
     if not pp:
@@ -1633,7 +2060,12 @@ def update_practice_problem_name(project_repo: ProjectRepository = Provide[Conta
 @jwt_required()
 @inject
 def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    data = project_repo.get_projects_by_class_id(request.args.get('id'))
+    if not is_staff_user():
+        return access_denied_response()
+    class_id = request.args.get('id')
+    if not user_can_access_class_id(parse_int(class_id, 0)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+    data = project_repo.get_projects_by_class_id(class_id)
     
     new_projects = []
     thisdic = submission_repo.get_total_submission_for_all_projects()
@@ -1644,8 +2076,8 @@ def get_projects_by_class_id(project_repo: ProjectRepository = Provide[Container
         new_projects.append(json.dumps({
             "Id": proj.Id,
             "Name": proj.Name,
-            "Start": _project_start(proj).strftime("%x %X") if _project_start(proj) else "",
-            "End": _project_end(proj).strftime("%x %X") if _project_end(proj) else "",
+            "Start": project_start(proj).strftime("%x %X") if project_start(proj) else "",
+            "End": project_end(proj).strftime("%x %X") if project_end(proj) else "",
             "TotalSubmissions": int(thisdic.get(proj.Id, 0) or 0),
             "PracticeTotalSubmissions": int(practice_total),
             "PracticeProblemsEnabled": True,
@@ -1661,13 +2093,15 @@ def practice_submission_counts():
     Response:
       { "total": <int>, "by_problem": { "<ppid>": <count>, ... } }
     """
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     pid = parse_int(request.args.get("project_id", ""), 0)
     if pid <= 0:
         return jsonify({'total': 0, 'by_problem': {}})
     pid = int(pid)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     if not hasattr(Submissions, "IsPractice"):
         return jsonify({'total': 0, 'by_problem': {}})
@@ -1705,6 +2139,8 @@ def practice_submission_counts():
 def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container.project_repo]):
     
     project_id = request.args.get('project_id')
+    if not user_can_access_project_id(parse_int(project_id, 0)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     ppid_raw = (request.args.get('practice_problem_id', '') or '').strip()
     ppid = int(ppid_raw) if ppid_raw.isdigit() else None
     assignmentdesc_contents = project_repo.get_project_desc_file(int(project_id), practice_problem_id=ppid)
@@ -1748,8 +2184,8 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
     def safe_name(s: str) -> str:
         return secure_filename(s or "").replace(" ", "_")
 
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     pid_str = (request.form.get("project_id", "") or "").strip()
     ppid_str = (request.form.get("practice_problem_id", "") or "").strip()
@@ -1757,6 +2193,10 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
         return make_response({'message': 'Invalid project_id or practice_problem_id'}, HTTPStatus.BAD_REQUEST)
     pid = int(pid_str)
     ppid = int(ppid_str)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+    if not user_can_access_practice_problem_id(ppid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     proj = project_repo.get_selected_project(pid)
     if not proj:
@@ -1830,8 +2270,8 @@ def edit_practice_project_files(project_repo: ProjectRepository = Provide[Contai
 @jwt_required()
 @inject
 def rename_practice_problem(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        return make_response({'message': 'Access Denied'}, HTTPStatus.UNAUTHORIZED)
+    if not is_staff_user():
+        return access_denied_response()
 
     data = request.get_json(silent=True) or {}
     try:
@@ -1846,6 +2286,10 @@ def rename_practice_problem(project_repo: ProjectRepository = Provide[Container.
 
     if pid <= 0 or ppid <= 0 or not name:
         return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_project_id(pid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+    if not user_can_access_practice_problem_id(ppid):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     pp = project_repo.get_practice_problem(ppid)
     if not pp or int(getattr(pp, "ProjectId", 0) or 0) != int(pid):
@@ -1864,14 +2308,13 @@ def rename_practice_problem(project_repo: ProjectRepository = Provide[Container.
 @jwt_required()
 @inject
 def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo], class_repo: ClassRepository = Provide[Container.class_repo], user_repo: UserRepository = Provide[Container.user_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'You do not have permission to do this!'
-        }
-        return make_response(message, HTTPStatus.FORBIDDEN)
+    if not is_staff_user():
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     input_json = request.get_json()
     project_id = input_json['ProjectId']
+    if not user_can_access_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     user_id = input_json['userID']
     practice_raw = (input_json or {}).get('practice', False)
     practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
@@ -1933,13 +2376,12 @@ def ProjectGrading(submission_repo: SubmissionRepository = Provide[Container.sub
 @jwt_required()
 @inject
 def unlockStudentAccount(user_repo: UserRepository = Provide[Container.user_repo]):
-    if current_user.Role != ADMIN_ROLE:
-        message = {
-            'message': 'You do not have permission to do this!'
-        }
-        return make_response(message, HTTPStatus.FORBIDDEN)
+    if not is_staff_user():
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     input_json = request.get_json()
     user_Id = input_json['UserId']
+    if not user_can_access_student_id(user_Id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
     user_repo.unlock_student_account(user_Id)
     message = {
         'message': 'Success'

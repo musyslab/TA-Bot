@@ -1,3 +1,4 @@
+
 from datetime import timedelta
 import os
 import threading
@@ -13,7 +14,7 @@ from flask_jwt_extended import jwt_required
 from flask_jwt_extended import current_user
 from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.project_repository import ProjectRepository
-from src.constants import EMPTY, ADMIN_ROLE
+from src.constants import ADMIN_ROLE, TEACHER_ROLE
 import json
 import zipfile
 from io import BytesIO
@@ -26,7 +27,7 @@ from urllib.parse import unquote
 import csv
 from io import StringIO
 from src.ai_suggestions import ERROR_DEFS
-from src.repositories.models import Testcases, Submissions
+from src.repositories.models import Testcases, Submissions, Projects, Classes
 
 # Default grading error definitions (must match AdminGrading.tsx BASE_ERROR_DEFS).
 # We store them here so exports can resolve default point values when ErrorPointsJson
@@ -72,6 +73,66 @@ def parse_bool(v) -> bool:
     s = str(v or "").strip().lower()
     return s in ("1", "true", "yes", "y", "on")
 
+def is_admin_user() -> bool:
+    return int(getattr(current_user, "Role", -1) or -1) == ADMIN_ROLE
+
+
+def is_teacher_user() -> bool:
+    return int(getattr(current_user, "Role", -1) or -1) == TEACHER_ROLE
+
+
+def is_staff_user() -> bool:
+    return is_admin_user() or is_teacher_user()
+
+
+def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
+    if class_item is None or class_item.Tid is None:
+        return False
+
+    teacher_ids = [
+        token
+        for token in "".join(
+            character if character.isdigit() else " "
+            for character in str(class_item.Tid)
+        ).split()
+    ]
+
+    return str(teacher_id) in teacher_ids
+
+
+def user_can_access_class_id(class_id: int) -> bool:
+    class_id = parse_int(class_id, 0)
+    if class_id <= 0:
+        return False
+
+    if is_admin_user():
+        return Classes.query.filter(Classes.Id == class_id).first() is not None
+
+    if is_teacher_user():
+        class_item = Classes.query.filter(Classes.Id == class_id).first()
+        return teacher_id_is_on_class(int(current_user.Id), class_item)
+
+    return False
+
+
+def user_can_access_project_id(project_id: int) -> bool:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return False
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    return user_can_access_class_id(int(getattr(project, "ClassId", 0) or 0))
+
+
+def user_can_access_submission(submission) -> bool:
+    if submission is None:
+        return False
+
+    return user_can_access_project_id(int(getattr(submission, "Project", 0) or 0))
+
 def opt_int(raw) -> int | None:
     s = str(raw or "").strip()
     return int(s) if s.isdigit() else None
@@ -116,7 +177,7 @@ def resolve_submission_for_current_user(
     sub = None
     practice_problem_id = None
 
-    if submission_id != EMPTY and submission_id != -1:
+    if submission_id != -1:
         sub = submission_repo.get_submission_by_submission_id(int(submission_id))
         if sub is None:
             project_id = int(submission_id)
@@ -287,10 +348,12 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
     if submission is None:
         return make_response(json.dumps({"results": []}), HTTPStatus.OK)
 
-    if current_user.Role != ADMIN_ROLE:
+    if not is_staff_user():
         real_sub_id = int(getattr(submission, "Id", -1) or -1)
         if real_sub_id <= 0 or not submission_repo.submission_view_verification(int(current_user.Id), real_sub_id):
             return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+    elif not user_can_access_submission(submission):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
    
     output = convert_tap_to_json(submission.OutputFilepath, current_user.Role, 0, False)
     output = apply_hidden_flags_to_results(output, int(projectid), practice_problem_id)
@@ -309,9 +372,9 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
     want_practice, ppid = practice_params_from_args()
 
     code_output = ""
-    if submissionid != EMPTY:
+    if submissionid != -1:
         sub = submission_repo.get_submission_by_submission_id(submissionid)
-        if sub is not None and (current_user.Role == ADMIN_ROLE or submission_repo.submission_view_verification(current_user.Id, submissionid)):
+        if sub is not None and ((is_staff_user() and user_can_access_submission(sub)) or submission_repo.submission_view_verification(current_user.Id, submissionid)):
             code_output = submission_repo.get_code_path_by_submission_id(submissionid)
         else:
             resolved, _, _ = resolve_submission_for_current_user(
@@ -396,10 +459,12 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
 @jwt_required()
 @inject
 def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo],project_repo: ProjectRepository = Provide[Container.project_repo] ):
-    if(current_user.Role != ADMIN_ROLE):
+    if not is_staff_user():
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
     input_json = request.get_json()
     projectid = input_json['project_id']
+    if not user_can_access_project_id(int(projectid)):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
     practice_raw = (input_json or {}).get('practice', False)
     practice = str(practice_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
     
@@ -502,7 +567,7 @@ def Submit_OH_Question(submission_repo: SubmissionRepository = Provide[Container
 @jwt_required()
 @inject
 def Get_OH_Questions(submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if current_user.Role != ADMIN_ROLE:
+    if not is_staff_user():
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
 
     def fmt_dt(dt_val):
@@ -529,6 +594,8 @@ def Get_OH_Questions(submission_repo: SubmissionRepository = Provide[Container.s
         user = user_repo.get_user(question.StudentId)
         Student_name = user.Firstname + " " + user.Lastname
         class_id = int(getattr(proj, "ClassId", 0) or 0)
+        if not user_can_access_class_id(class_id):
+            continue
         subs = submission_repo.get_most_recent_submission_by_project(question.projectId, [question.StudentId])
         try:
             question_list.append([
@@ -737,11 +804,13 @@ def get_oh_visits_by_projectId(submission_repo: SubmissionRepository = Provide[C
 @jwt_required()
 @inject
 def submit_grades(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if(current_user.Role != ADMIN_ROLE):
+    if not is_staff_user():
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
     #spacing issue
     data = request.get_json()
     project_id = data['projectID']
+    if not user_can_access_project_id(int(project_id)):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
     userId = data['userId']
     grade = data['grade']
     project_repo.set_student_grade(int(project_id), int(userId), int(grade))
@@ -895,10 +964,12 @@ def get_grading(submission_id, submission_repo: SubmissionRepository = Provide[C
 @jwt_required()
 @inject
 def export_project_grades(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if(current_user.Role != ADMIN_ROLE):
+    if not is_staff_user():
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
 
     project_id = int(request.args.get("project_id"))
+    if not user_can_access_project_id(project_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
 
     grade_list = submission_repo.get_project_grade_info(project_id)
     project_name = project_repo.get_selected_project(project_id).Name
