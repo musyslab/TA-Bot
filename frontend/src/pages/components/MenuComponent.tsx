@@ -1,4 +1,5 @@
 import { Component } from "react";
+import { Link } from "react-router-dom";
 import axios from "axios";
 import {
     FaUpload,
@@ -49,10 +50,6 @@ class MenuComponent extends Component<MenuComponentProps> {
 
     handleLogin = () => {
         window.location.replace("/login");
-    };
-
-    handleHome = () => {
-        window.location.replace("/");
     };
 
     getStoredDashboardPath(): string | null {
@@ -120,9 +117,9 @@ class MenuComponent extends Component<MenuComponentProps> {
         return (
             <nav className="menu menu--top menu--inverted menu--borderless menu--huge">
                 <div className="menu__container">
-                    <button type="button" className="menu__item menu__item--header" onClick={this.handleHome}>
+                    <Link className="menu__item menu__item--header" to="/">
                         <img src={maatLogo} alt="MAAT" className="menu__logo" />
-                    </button>
+                    </Link>
 
                     {this.props.showAdminUpload && (
                         <>
