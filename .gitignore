@@ -1,10 +1,10 @@
 __pycache__/
 
-frontend/.env
-
-backend/.env.backend
+tabot.env
 
 tabot-files/project-files
+
+frontend/.env
 
 frontend/package-lock.json
 
