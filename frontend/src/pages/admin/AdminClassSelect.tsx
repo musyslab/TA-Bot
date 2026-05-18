@@ -1,11 +1,10 @@
-import { Component, KeyboardEvent } from "react"
-import axios from "axios"
-import { Link, NavigateFunction, useNavigate, useParams } from "react-router-dom"
-import { Helmet } from "react-helmet"
-
-import MenuComponent from "../components/MenuComponent"
+import { Component, KeyboardEvent } from 'react'
+import axios from 'axios'
+import { Link, NavigateFunction, useNavigate, useParams } from 'react-router-dom'
+import { Helmet } from 'react-helmet'
+import MenuComponent from '../components/MenuComponent'
+import '../../styling/Selection.scss'
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
-import "../../styling/Selection.scss"
 
 interface ClassObject {
     Id: number
@@ -36,13 +35,13 @@ interface ClassState {
     isLoading: boolean
 }
 
-interface StudentClassSelectionProps {
+interface AdminClassSelectProps {
     schoolIdFromUrl: string
     navigate: NavigateFunction
 }
 
-class StudentClassSelectionInner extends Component<StudentClassSelectionProps, ClassState> {
-    constructor(props: StudentClassSelectionProps) {
+class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState> {
+    constructor(props: AdminClassSelectProps) {
         super(props)
         this.state = {
             classes: [],
@@ -57,7 +56,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
         this.loadSchoolAndClassesFromUrl()
     }
 
-    componentDidUpdate(prevProps: StudentClassSelectionProps) {
+    componentDidUpdate(prevProps: AdminClassSelectProps) {
         if (prevProps.schoolIdFromUrl === this.props.schoolIdFromUrl) return
         this.loadSchoolAndClassesFromUrl()
     }
@@ -66,7 +65,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
         const schoolId = Number(this.props.schoolIdFromUrl)
 
         if (!schoolId || Number.isNaN(schoolId)) {
-            this.props.navigate("/student/schools", { replace: true })
+            this.props.navigate("/admin/schools", { replace: true })
             return
         }
 
@@ -85,7 +84,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
         axios
             .get(import.meta.env.VITE_API_URL + `/class/all?school_id=${schoolId}&include_school=true`, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`
+                    Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`
                 }
             })
             .then(res => {
@@ -118,7 +117,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
                 console.error(err)
 
                 if (err.response && (err.response.status === 403 || err.response.status === 404)) {
-                    this.props.navigate("/student/schools", { replace: true })
+                    this.props.navigate("/admin/schools", { replace: true })
                     return
                 }
 
@@ -140,7 +139,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
     }
 
     getClassModulesUrl = (classId: number): string => {
-        return `/student/school/${this.state.selectedSchoolId}/class/${classId}/modules`
+        return `/admin/school/${this.state.selectedSchoolId}/class/${classId}/modules`
     }
 
     render() {
@@ -150,28 +149,28 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
         return (
             <div className="projects-page admin-landing-root">
                 <Helmet>
-                    <title>MAAT</title>
+                    <title>[Admin] MAAT</title>
                 </Helmet>
 
                 <MenuComponent
-                    showUpload={true}
-                    showAdminUpload={false}
+                    showUpload={false}
+                    showAdminUpload={true}
                     showHelp={false}
                     showCreate={false}
                     showLast={false}
                     showReviewButton={false}
-                />
+                ></MenuComponent>
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: "School Selection", to: "/student/schools" },
+                        { label: "School Selection", to: "/admin/schools" },
                         { label: "Class Selection" }
                     ]}
                     trailingSeparator={true}
                 />
 
                 <div className="pageTitle">
-                    {hasSelectedSchool && selectedSchoolName ? `Student · ${selectedSchoolName}` : "Class Selection"}
+                    {hasSelectedSchool && selectedSchoolName ? `Admin · ${selectedSchoolName}` : "Admin Class Selection"}
                 </div>
 
                 <p className="projects-subtitle">
@@ -189,7 +188,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
 
                     {!hasSelectedSchool ? (
                         <Link
-                            to="/student/schools"
+                            to="/admin/schools"
                             className="project-action project-action-secondary"
                         >
                             Go to School Selection
@@ -234,7 +233,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
 
                     {!isLoading && hasSelectedSchool && classes.length === 0 && !errorMessage ? (
                         <div className="empty-projects">
-                            No classes are currently assigned to you for this school.
+                            No classes are currently available for this school.
                         </div>
                     ) : null}
                 </section>
@@ -243,9 +242,9 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
     }
 }
 
-export default function StudentClassSelection() {
+export default function AdminClassSelect() {
     const navigate = useNavigate()
     const { school_id } = useParams<{ school_id: string }>()
 
-    return <StudentClassSelectionInner navigate={navigate} schoolIdFromUrl={school_id || ""} />
+    return <AdminClassSelectInner navigate={navigate} schoolIdFromUrl={school_id || ""} />
 }

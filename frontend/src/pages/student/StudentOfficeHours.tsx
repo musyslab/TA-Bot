@@ -47,7 +47,7 @@ const StudentOfficeHours: React.FC = () => {
     return (
         <div>
             <Helmet>
-                <title> TA-Bot</title>
+                <title> MAAT</title>
             </Helmet>
 
             <MenuComponent

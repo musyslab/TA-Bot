@@ -2,28 +2,28 @@ from collections import defaultdict
 import json
 import os
 from src.repositories.database import db
-from .models import StudentGrades, OHVisits, StudentSuggestions, StudentUnlocks, SubmissionChargeRedeptions, SubmissionCharges, Submissions, Projects, Users, SubmissionManualErrors
+from .models import MainAssignmentGrades, StudentSuggestions, Submissions, Projects, Users, SubmissionManualErrors, CheckpointGrades
 from sqlalchemy import desc, and_
 from sqlalchemy.exc import IntegrityError
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
 
-class PracticeBonusAwards(db.Model):
+class CheckpointBonusAwards(db.Model):
     """
-    Idempotent record of practice-problem bonus awards.
-    One award per (UserId, PracticeProblemId).
+    Idempotent record of checkpoint bonus awards.
+    One award per (UserId, CheckpointId).
     """
-    __tablename__ = "PracticeBonusAwards"
+    __tablename__ = "CheckpointBonusAwards"
     Id = db.Column(db.Integer, primary_key=True)
     UserId = db.Column(db.Integer, nullable=False, index=True)
     ClassId = db.Column(db.Integer, nullable=False)
     ProjectId = db.Column(db.Integer, nullable=False)
-    PracticeProblemId = db.Column(db.Integer, nullable=False, index=True)
+    CheckpointId = db.Column(db.Integer, nullable=False, index=True)
     AwardedAt = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     SubmissionId = db.Column(db.Integer, nullable=True)
 
     __table_args__ = (
-        db.UniqueConstraint("UserId", "PracticeProblemId", name="uq_practice_bonus_user_pp"),
+        db.UniqueConstraint("UserId", "CheckpointId", name="uq_checkpoint_bonus_user_pp"),
     )
 
 class SubmissionRepository():
@@ -51,13 +51,13 @@ class SubmissionRepository():
             Submissions: The latest submission object made by the user for the given project.
         """
 
-        # MAIN submissions only (exclude practice submissions that share the same Project id)
+        # MAIN submissions only (exclude checkpoint submissions that share the same Project id)
         submission = (
             Submissions.query
             .filter(and_(
                 Submissions.Project == project_id,
                 Submissions.User == user_id,
-                Submissions.IsPractice == False
+                Submissions.IsCheckpoint == False
             ))
             .order_by(desc("Time"))
             .first()
@@ -134,8 +134,8 @@ class SubmissionRepository():
         status: bool,
         errorcount: int,
         testcase_results,
-        is_practice: bool = False,
-        practice_problem_id: int = None,
+        is_checkpoint: bool = False,
+        checkpoint_id: int = None,
     ):
         """Creates a new submission record in the database.
 
@@ -158,8 +158,8 @@ class SubmissionRepository():
             User=user_id,
             Project=project_id,
             IsPassing=status,
-            IsPractice=bool(is_practice),
-            PracticeProblemId=(int(practice_problem_id) if (is_practice and practice_problem_id is not None) else None),
+            IsCheckpoint=bool(is_checkpoint),
+            CheckpointId=(int(checkpoint_id) if (is_checkpoint and checkpoint_id is not None) else None),
             TestCaseResults=str(testcase_results),
         )        
         db.session.add(submission)
@@ -179,7 +179,7 @@ class SubmissionRepository():
         for proj in project_ids:
             count = (
                 Submissions.query.with_entities(Submissions.User)
-                .filter(Submissions.Project == proj[0], Submissions.IsPractice == False)
+                .filter(Submissions.Project == proj[0], Submissions.IsCheckpoint == False)
                 .distinct()
                 .count()
             )
@@ -203,7 +203,7 @@ class SubmissionRepository():
             .filter(and_(
                 Submissions.Project == project_id,
                 Submissions.User.in_(user_ids),
-                Submissions.IsPractice == False
+                Submissions.IsCheckpoint == False
             ))
             .order_by(desc(Submissions.Time))
             .all()
@@ -239,10 +239,8 @@ class SubmissionRepository():
         return submission is not None
         
     def unlock_check(self, user_id,project_id) -> bool:
-        unlocked_info = StudentUnlocks.query.filter(and_(StudentUnlocks.ProjectId==project_id,StudentUnlocks.UserId==user_id)).first()
-        current_day=datetime.today().strftime('%A')
-        #TODO: Make this not hardcoded for 2.0
-        return (current_day == "Wednesday" and unlocked_info != None)
+        # Legacy unlocks were removed in the checkpoint system.
+        return False
         
     def submission_counter(self, project_id: int, user_ids: List[int]) -> bool:
 
@@ -251,7 +249,7 @@ class SubmissionRepository():
             .filter(and_(
                 Submissions.Project == project_id,
                 Submissions.User.in_(user_ids),
-                Submissions.IsPractice == False
+                Submissions.IsCheckpoint == False
             ))
             .all()
         )
@@ -265,167 +263,30 @@ class SubmissionRepository():
         return submission_counter_dict
 
     def Submit_Student_OH_question(self, question, user_id, project_id):
-        dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        student_question = OHVisits(
-            StudentQuestionscol=question,
-            StudentId=user_id,
-            dismissed=0,
-            ruling=-1,
-            TimeSubmitted=dt_string,
-            projectId=int(project_id),
-        )
-        db.session.add(student_question)
-        db.session.commit()
-        return str(student_question.Sqid)
+        raise RuntimeError("Legacy office-hours queue has been removed in the checkpoint system")
+
     def Submit_OH_ruling(self, question_id, ruling):
-        question = OHVisits.query.filter(OHVisits.Sqid == question_id).first()
-        question.ruling = int(ruling)
-        if(int(ruling) == 0):
-            question.dismissed = int(1)
-        else:
-            question.TimeAccepted = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        db.session.commit()
-        return "ok"
+        raise RuntimeError("Legacy office-hours queue has been removed in the checkpoint system")
+
     def Submit_OH_dismiss(self, question_id):
-        question = OHVisits.query.filter(OHVisits.Sqid == question_id).first()
-        #Get classId based on the projectID
-        project = Projects.query.filter(Projects.Id == question.projectId).first()
-        classId = project.ClassId
-        question.dismissed = int(1)
-        question.TimeCompleted = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        db.session.commit()
-        return [question.StudentId, classId]
+        raise RuntimeError("Legacy office-hours queue has been removed in the checkpoint system")
+
     def Get_all_OH_questions(self, include_dismissed: bool = False):
-        """
-        include_dismissed=False (default): only active (dismissed == 0)
-        include_dismissed=True: ALL OHVisits rows (active + dismissed) for admin history
-        """
-        q = OHVisits.query
-        if not include_dismissed:
-            q = q.filter(OHVisits.dismissed == 0)
-        questions = q.order_by(desc(OHVisits.Sqid)).all()
-        return questions
+        return []
 
     def Get_active_OH_questions_for_project(self, project_id: int):
-        """
-        Student-safe queue: only active (dismissed == 0) for one project, FIFO order.
-        """
-        questions = (OHVisits.query
-            .filter(and_(OHVisits.projectId == int(project_id), OHVisits.dismissed == 0))
-            .order_by(OHVisits.Sqid.asc())
-            .all())
-        return questions
+        return []
 
     def get_active_question(self, user_id, accepted_only: bool = False):
-        """
-        When accepted_only is False (default): any not-dismissed question counts as active
-        (used by the Office Hours queue to persist 'in-queue' state).
-        When True: only accepted questions (ruling == 1 AND TimeAccepted is not null) count as active
-        (used by Upload page to show the banner only after acceptance).
-        """
-        base_query = OHVisits.query.filter(
-            and_(OHVisits.StudentId == user_id, OHVisits.dismissed == 0)
-        )
-        if accepted_only:
-            base_query = base_query.filter(
-                and_(OHVisits.ruling == 1, OHVisits.TimeAccepted.isnot(None))
-            )
-        question = base_query.order_by(OHVisits.Sqid.desc()).first()
-        if question is None:
-            return -1
-        return question.Sqid
+        return -1
 
     def get_accepted_oh_for_class(self, user_id, class_id):
-        """
-        Return Sqid of the most recent accepted (ruling==1, not dismissed, TimeAccepted set)
-        OH entry for this user that belongs to the current project of the given class_id.
-        If class_id is None or there is no current project match, fall back to any class.
-        """
-        # Base: accepted & not dismissed for this user
-        q = OHVisits.query.filter(
-            and_(OHVisits.StudentId == user_id,
-                 OHVisits.dismissed == 0,
-                 OHVisits.ruling == 1,
-                 OHVisits.TimeAccepted.isnot(None))
-        )
-        # If a class_id is provided, scope to projects from that class
-        if class_id is not None:
-            q = (q.join(Projects, Projects.Id == OHVisits.projectId)
-                   .filter(Projects.ClassId == class_id))
-        result = q.order_by(OHVisits.Sqid.desc()).first()
-        return result.Sqid if result else -1
+        return -1
 
     def check_timeout(self, user_id, project_id):
-        tbs_settings = [5, 15, 45, 60, 90, 120, 120, 120]
-        #get the two most recent submissions for a given projectID
-        submissions = Submissions.query.filter(and_(Submissions.Project == project_id, Submissions.User == user_id)).order_by(desc(Submissions.Time)).first()
-        #get the time of the most recent submission
-        if submissions == None:
-            return [1, "None"]
-        most_recent_submission = submissions.Time
-        project_start_date = Projects.query.filter(Projects.Id == project_id).first().Start
-        #Get how many days have passed since the project start date
-        days_passed = (datetime.now() - project_start_date).days
-        if days_passed > 7:
-            days_passed = 7
-        # get current time
-        current_time = datetime.now()
-        #given the student ID and project, query to see if there was a question asked for this project, get the most recent question
-        question = OHVisits.query.filter(and_(OHVisits.StudentId == user_id, OHVisits.projectId == project_id)).order_by(desc(OHVisits.TimeSubmitted)).first()
-        time_until_resubmission=""
-        tbs_threshold = tbs_settings[days_passed]
-        if question == None:
-            if most_recent_submission + timedelta(minutes=tbs_threshold) < current_time:
-                return [1, "None"]
-        time_until_resubmission = most_recent_submission + timedelta(minutes=tbs_threshold) - current_time
-        if question is not None and question.ruling == 1:
-            if question.dismissed == 0:
-                return [1, "None"]
-            submission_time_limit = question.TimeSubmitted + timedelta(hours=3)
-            if submission_time_limit > current_time:
-                if most_recent_submission + timedelta(minutes=tbs_threshold / 3) < current_time:
-                    return [1, "None"]
-                time_until_resubmission = most_recent_submission + timedelta(minutes=tbs_threshold / 3) - current_time
-            else:
-                if most_recent_submission + timedelta(minutes=tbs_threshold) < current_time:
-                    return [1, "None"]
-        return [0, time_until_resubmission]
+        return [1, "None"]
 
-    def check_visibility(self, user_id, project_id):
-        # Get most recent submission given userId and projectID
-        submission = Submissions.query.filter(and_(Submissions.User == user_id, Submissions.Project == project_id)).order_by(desc(Submissions.Time)).first()
-        if submission == None:
-            print("Error: No submission found", flush=True)
-            return True
-        return False
-    
-    def get_remaining_OH_Time(self, user_id, project_id):
-        #Get the most recent question asked by the student for the given project that is dismissed
-        question = OHVisits.query.filter(and_(OHVisits.StudentId == user_id, OHVisits.projectId == int(project_id), OHVisits.dismissed == 1)).order_by(desc(OHVisits.TimeSubmitted)).first()
-        #Get how long until this time is the current time
-        if question == None:
-            return "Expired"
-        elif question.TimeAccepted == None:
-            formatted_time_remaining = f"{3} hours, {0} minutes" 
-            return formatted_time_remaining 
-        current_time = datetime.now()
-        time_remaining = question.TimeCompleted + timedelta(hours=3) - current_time
-        if time_remaining < timedelta(minutes=0):
-            formatted_time_remaining = "Expired"
-        else:
-            hours = time_remaining.seconds // 3600
-            minutes = (time_remaining.seconds % 3600) // 60
-            formatted_time_remaining = f"{hours} hours, {minutes} minutes" 
-        return formatted_time_remaining 
-    
-    def get_number_of_questions_asked(self, user_id, project_id):
-        number_of_questions = OHVisits.query.filter(and_(OHVisits.StudentId == user_id, OHVisits.projectId == int(project_id))).count()
-        return number_of_questions
-    
-    def get_student_questions_asked(self, user_id, project_id):
-        questions = OHVisits.query.filter(and_(OHVisits.StudentId == user_id, OHVisits.projectId == int(project_id))).all()
-        return questions
-    
+
     def get_all_submissions_for_project(self, project_id):
         submissions = Submissions.query.filter(Submissions.Project == project_id).all()
         return submissions
@@ -557,7 +418,7 @@ class SubmissionRepository():
         submissions = Submissions.query.filter(Submissions.User == user_id).all()
         return submissions
     def get_project_scores(self, project_id):
-        scores = StudentGrades.query.filter(StudentGrades.Pid == project_id).all()
+        scores = MainAssignmentGrades.query.filter(MainAssignmentGrades.Pid == project_id).all()
         student_list = []
         for score in scores:
             student_list.append([score.Sid, score.Grade])
@@ -569,263 +430,58 @@ class SubmissionRepository():
         db.session.commit()
         return "ok"
     def get_charges(self, user_id, class_id, project_id):
-        tbs_settings = [5, 15, 45, 60, 90, 120, 120, 120]
-        tbs_settings = [i * 3 for i in tbs_settings]
-        project_start_date = Projects.query.filter(Projects.Id == project_id).first().Start
-        charges = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
-        if charges is None:
-            charge = SubmissionCharges(UserId=user_id, ClassId=class_id, BaseCharge=3, RewardCharge=0)
-            db.session.add(charge)
-            db.session.commit()
-            return [3, 0]
-        try:
-            charges = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
-
-            # If base charges are not full, we use a SINGLE cooldown timer.
-            # When the cooldown expires, ALL base charges refill to 3 at once.
-            if charges.BaseCharge < 3:
-                last_base = (SubmissionChargeRedeptions.query
-                    .filter(and_(
-                        SubmissionChargeRedeptions.UserId == int(user_id),
-                        SubmissionChargeRedeptions.ClassId == int(class_id),
-                        SubmissionChargeRedeptions.projectId == int(project_id),
-                        SubmissionChargeRedeptions.Type == "base",
-                        SubmissionChargeRedeptions.Recouped == 0
-                    ))
-                    .order_by(desc(SubmissionChargeRedeptions.RedeemedTime))
-                    .first())
-
-                if last_base is not None and last_base.RedeemedTime is not None:
-                    charge_date = last_base.RedeemedTime
-                    days_passed = (charge_date - project_start_date).days
-                    days_passed = max(0, min(days_passed, len(tbs_settings) - 1))
-                    tbs_threshold = tbs_settings[days_passed]
-
-                    if datetime.now() >= last_base.RedeemedTime + timedelta(minutes=tbs_threshold):
-                        # FULL recharge
-                        charges.BaseCharge = 3
-                        # Mark all un-recouped base redemptions for this project as handled
-                        pending = (SubmissionChargeRedeptions.query
-                            .filter(and_(
-                                SubmissionChargeRedeptions.UserId == int(user_id),
-                                SubmissionChargeRedeptions.ClassId == int(class_id),
-                                SubmissionChargeRedeptions.projectId == int(project_id),
-                                SubmissionChargeRedeptions.Type == "base",
-                                SubmissionChargeRedeptions.Recouped == 0
-                            ))
-                            .all())
-                        for r in pending:
-                            r.Recouped = 1
-                        db.session.commit()
-
-            # If this is a new project (no base redemptions yet) and carryover left the student < 3,
-            # reset to full base charges so each project starts fresh.
-            current_proj_redemption = SubmissionChargeRedeptions.query.filter(
-                and_(
-                    SubmissionChargeRedeptions.UserId == int(user_id),
-                    SubmissionChargeRedeptions.ClassId == int(class_id),
-                    SubmissionChargeRedeptions.projectId == int(project_id),
-                    SubmissionChargeRedeptions.Type == "base"
-                )
-            ).first()
-            if charges.BaseCharge < 3 and current_proj_redemption is None:
-                charges.BaseCharge = 3
-                db.session.commit()
-
-        except  Exception as e:
-            return [0, 0]
-        return [charges.BaseCharge, charges.RewardCharge]
+        # Submission charges were removed with the checkpoint system.
+        return [0, 0]
 
     def get_time_until_recharge(self, user_id, class_id, project_id):
-        project_start_date = Projects.query.filter(Projects.Id == project_id).first().Start
-        #Get how many days have passed since the project start date
-        tbs_settings = [5, 15, 45, 60, 90, 120, 120, 120]
-        tbs_settings = [i * 3 for i in tbs_settings]
-        charge_redemptions = SubmissionChargeRedeptions.query.filter(
-            and_(
-                SubmissionChargeRedeptions.UserId == user_id, 
-                SubmissionChargeRedeptions.ClassId == class_id, 
-                SubmissionChargeRedeptions.projectId == project_id, 
-                SubmissionChargeRedeptions.Recouped == 0,
-                SubmissionChargeRedeptions.Type=="base"
-            )
-        ).order_by(desc(SubmissionChargeRedeptions.RedeemedTime)).first()
-        #Idenify on what date the charge was redeemed
+        return timedelta(seconds=0)
 
-        if charge_redemptions is None:
-            # No redemption in this project yet → nothing to count down from
-            return timedelta(seconds=0)
-        charge_date = charge_redemptions.RedeemedTime
-
-        #Identify how many days have passed since the project start date
-        days_passed = (charge_date - project_start_date).days
-        if days_passed > 7:
-            days_passed = 7
-        #Get the TBS threshold for the given day
-        tbs_threshold = tbs_settings[days_passed]
-         
-        # Get the time until the next recharge
-        time_until_resubmission = charge_redemptions.RedeemedTime + timedelta(minutes=tbs_threshold) - datetime.now()
-        if time_until_resubmission.total_seconds() < 0:
-            return timedelta(seconds=0)
-
-        return time_until_resubmission
-  
     def consume_charge(self, user_id, class_id, project_id, submission_id):
-        dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-
-        # Ensure a SubmissionCharges row exists for this user/class.
-        charge = SubmissionCharges.query.filter(
-            and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)
-        ).first()
-        if charge is None:
-            charge = SubmissionCharges(UserId=user_id, ClassId=class_id, BaseCharge=3, RewardCharge=0)
-            db.session.add(charge)
-            db.session.commit()
-
-        # Practice submissions are always free (do not consume base or reward charges).
-        try:
-            sub = Submissions.query.filter(Submissions.Id == submission_id).first()
-            if sub is not None and bool(getattr(sub, "IsPractice", False)):
-                return "ok"
-        except Exception:
-            pass
-
-        submission_charge = None
-
-        # Determine if a user is in an active office hour session; if so, do not charge the student.
-        question = OHVisits.query.filter(
-            and_(OHVisits.StudentId == user_id, OHVisits.dismissed == 0)
-        ).first()
-        print("Question is: ", question, flush=True)
-
-        if question is not None and question.ruling == 1:
-            submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-            db.session.commit()
-            return "ok"
-
-        # Determine if a user has an unredeemed reward charge for the given project.
-        reward_charge = SubmissionChargeRedeptions.query.filter(
-            and_(
-                SubmissionChargeRedeptions.UserId == user_id,
-                SubmissionChargeRedeptions.ClassId == class_id,
-                SubmissionChargeRedeptions.projectId == project_id,
-                SubmissionChargeRedeptions.Type == "reward",
-            )
-        ).all()
-        if len(reward_charge) > 0:
-            for reward in reward_charge:
-                if reward.RedeemedTime is None:
-                    if charge.RewardCharge > 0:
-                        charge.RewardCharge -= 1
-                        db.session.commit()
-                    reward.RedeemedTime = dt_string
-                    reward.submissionId = submission_id
-                    reward.Recouped = 1
-                    db.session.commit()
-                    submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-                    db.session.commit()
-                    return "ok"
-
-        # Consume a base charge if available.
-        if charge and charge.BaseCharge > 0:
-            charge.BaseCharge -= 1
-            submission_charge = SubmissionChargeRedeptions(
-                UserId=user_id,
-                ClassId=class_id,
-                projectId=project_id,
-                Type="base",
-                ClaimedTime=dt_string,
-                RedeemedTime=dt_string,
-                SubmissionId=submission_id,
-                Recouped=0,
-            )
-            db.session.add(submission_charge)
-            db.session.commit()
-
-        # Update the visibility of the submission
-        submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-        db.session.commit()
+        # No-op: checkpoint system does not consume legacy charges.
         return "ok"
 
     def Charge_use_accounting(self, submission_id, charge_id):
-        dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        charge = SubmissionChargeRedeptions.query.filter(SubmissionChargeRedeptions.Id == charge_id).first()
-        charge.submissionId = submission_id
-        charge.RedeemedTime = dt_string
-        db.session.commit()
         return "ok"
 
     def add_reward_charge(self, user_id, class_id, rewardAmount):
-        charge = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
-        charge.RewardCharge += rewardAmount
-        if charge.RewardCharge > 5:
-            charge.RewardCharge = 5
-        db.session.commit()
+        return None
 
-    def award_practice_bonus(
+    def award_checkpoint_bonus(
         self,
         user_id: int,
         class_id: int,
         project_id: int,
-        practice_problem_id: int,
+        checkpoint_id: int,
         submission_id: int | None = None,
     ) -> bool:
-        """
-        Award +1 FastPass (RewardCharge) once per practice problem when the student passes.
-        Returns True only if a new award was created and applied.
-        """
-        if not practice_problem_id:
+        """Record once-per-checkpoint completion without awarding legacy FastPass charges."""
+        if not checkpoint_id:
             return False
 
-        # Ensure table exists without requiring a migration step.
         try:
-            PracticeBonusAwards.__table__.create(db.engine, checkfirst=True)
+            CheckpointBonusAwards.__table__.create(db.engine, checkfirst=True)
         except Exception:
             return False
 
         try:
             exists = (
-                PracticeBonusAwards.query
-                .filter(PracticeBonusAwards.UserId == int(user_id))
-                .filter(PracticeBonusAwards.PracticeProblemId == int(practice_problem_id))
+                CheckpointBonusAwards.query
+                .filter(CheckpointBonusAwards.UserId == int(user_id))
+                .filter(CheckpointBonusAwards.CheckpointId == int(checkpoint_id))
                 .first()
             )
             if exists:
                 return False
 
-            row = PracticeBonusAwards(
+            row = CheckpointBonusAwards(
                 UserId=int(user_id),
                 ClassId=int(class_id),
                 ProjectId=int(project_id),
-                PracticeProblemId=int(practice_problem_id),
+                CheckpointId=int(checkpoint_id),
                 AwardedAt=datetime.utcnow(),
                 SubmissionId=(int(submission_id) if submission_id is not None else None),
             )
             db.session.add(row)
-
-            # Ensure a SubmissionCharges row exists for this user/class
-            charge = (
-                SubmissionCharges.query
-                .filter(and_(
-                    SubmissionCharges.UserId == int(user_id),
-                    SubmissionCharges.ClassId == int(class_id),
-                ))
-                .first()
-            )
-            if charge is None:
-                charge = SubmissionCharges(
-                    UserId=int(user_id),
-                    ClassId=int(class_id),
-                    BaseCharge=3,
-                    RewardCharge=0,
-                )
-                db.session.add(charge)
-                db.session.flush()
-
-            # Apply +1 FastPass (cap at 5 to match existing behavior)
-            charge.RewardCharge = min(5, int(charge.RewardCharge or 0) + 1)
-
             db.session.commit()
             return True
         except IntegrityError:
@@ -836,30 +492,9 @@ class SubmissionRepository():
             return False
 
     def consume_reward_charge(self, user_id, class_id, project):
-        dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        try:
-            student_submissionCharges = SubmissionCharges.query.filter(and_(SubmissionCharges.UserId == user_id, SubmissionCharges.ClassId == class_id)).first()
-            if student_submissionCharges.RewardCharge < 1:
-                return 0
-            # Reserve a FastPass without consuming it yet (pending until next submission)
-            reward_charge = SubmissionChargeRedeptions(
-                UserId=user_id,
-                ClassId=class_id,
-                projectId=project,
-                Type="reward",
-                ClaimedTime=dt_string,
-                Recouped=0
-            )
-            db.session.add(reward_charge)
-            db.session.commit()
-            
-            return 1
-        except Exception as e:
-            print("An error occurred while handling the database operation", e)
-            db.session.rollback()
-            return 0
+        return 0
 
-    def save_manual_grading(self, submission_id, grade, scoring_mode, error_points, errors, error_defs):
+    def save_manual_grading(self, submission_id, grade, scoring_mode, error_points, errors, error_defs, checkpoint=False, checkpoint_id=None):
         try:
             sub = Submissions.query.get(submission_id)
             if sub is None:
@@ -867,12 +502,7 @@ class SubmissionRepository():
 
             sid = sub.User
             pid = sub.Project
-
-            # Persist grade + grading configuration so refresh recomputes the same result.
-            grades = (StudentGrades.query
-                .filter(StudentGrades.Sid == sid)
-                .filter(StudentGrades.Pid == pid)
-                .first())
+            is_checkpoint_submission = bool(getattr(sub, "IsCheckpoint", False)) or bool(checkpoint)
 
             mode = scoring_mode if scoring_mode in ("perInstance", "flatPerError") else "perInstance"
             clean_pts = {}
@@ -883,54 +513,79 @@ class SubmissionRepository():
                     pass
             points_json = json.dumps(clean_pts, sort_keys=True)
 
-            # error_defs now stores custom defs INCLUDING default points
+            # error_defs stores custom defs INCLUDING default points.
             defs_json = json.dumps(error_defs or {}, sort_keys=True)
 
-            if grades:
-                grades.Grade = int(grade) if grade is not None else grades.Grade
-                grades.SubmissionId = int(submission_id)
-                grades.ScoringMode = mode
-                grades.ErrorPointsJson = points_json
-                grades.ErrorDefsJson = defs_json
-                grades.UpdatedAt = datetime.utcnow()
+            if is_checkpoint_submission:
+                grades = CheckpointGrades.query.get(int(submission_id))
+                if grades:
+                    grades.Sid = sid
+                    grades.Pid = pid
+                    grades.Grade = int(grade) if grade is not None else grades.Grade
+                    grades.ScoringMode = mode
+                    grades.ErrorPointsJson = points_json
+                    grades.ErrorDefsJson = defs_json
+                    grades.UpdatedAt = datetime.utcnow()
+                else:
+                    db.session.add(CheckpointGrades(
+                        SubmissionId=int(submission_id),
+                        Sid=sid,
+                        Pid=pid,
+                        Grade=int(grade) if grade is not None else 0,
+                        ScoringMode=mode,
+                        ErrorPointsJson=points_json,
+                        ErrorDefsJson=defs_json,
+                        UpdatedAt=datetime.utcnow(),
+                    ))
             else:
-                new_grade = StudentGrades(
-                    Sid=sid,
-                    Pid=pid,
-                    Grade=int(grade) if grade is not None else 0,
-                    SubmissionId=int(submission_id),
-                    ScoringMode=mode,
-                    ErrorPointsJson=points_json,
-                    ErrorDefsJson=defs_json,
-                    UpdatedAt=datetime.utcnow(),
-                )
-                db.session.add(new_grade)
+                grades = (MainAssignmentGrades.query
+                    .filter(MainAssignmentGrades.Sid == sid)
+                    .filter(MainAssignmentGrades.Pid == pid)
+                    .first())
 
-            # Replace error rows for this submission (now with counts).
+                if grades:
+                    grades.Grade = int(grade) if grade is not None else grades.Grade
+                    grades.SubmissionId = int(submission_id)
+                    grades.ScoringMode = mode
+                    grades.ErrorPointsJson = points_json
+                    grades.ErrorDefsJson = defs_json
+                    grades.UpdatedAt = datetime.utcnow()
+                else:
+                    db.session.add(MainAssignmentGrades(
+                        Sid=sid,
+                        Pid=pid,
+                        Grade=int(grade) if grade is not None else 0,
+                        SubmissionId=int(submission_id),
+                        ScoringMode=mode,
+                        ErrorPointsJson=points_json,
+                        ErrorDefsJson=defs_json,
+                        UpdatedAt=datetime.utcnow(),
+                    ))
+
+            # Replace error rows for this exact submission.
             SubmissionManualErrors.query.filter_by(SubmissionId=submission_id).delete()
 
             for error in (errors or []):
-                new_err = SubmissionManualErrors(
+                db.session.add(SubmissionManualErrors(
                     SubmissionId=int(submission_id),
                     StartLine=int(error.get('startLine')),
                     EndLine=int(error.get('endLine')),
                     ErrorId=str(error.get('errorId')),
                     Count=max(1, int(error.get('count', 1))),
                     Note=str(error.get('note', '') or ''),
-                )
-                db.session.add(new_err)
+                ))
 
             db.session.commit()
             return True
         except Exception:
             db.session.rollback()
             return False
-            
+
     def get_manual_errors(self, submission_id):
-        
+
         # fetch all errors for this submission
         errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId == submission_id).all()
-        
+
         # convert to list of dicts
         return [
             {
@@ -945,24 +600,35 @@ class SubmissionRepository():
 
     def get_manual_grade_config(self, submission_id: int):
         """
-        Return persisted manual grading config for the submission's (Sid,Pid) row in StudentGrades.
+        Return persisted manual grading config for this exact submission.
+
+        Older non-checkpoint grades are stored on MainAssignmentGrades by (Sid, Pid), so this
+        still falls back to the legacy row when no per-submission row exists.
         """
         sub = Submissions.query.get(int(submission_id))
         if sub is None:
-            return {"grade": None, "scoringMode": "perInstance", "errorPoints": {}}
+            return {"grade": None, "scoringMode": "perInstance", "errorPoints": {}, "errorDefs": {}}
 
-        sid = sub.User
-        pid = sub.Project
+        if bool(getattr(sub, "IsCheckpoint", False)):
+            row = CheckpointGrades.query.get(int(submission_id))
+        else:
+            sid = sub.User
+            pid = sub.Project
+            row = (MainAssignmentGrades.query
+                .filter(MainAssignmentGrades.Sid == sid)
+                .filter(MainAssignmentGrades.Pid == pid)
+                .filter(MainAssignmentGrades.SubmissionId == int(submission_id))
+                .first())
 
-        row = (StudentGrades.query
-            .filter(StudentGrades.Sid == sid)
-            .filter(StudentGrades.Pid == pid)
-            .first())
+            if row is None:
+                row = (MainAssignmentGrades.query
+                    .filter(MainAssignmentGrades.Sid == sid)
+                    .filter(MainAssignmentGrades.Pid == pid)
+                    .first())
 
         if row is None:
-            return {"grade": None, "scoringMode": "perInstance", "errorPoints": {}}
+            return {"grade": None, "scoringMode": "perInstance", "errorPoints": {}, "errorDefs": {}}
 
-        # ScoringMode and ErrorPointsJson may not exist yet if DB migration wasn't applied.
         mode = getattr(row, "ScoringMode", None)
         if mode not in ("perInstance", "flatPerError"):
             mode = "perInstance"
@@ -980,54 +646,102 @@ class SubmissionRepository():
             defs = {}
 
         return {"grade": getattr(row, "Grade", None), "scoringMode": mode, "errorPoints": pts, "errorDefs": defs}
-    
+
     def get_oh_visits_by_projectId(self, project_id):
-        """
-        Helper to get all OHVisits entries for a given project_id.
-        Returns list of OHVisits objects.
-        """
-        visits = OHVisits.query.filter(OHVisits.projectId == project_id).filter(OHVisits.ruling == 1).all()
-        student_ids = []
-        for i in visits:
-            student_ids.append(i.StudentId)
+        return []
 
-        return student_ids
+    def _grade_payload_from_row(self, row):
+        raw_pts = getattr(row, "ErrorPointsJson", None) or "{}"
+        try:
+            pts = json.loads(raw_pts) if isinstance(raw_pts, str) else (raw_pts or {})
+        except Exception:
+            pts = {}
 
-    def get_project_grade_info(self, project_id: int):
-        # Get all students grade info from a project (ID, grade, submission ID, error json)
-        grade_rows = StudentGrades.query.filter(StudentGrades.Pid == project_id).all()
-        grades_by_student = {}
-        for g in grade_rows:
-            raw_pts = getattr(g, "ErrorPointsJson", None) or "{}"
-            try:
-                pts = json.loads(raw_pts) if isinstance(raw_pts, str) else (raw_pts or {})
-            except Exception:
-                pts = {}
+        raw_defs = getattr(row, "ErrorDefsJson", None) or "{}"
+        try:
+            defs = json.loads(raw_defs) if isinstance(raw_defs, str) else (raw_defs or {})
+        except Exception:
+            defs = {}
 
-            raw_defs = getattr(g, "ErrorDefsJson", None) or "{}"
-            try:
-                defs = json.loads(raw_defs) if isinstance(raw_defs, str) else (raw_defs or {})
-            except Exception:
-                defs = {}    
+        return {
+            'grade': getattr(row, "Grade", None),
+            'submission_id': getattr(row, "SubmissionId", None),
+            'scoring_mode': getattr(row, "ScoringMode", None),
+            'error_points': pts,
+            'error_defs': defs
+        }
 
-            grades_by_student[g.Sid] = {
-                'grade': getattr(g, "Grade", None),
-                'submission_id': getattr(g, "SubmissionId", None),
-                'scoring_mode': getattr(g, "ScoringMode", None),
-                'error_points': pts,
-                'error_defs': defs
-            }
+    def get_manual_grade_for_submission(self, submission_id: int):
+        sub = Submissions.query.get(int(submission_id))
+        if sub is None:
+            return None
 
-        # Get all student school id numbers
+        if bool(getattr(sub, "IsCheckpoint", False)):
+            row = CheckpointGrades.query.get(int(submission_id))
+        else:
+            row = (MainAssignmentGrades.query
+                .filter(MainAssignmentGrades.Sid == sub.User)
+                .filter(MainAssignmentGrades.Pid == sub.Project)
+                .filter(MainAssignmentGrades.SubmissionId == int(submission_id))
+                .first())
+            if row is None:
+                row = (MainAssignmentGrades.query
+                    .filter(MainAssignmentGrades.Sid == sub.User)
+                    .filter(MainAssignmentGrades.Pid == sub.Project)
+                    .first())
+
+        if row is None:
+            return None
+        return self._grade_payload_from_row(row)
+
+    def get_project_grade_info(self, project_id: int, checkpoint=False, checkpoint_id=None):
+        # Get grade info for a project. Normal projects use main assignment rows.
+        # Checkpoints use per-submission rows so each checkpoint can be graded separately.
+        checkpoint = bool(checkpoint)
+
+        if checkpoint:
+            subs_query = Submissions.query.filter(
+                Submissions.Project == int(project_id),
+                Submissions.IsCheckpoint == True,
+            )
+            if checkpoint_id is not None:
+                subs_query = subs_query.filter(Submissions.CheckpointId == int(checkpoint_id))
+
+            latest_by_student = {}
+            for sub in subs_query.order_by(Submissions.User.asc(), Submissions.Time.desc()).all():
+                sid = int(getattr(sub, "User", 0) or 0)
+                if sid and sid not in latest_by_student:
+                    latest_by_student[sid] = sub
+
+            submission_ids = [int(s.Id) for s in latest_by_student.values()]
+            grade_rows = CheckpointGrades.query.filter(CheckpointGrades.SubmissionId.in_(submission_ids)).all() if submission_ids else []
+            grades_by_submission = {int(g.SubmissionId): self._grade_payload_from_row(g) for g in grade_rows}
+
+            grades_by_student = {}
+            for sid, sub in latest_by_student.items():
+                payload = grades_by_submission.get(int(sub.Id), {
+                    'grade': 0,
+                    'submission_id': int(sub.Id),
+                    'scoring_mode': "perInstance",
+                    'error_points': {},
+                    'error_defs': {},
+                })
+                payload['submission_id'] = int(sub.Id)
+                grades_by_student[sid] = payload
+        else:
+            grade_rows = MainAssignmentGrades.query.filter(MainAssignmentGrades.Pid == project_id).all()
+            grades_by_student = {}
+            for g in grade_rows:
+                grades_by_student[g.Sid] = self._grade_payload_from_row(g)
+
         database_ids = list(grades_by_student.keys())
-        student_numbers = Users.query.filter(Users.Id.in_(database_ids)).all()
+        student_numbers = Users.query.filter(Users.Id.in_(database_ids)).all() if database_ids else []
         numbers_by_student = defaultdict(str)
         for num in student_numbers:
             numbers_by_student[num.Id] = num.StudentNumber
 
-        # Get all errors by submission
-        submission_ids = [v['submission_id'] for v in grades_by_student.values()]
-        errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId.in_(submission_ids)).all()
+        submission_ids = [v['submission_id'] for v in grades_by_student.values() if v.get('submission_id') is not None]
+        errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId.in_(submission_ids)).all() if submission_ids else []
         errors_by_submission = defaultdict(list)
         for e in errors:
             errors_by_submission[e.SubmissionId].append(e)

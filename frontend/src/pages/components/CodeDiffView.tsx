@@ -306,11 +306,11 @@ export default function DiffView(props: DiffViewProps) {
     const [selectedCodeFile, setSelectedCodeFile] = useState<string>('')
 
     const [selectedDiffId, setSelectedDiffId] = useState<string | null>(null)
-    const [diffMode, setDiffMode] = useState<DiffMode>('short')
-    const [diffLayout, setDiffLayout] = useState<DiffLayout>('stacked')
+    const [diffMode, setDiffMode] = useState<DiffMode>('long')
+    const [diffLayout, setDiffLayout] = useState<DiffLayout>('side-by-side')
 
     // Intra-line highlight toggle
-    const initialIntraRef = useRef<boolean>(Math.random() < 0.5)
+    const initialIntraRef = useRef<boolean>(true)
     const [intraEnabled, setIntraEnabled] = useState<boolean>(initialIntraRef.current)
 
     // Track which (submissionId,classId) we've already logged to avoid duplicate logs (React StrictMode)
@@ -1087,7 +1087,7 @@ export default function DiffView(props: DiffViewProps) {
                         )}
 
                         {/* Button 2: Diff Finder */}
-                        {selectedFile && !selectedFile.passed && (!selectedFile.hidden || revealHiddenOutput) && (
+                        {selectedFile && !selectedFile.passed && (!selectedFile.hidden || revealHiddenOutput) && hasIntraInSelected && (
                             <button
                                 type="button"
                                 className={`btn toggle-intra ${intraEnabled ? 'on' : 'off'}`}

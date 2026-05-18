@@ -1,10 +1,10 @@
-# TA-Bot
+# MAAT (formerly known as TA-Bot)
 
 This project was originally developed and maintained by Jack Forden and Alex Gebhard.
 
 It is currently maintained by Sam Mazzone.
 
-# How to install TA-Bot (if on Windows)
+# How to install MAAT (if on Windows)
 
 ## Install WSL Ubuntu
 
@@ -48,7 +48,7 @@ Make it so you don't have to run sudo everytime in docker:
 
 ```docker run hello-world```
 
-## Install TA-Bot:
+## Install MAAT:
 
 ```git clone https://github.com/musyslab/TA-Bot.git```
 
@@ -64,7 +64,7 @@ Add the following line to that file: ```VITE_API_URL=http://localhost:5000/api``
 
 (Or different URL for Production)
 
-## Run TA-Bot
+## Run MAAT
 
 Go up a directory (from the frontend folder) and run:
 
@@ -74,7 +74,7 @@ It will take a while to compile the first time, but once it is ready navigate to
 
 ```http://localhost:3000/```
 
-## View the local TA-Bot Database
+## View the local MAAT Database
 
 Download DBDeaver: https://dbeaver.io/download/
 

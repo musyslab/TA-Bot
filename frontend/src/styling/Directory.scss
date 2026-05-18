@@ -7,6 +7,19 @@
     box-sizing: border-box;
 }
 
+body {
+    background: #f5f5f5;
+}
+
+.directory+.main-grid {
+    margin-top: 15px;
+    padding-top: 0;
+}
+
+.directory+.main-grid .admin-project-config-container .pageTitle {
+    margin-top: 0;
+}
+
 .directory {
     width: 95%;
     box-sizing: border-box;
@@ -83,7 +96,7 @@
 
 .pageTitle {
     width: 95%;
-    margin: 15px auto 0; 
+    margin: 15px auto 0;
     align-self: stretch;
     display: block;
     padding: 15px 32px;

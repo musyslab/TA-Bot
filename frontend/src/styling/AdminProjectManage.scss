@@ -1,16 +1,3 @@
-body {
-  background: #f5f5f5;
-}
-
-.directory+.main-grid {
-  margin-top: 15px;
-  padding-top: 0;
-}
-
-.directory+.main-grid .admin-project-config-container .pageTitle {
-  margin-top: 0;
-}
-
 .admin-project-config-container {
   width: 100%;
   margin: 0 auto;
@@ -91,21 +78,6 @@ body {
       gap: 0.9rem;
       width: 100%;
 
-      /* Side-by-side layout for start/end date */
-      .date-range-group {
-        display: flex;
-        gap: 1rem;
-
-        .form-field {
-          flex: 1;
-        }
-      }
-
-      .react-datepicker__day--today {
-        font-weight: 700;
-        box-shadow: inset 0 0 0 2px black;
-      }
-
       .form-title {
         font-size: 1.6rem;
         font-weight: 700;
@@ -127,57 +99,6 @@ body {
         top: 95px;
         z-index: 25;
         box-shadow: 0 8px 18px rgba(245, 158, 11, 0.12);
-      }
-
-      .form-field {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-
-        label {
-          font-weight: 500;
-          color: #1a1a1a;
-        }
-
-        &.input-field {
-          input {
-            width: 100%;
-            padding: 0.75rem 1rem;
-            border: 1px solid #cccccc;
-            border-radius: 6px;
-            font-size: 1rem;
-            transition: border-color 0.3s, box-shadow 0.3s;
-            cursor: text;
-
-            &:focus {
-              outline: none;
-              border-color: #3498db;
-              box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.15);
-            }
-
-            // But whenever you hover over the actual date‑text fields, show the I‑beam
-            &::-webkit-datetime-edit-text,
-            &::-webkit-datetime-edit-year-field,
-            &::-webkit-datetime-edit-month-field,
-            &::-webkit-datetime-edit-day-field,
-            &::-webkit-datetime-edit-hour-field,
-            &::-webkit-datetime-edit-minute-field {
-              cursor: text;
-            }
-
-            // keep the built‑in calendar icon as a pointer
-            &::-webkit-calendar-picker-indicator {
-              cursor: pointer;
-            }
-          }
-
-          &.input-error {
-            input {
-              border-color: #e74c3c;
-              box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.15);
-            }
-          }
-        }
       }
 
       .form-group {
@@ -1637,4 +1558,176 @@ body:has(.testcase-modal) {
   margin-bottom: 0.1rem;
   flex: 0 0 auto;
   pointer-events: none;
+}
+
+.step-menu-shell {
+  width: 95%;
+  margin: 15px auto 0.75rem auto;
+  display: flex;
+  justify-content: center;
+}
+
+.step-menu {
+  width: min(520px, 100%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  padding: 0.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  background: #e2e8f0;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
+}
+
+.step-menu-item {
+  appearance: none;
+  border: 2px solid transparent;
+  background: transparent;
+  color: #334155;
+  border-radius: 12px;
+  min-height: 3.4rem;
+  padding: 0.65rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.12rem;
+  cursor: pointer;
+  text-align: center;
+  font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.step-menu-item:hover {
+  background: rgba(255, 255, 255, 0.62);
+  color: #0f172a;
+}
+
+.step-menu-item:focus-visible {
+  outline: 3px solid rgba(0, 123, 255, 0.35);
+  outline-offset: 2px;
+}
+
+.step-menu-item.active {
+  border-color: #007bff;
+  background: #ffffff;
+  color: #0056b3;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+  cursor: default;
+}
+
+.step-title {
+  font-size: 1rem;
+  line-height: 1.15;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.step-needs-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.42rem;
+  border-radius: 999px;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 0.62rem;
+  line-height: 1;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.step-state {
+  font-size: 0.72rem;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.step-menu-item.active .step-state {
+  color: #007bff;
+}
+
+@media (max-width: 640px) {
+  .step-menu-shell {
+    width: calc(100% - 1rem);
+  }
+
+  .step-menu {
+    width: 100%;
+  }
+
+  .step-menu-item {
+    min-height: 3.1rem;
+    padding: 0.55rem 0.65rem;
+  }
+}
+
+.step-content {
+  flex: 1;
+  background: #f5f5f5;
+}
+
+.wizard-step-details .file-section,
+.wizard-step-details .submit-button {
+  display: none;
+}
+
+.wizard-step-files .segment-main>.form-field.input-field:first-child,
+.wizard-step-files .date-range-group,
+.wizard-step-files .overlap-error-text,
+.wizard-step-files .language-group,
+.wizard-step-files .details-step-footer {
+  display: none;
+}
+
+.wizard-step-files .file-section {
+  margin-top: 0;
+}
+
+.wizard-nav-footer {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.details-step-footer {
+  justify-content: flex-end;
+}
+
+.wizard-next-button,
+.wizard-secondary-button {
+  border: none;
+  border-radius: 10px;
+  padding: 0.85rem 1.2rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.wizard-next-button {
+  background: #007bff;
+  color: #ffffff;
+  box-shadow: 0 5px 14px rgba(0, 123, 255, 0.25);
+}
+
+.wizard-secondary-button {
+  background: #edf2f7;
+  color: #1f2933;
+}
+
+.wizard-next-button:hover,
+.wizard-secondary-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 16px rgba(15, 23, 42, 0.12);
 }

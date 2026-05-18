@@ -44,12 +44,47 @@ type StudentSubmissionNavRow = {
 }
 
 export function AdminGrading() {
-    const { id, class_id, project_id } = useParams<{ id: string; class_id: string; project_id: string }>()
+    const { id, school_id, class_id, module_id, project_id, checkpoint_id: route_checkpoint_id } = useParams<{
+        id: string
+        school_id: string
+        class_id: string
+        module_id: string
+        project_id: string
+        checkpoint_id?: string
+    }>()
+
     const submissionId = id !== undefined ? parseInt(id, 10) : defaultpagenumber
+    const sid = school_id !== undefined ? parseInt(school_id, 10) : -1
     const cid = class_id !== undefined ? parseInt(class_id, 10) : -1
+    const mid = module_id !== undefined ? parseInt(module_id, 10) : -1
     const pid = project_id !== undefined ? parseInt(project_id, 10) : -1
     const navigate = useNavigate()
     const location = useLocation()
+
+    const schoolIdStr = school_id ?? ''
+    const classIdStr = class_id ?? ''
+    const moduleIdStr = module_id ?? ''
+    const projectIdStr = project_id ?? ''
+
+    const params = new URLSearchParams(location.search)
+    const truthyValues = ['1', 'true', 'yes', 'y', 'on']
+    const checkpointParam = (params.get('checkpoint') || params.get('practice') || '').toLowerCase()
+    const isCheckpoint = !!route_checkpoint_id || truthyValues.includes(checkpointParam)
+    const checkpointIdParam = (
+        route_checkpoint_id ||
+        params.get('checkpoint_id') ||
+        params.get('practice_problem_id') ||
+        ''
+    ).trim()
+    const parsedCheckpointId = parseInt(checkpointIdParam, 10)
+    const checkpointId =
+        isCheckpoint && !Number.isNaN(parsedCheckpointId) && parsedCheckpointId > 0 ? parsedCheckpointId : undefined
+    const classSelectionUrl = `/admin/school/${schoolIdStr}/classes`
+    const moduleListUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/modules`
+    const moduleDetailsUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/overview`
+    const studentListUrl = isCheckpoint && checkpointId
+        ? `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/project/${projectIdStr}/checkpoint/${checkpointId}/submissions`
+        : `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/project/${projectIdStr}/submissions`
 
     const [studentName, setStudentName] = useState<string>('')
     const [studentRoster, setStudentRoster] = useState<StudentSubmissionNavRow[]>([])
@@ -572,7 +607,7 @@ export function AdminGrading() {
         axios
             .post(
                 `${import.meta.env.VITE_API_URL}/submissions/recentsubproject`,
-                { project_id: pid },
+                { project_id: pid, checkpoint: isCheckpoint, checkpoint_id: checkpointId ?? null },
                 {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}`,
@@ -613,7 +648,7 @@ export function AdminGrading() {
             })
             .catch((err) => console.log(err))
             .finally(() => setStudentHeaderLoading(false))
-    }, [submissionId, pid])
+    }, [submissionId, pid, isCheckpoint, checkpointId])
 
     // Fetch saved grading errors
     useEffect(() => {
@@ -803,6 +838,9 @@ export function AdminGrading() {
                     errorPoints: errorPoints,
                     errorDefs: customDefsForSave,
                     errors: serializeErrorsForSave(observedErrors),
+                    projectId: pid,
+                    checkpoint: isCheckpoint,
+                    checkpoint_id: checkpointId ?? null,
                 },
                 {
                     headers: {
@@ -858,15 +896,17 @@ export function AdminGrading() {
         <div className="page-container" id="admin-output-diff">
             <LoadingAnimation show={showLoadingOverlay} message={isInitialPageLoading ? 'Loading grading page...' : 'Saving grade...'} />
             <Helmet>
-                <title>TA-Bot</title>
+                <title>MAAT</title>
             </Helmet>
             <MenuComponent showUpload={false} showAdminUpload={false} showHelp={false} showCreate={false} showLast={false} showReviewButton={false} />
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: 'Class Selection', to: '/admin/classes' },
-                    { label: 'Project List', to: `/admin/${cid}/projects` },
-                    { label: 'Student List', to: `/admin/${cid}/project/${pid}` },
+                    { label: 'School Selection', to: '/admin/schools' },
+                    { label: 'Class Selection', to: classSelectionUrl },
+                    { label: 'Module List', to: moduleListUrl },
+                    { label: 'Module Details', to: moduleDetailsUrl },
+                    { label: 'Student List', to: studentListUrl },
                     { label: 'Grade Submission' },
                 ]}
                 confirmOnNavigate={isDirty}

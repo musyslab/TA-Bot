@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql.schema import ForeignKey
 from sqlalchemy.sql.sqltypes import DateTime
@@ -6,34 +6,48 @@ from sqlalchemy.types import Date
 
 from src.repositories.database import db
 
+class Schools(db.Model):
+    __tablename__ = "Schools"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    Name = Column(String)
+    Classes = relationship('Classes', back_populates='School')
+
+
+class Modules(db.Model):
+    __tablename__ = "Modules"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    ClassId = Column(Integer, ForeignKey('Classes.Id'))
+    Name = Column(String)
+    Start = Column(DateTime)
+    End = Column(DateTime)
+    Projects = relationship('Projects', back_populates='Module')
 
 class Projects(db.Model):
     __tablename__ = "Projects"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     ClassId = Column(Integer, ForeignKey('Classes.Id'))
+    ModuleId = Column(Integer, ForeignKey('Modules.Id'), nullable=True)
+    Module = relationship('Modules', back_populates='Projects')
     Name = Column(String)
-    Start = Column(Date)
-    End = Column(Date)
     Language = Column(String)
     Submissions=relationship('Submissions') 
-    StudentUnlocks=relationship('StudentUnlocks') 
     solutionpath=Column(String)
     AsnDescriptionPath = Column(String)
     AdditionalFilePath = Column(String)
-    PracticeProblems = relationship('PracticeProblems', back_populates='Project', cascade="all, delete-orphan")
+    Checkpoints = relationship('Checkpoints', back_populates='Project', cascade="all, delete-orphan")
 
-class PracticeProblems(db.Model):
-    __tablename__ = "PracticeProblems"
+class Checkpoints(db.Model):
+    __tablename__ = "Checkpoints"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     ProjectId = Column(Integer, ForeignKey('Projects.Id', ondelete='CASCADE'), nullable=False)
-    PracticeNumber = Column(Integer, nullable=False, default=1)
+    CheckpointNumber = Column(Integer, nullable=False, default=1)
     Enabled = Column(Boolean, nullable=False, default=True)
     Name = Column(String)
     Language = Column(String)
     solutionpath = Column(String)
     AsnDescriptionPath = Column(String)
     AdditionalFilePath = Column(String)
-    Project = relationship('Projects', back_populates='PracticeProblems')
+    Project = relationship('Projects', back_populates='Checkpoints')
 
 class Users(db.Model):
     __tablename__ = "Users"
@@ -48,7 +62,6 @@ class Users(db.Model):
     Submissions=relationship('Submissions')
     ClassAssignments=relationship('ClassAssignments')
     LoginAttempts=relationship('LoginAttempts')
-    StudentUnlocks=relationship('StudentUnlocks') 
 
 class Submissions(db.Model):
     __tablename__ = "Submissions"
@@ -56,8 +69,8 @@ class Submissions(db.Model):
     OutputFilepath = Column(String)
     CodeFilepath = Column(String)
     IsPassing = Column(Boolean, nullable=False, default=False)
-    IsPractice = Column(Boolean, nullable=False, default=False)
-    PracticeProblemId = Column(Integer, ForeignKey('PracticeProblems.Id'), nullable=True)
+    IsCheckpoint = Column(Boolean, nullable=False, default=False)
+    CheckpointId = Column(Integer, ForeignKey('Checkpoints.Id'), nullable=True)
     Time = Column(Date)
     User = Column(Integer, ForeignKey('Users.Id'))
     Project = Column(Integer, ForeignKey('Projects.Id'))
@@ -74,7 +87,9 @@ class Classes(db.Model):
     __tablename__ = "Classes"
     Id = Column(Integer, primary_key=True)
     Name = Column(String)
+    SchoolId = Column(Integer, ForeignKey('Schools.Id'))
     Tid = Column(String)
+    School = relationship('Schools', back_populates='Classes')
 
 class Labs(db.Model):
     __tablename__ = "Labs"
@@ -97,46 +112,45 @@ class ClassAssignments(db.Model):
     LabId = Column(Integer, ForeignKey('Labs.Id'))
     LectureId = Column(Integer, ForeignKey('LectureSections.Id'))
 
-class StudentUnlocks(db.Model):
-    __tablename__ = "StudentUnlocks"
-    UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
-    ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
-    Time = Column(DateTime)
 
 class Testcases(db.Model):
     __tablename__ = "Testcases"
     Id = Column(Integer, primary_key=True, autoincrement=True)
     ProjectId = Column(Integer, ForeignKey('Projects.Id'))
-    PracticeProblemId = Column(Integer, ForeignKey('PracticeProblems.Id'), nullable=True)
+    CheckpointId = Column(Integer, ForeignKey('Checkpoints.Id'), nullable=True)
     Name = Column(String)
     Description = Column(String)
     input = Column(String)
     Output = Column(String)
     Hidden = Column(Boolean, default=False)
-    Practice = Column(Boolean, default=False)
+    Checkpoint = Column(Boolean, default=False)
 
-class OHVisits(db.Model):
-    __tablename__ = "OHVisits"
-    Sqid = Column(Integer, primary_key=True, autoincrement=True)
-    StudentQuestionscol = Column(String)
-    ruling = Column(Integer)
-    dismissed = Column(Integer)
-    StudentId = Column(Integer, ForeignKey('Users.Id'))
-    TimeSubmitted = Column(DateTime)
-    projectId = Column(Integer, ForeignKey('Projects.Id'))
-    TimeAccepted = Column(DateTime)
-    TimeCompleted = Column(DateTime)
 
-class StudentGrades(db.Model):
-    __tablename__ = "StudentGrades"
+class MainAssignmentGrades(db.Model):
+    __tablename__ = "MainAssignmentGrades"
     Sid = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
     Pid = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
     Grade = Column(Integer)
     SubmissionId = Column(Integer, ForeignKey('Submissions.Id'))
     ScoringMode = Column(String(20))
-    ErrorPointsJson = Column(String(10000))
-    ErrorDefsJson = Column(String(20000))
+    ErrorPointsJson = Column(Text)
+    ErrorDefsJson = Column(Text)
     UpdatedAt = Column(DateTime)
+
+
+
+class CheckpointGrades(db.Model):
+    __tablename__ = "CheckpointGrades"
+    SubmissionId = Column(Integer, ForeignKey('Submissions.Id'), primary_key=True)
+    Sid = Column(Integer, ForeignKey('Users.Id'))
+    Pid = Column(Integer, ForeignKey('Projects.Id'))
+    Grade = Column(Integer)
+    ScoringMode = Column(String(20))
+    ErrorPointsJson = Column(Text)
+    ErrorDefsJson = Column(Text)
+    UpdatedAt = Column(DateTime)
+
+
 
 class StudentSuggestions(db.Model):
     __tablename__ = "StudentSuggestions"
@@ -145,26 +159,7 @@ class StudentSuggestions(db.Model):
     StudentSuggestionscol = Column(String)
     TimeSubmitted = Column(DateTime)
 
-class SubmissionCharges(db.Model):
-    __tablename__ = "SubmissionCharges"
-    Id = Column(Integer, primary_key=True, autoincrement=True)
-    UserId = Column(Integer)
-    ClassId = Column(Integer)
-    BaseCharge = Column(Integer)
-    RewardCharge = Column(Integer)
-    
-class SubmissionChargeRedeptions(db.Model):
-    __tablename__ = "SubmissionChargeRedeptions"
-    Id = Column(Integer, primary_key=True, autoincrement=True)
-    UserId = Column(Integer)
-    ClassId = Column(Integer)
-    projectId = Column(Integer)
-    Type = Column(String)
-    ClaimedTime = Column(DateTime)
-    RedeemedTime = Column(DateTime)
-    SubmissionId = Column(Integer)
-    Recouped = Column(Integer)
-    
+
 class SubmissionManualErrors(db.Model):
     __tablename__ = "SubmissionManualErrors"
     Id = Column(Integer, primary_key=True, autoincrement=True)

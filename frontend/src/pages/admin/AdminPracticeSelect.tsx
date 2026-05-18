@@ -135,7 +135,7 @@ export default function AdminPracticeSelect() {
     return (
         <div>
             <Helmet>
-                <title>[Admin] TA-Bot</title>
+                <title>[Admin] MAAT</title>
             </Helmet>
 
             <MenuComponent
@@ -149,6 +149,7 @@ export default function AdminPracticeSelect() {
 
             <DirectoryBreadcrumbs
                 items={[
+                    { label: 'School Selection', to: '/admin/classes' },
                     { label: 'Class Selection', to: '/admin/classes' },
                     { label: 'Project List', to: `/admin/${classId}/projects/` },
                     { label: 'Project Manage', to: `/admin/${classId}/project/${projectId}/manage/` },

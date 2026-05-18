@@ -1,11 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { eachDayOfInterval } from 'date-fns'
 import axios from 'axios'
-import DatePicker from 'react-datepicker'
-import 'react-datepicker/dist/react-datepicker.css'
 import '../../styling/AdminProjectManage.scss'
 import '../../styling/FileUploadCommon.scss'
 import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
@@ -16,7 +14,6 @@ import {
     FaAlignJustify,
     FaCircleNotch,
     FaCloudUploadAlt,
-    FaClipboardCheck,
     FaCode,
     FaDownload,
     FaEdit,
@@ -52,22 +49,29 @@ type AdminProjectManageProps = {
 
 const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) => {
 
-    const { id, class_id, practice_problem_id } = useParams()
-    const navigate = useNavigate()
+    const { id, school_id, class_id, module_id, practice_problem_id, checkpoint_id } = useParams()
 
+    const [searchParams] = useSearchParams()
+
+    const schoolId = Number(school_id)
     const project_id = Number(id)
     const classId = Number(class_id)
+    const moduleId = Number(module_id)
 
-    if (Number.isNaN(project_id) || Number.isNaN(classId)) {
-        return <div>Error: Missing or invalid project or class ID.</div>
+    if (Number.isNaN(project_id) || Number.isNaN(schoolId) || Number.isNaN(classId) || Number.isNaN(moduleId)) {
+        return <div>Error: Missing or invalid school, class, module, or project ID.</div>
     }
+
+    const moduleListUrl = `/admin/school/${schoolId}/class/${classId}/modules`
+    const moduleOverviewUrl = `/admin/school/${schoolId}/class/${classId}/module/${moduleId}/overview`
+    const projectBaseUrl = `/admin/school/${schoolId}/class/${classId}/module/${moduleId}/project/${project_id}`
 
     const [testcases, setTestcases] = useState<Array<Testcase>>([])
     const [ProjectName, setProjectName] = useState<string>('')
     const [ProjectLanguage, setProjectLanguage] = useState<string>('')
     const [serverProjectNameSnapshot, setServerProjectNameSnapshot] = useState<string>('')
     const [serverProjectLanguageSnapshot, setServerProjectLanguageSnapshot] = useState<string>('')
-    const [SubmitButton, setSubmitButton] = useState<string>('Create new assignment')
+    const [SubmitButton, setSubmitButton] = useState<string>('Submit file changes')
     const [SubmitJSON, setSubmitJSON] = useState<string>('Submit JSON file')
     const [getJSON, setGetJSON] = useState<string>('Export test cases to JSON')
     const [SolutionFiles, setSolutionFiles] = useState<File[]>([])
@@ -85,7 +89,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const [serverProjectStartSnapshot, setServerProjectStartSnapshot] = useState<string>('')
     const [serverProjectEndSnapshot, setServerProjectEndSnapshot] = useState<string>('')
     const [jsonfilename, setjsonfilename] = useState<string>('')
-    const [activeTab, setActiveTab] = useState<'psettings' | 'testcases'>('psettings')
+    const [activeStep, setActiveStep] = useState<'files' | 'testcases'>('files')
     const [submittingProject, setSubmittingProject] = useState<boolean>(false)
     const [submittingTestcase, setSubmittingTestcase] = useState<boolean>(false)
     const [submittingJson, setSubmittingJson] = useState<boolean>(false)
@@ -101,16 +105,15 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const [serverAdditionalFileNamesSnapshot, setServerAdditionalFileNamesSnapshot] = useState<string[]>([])
     const [removedAdditionalFiles, setRemovedAdditionalFiles] = useState<string[]>([])
     const [mainJavaFileName, setMainJavaFileName] = useState<string>('')
-    const [practiceProblemsEnabled, setPracticeProblemsEnabled] = useState<boolean>(false)
-    const [serverPracticeProblemsEnabledSnapshot, setServerPracticeProblemsEnabledSnapshot] = useState<boolean>(false)
     const [practiceProblemNumber, setPracticeProblemNumber] = useState<number | null>(null)
 
+    useEffect(() => {
+        const requestedStep = searchParams.get('step')
 
-
-    async function togglePracticeProblemsEnabled() {
-        const next = !practiceProblemsEnabled
-        setPracticeProblemsEnabled(next)
-    }
+        if (requestedStep === 'testcases' || requestedStep === 'files') {
+            setActiveStep(requestedStep)
+        }
+    }, [searchParams])
 
     useEffect(() => {
         document.body.style.overflow = ''
@@ -135,22 +138,24 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const API = import.meta.env.VITE_API_URL
     const authHeader = { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` }
     const isPractice = !!practiceMode
-    const practiceProblemId = isPractice && practice_problem_id ? Number(practice_problem_id) : null
+    const practiceProblemId = isPractice && (checkpoint_id || practice_problem_id) ? Number(checkpoint_id || practice_problem_id) : null
     const practiceProblemQuery =
-        isPractice && practiceProblemId ? `&practice_problem_id=${practiceProblemId}` : ''
+        isPractice && practiceProblemId ? `&checkpoint_id=${practiceProblemId}` : ''
 
     // Testcases must NOT be editable unless solution exists (main or practice)
     const hasSolution =
         SolutionFiles.length > 0 || serverSolutionFileNames.length > 0
+    const hasTestcases = testcases.some((tc) => tc.id > 0)
+
+    const filesNeedSetup = !hasSolution
+    const testcasesNeedSetup = !hasTestcases
 
     const pageTitleText =
-        isPractice
-            ? (
-                edit
-                    ? `Edit Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
-                    : `Create Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
-            )
-            : (edit ? 'Edit Assignment' : 'Create Assignment')
+        ProjectName.trim()
+        || serverProjectNameSnapshot.trim()
+        || (isPractice
+            ? `Practice Problem${practiceProblemNumber ? ` ${practiceProblemNumber}` : ''}`
+            : 'Project')
 
     const SUPPORTED_RE = /\.(py|c|h|java|rkt|scm|cpp)$/i
     const SOLUTION_ALLOWED_RE = /\.(py|java|c|h|rkt|scm)$/i
@@ -229,6 +234,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                     url.searchParams.set('project_id', String(project_id))
                     url.searchParams.set('relpath', name)
                     url.searchParams.set('practice', isPractice ? 'true' : 'false')
+                    if (isPractice && practiceProblemId) url.searchParams.set('checkpoint_id', String(practiceProblemId))
                     const res = await fetch(url, { headers: authHeader })
                     if (!res.ok) return
                     const txt = await res.text()
@@ -334,6 +340,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                     url.searchParams.set('project_id', String(project_id))
                     url.searchParams.set('relpath', name)
                     url.searchParams.set('practice', isPractice ? 'true' : 'false')
+                    if (isPractice && practiceProblemId) url.searchParams.set('checkpoint_id', String(practiceProblemId))
                     const res = await fetch(url, { headers: authHeader })
                     const text = res.ok ? await res.text() : '[Could not load file from server]'
                     return `// ===== ${name} =====\n${text}`
@@ -377,7 +384,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         if (relpath) url.searchParams.set('relpath', relpath)
 
         url.searchParams.set('practice', isPractice ? 'true' : 'false')
-        if (isPractice && practiceProblemId) url.searchParams.set('practice_problem_id', String(practiceProblemId))
+        if (isPractice && practiceProblemId) url.searchParams.set('checkpoint_id', String(practiceProblemId))
 
         const res = await fetch(url, { headers: authHeader })
         if (!res.ok) return
@@ -541,7 +548,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             setShowAdditionalFile(false)
             setMainJavaFileName('')
             setEdit(false)
-            setSubmitButton('Create new assignment')
+            setSubmitButton('Submit file changes')
         }
 
         const load = async () => {
@@ -610,10 +617,6 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
                     setProjectLanguage(data[project_id][4])
                     setServerProjectLanguageSnapshot(data[project_id][4])
-                    const ppe = parseHidden(data[project_id][8])
-                    setPracticeProblemsEnabled(ppe)
-                    setServerPracticeProblemsEnabledSnapshot(ppe)
-
                     const pnRaw = (data[project_id] as any)[9]
                     const pn = typeof pnRaw === 'number' ? pnRaw : Number(pnRaw)
                     setPracticeProblemNumber(isPractice && pn > 0 ? pn : null)
@@ -642,7 +645,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                     setServerShowAdditionalFileSnapshot(normalizedAdditionalFiles.length > 0)
 
                     setEdit(true)
-                    setSubmitButton('Submit changes')
+                    setSubmitButton('Submit file changes')
                 }
 
                 // Ensure filesystem/solution lists match the newly loaded (project_id, practice) state
@@ -843,10 +846,11 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             formData.append('file', JsonFile!)
             formData.append('project_id', project_id.toString())
             formData.append('class_id', classId.toString())
-            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
+            formData.append('module_id', moduleId.toString())
+            formData.append('practice_problems_enabled', 'true')
             formData.append('practice', isPractice ? 'true' : 'false')
             if (isPractice && practiceProblemId) {
-                formData.append('practice_problem_id', String(practiceProblemId))
+                formData.append('checkpoint_id', String(practiceProblemId))
             }
 
             await axios.post(import.meta.env.VITE_API_URL + `/projects/json_add_testcases`, formData, {
@@ -914,7 +918,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             formData.append('end_date', formatDateTimeLocal(ProjectEndDate))
             formData.append('language', ProjectLanguage)
             formData.append('class_id', classId.toString())
-            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
+            formData.append('module_id', moduleId.toString())
+            formData.append('practice_problems_enabled', 'true')
 
             const res = await axios.post(`${import.meta.env.VITE_API_URL}/projects/create_project`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
@@ -922,7 +927,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             const newId = res.data
 
             window.alert('Your project has been created! Next, open the "Test Cases" tab to add test cases.')
-            window.location.href = `/admin/${classId}/project/${newId}/manage/`
+            window.location.href = `/admin/school/${schoolId}/class/${classId}/module/${moduleId}/project/${newId}/manage`
         } catch (error) {
             console.log(error)
         }
@@ -933,32 +938,16 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
     async function handleEditSubmit() {
         try {
-            if (!ProjectName || !ProjectStartDate || !ProjectEndDate || !ProjectLanguage) {
-                window.alert('Please fill out all fields')
+            if (!ProjectLanguage) {
+                window.alert('Please upload a valid solution file so the project language can be detected.')
                 return
             }
+
+            const safeProjectName = ProjectName || serverProjectNameSnapshot || 'Project'
+            const safeProjectStart = ProjectStartDate || (serverProjectStartSnapshot ? new Date(serverProjectStartSnapshot) : defaultStart)
+            const safeProjectEnd = ProjectEndDate || (serverProjectEndSnapshot ? new Date(serverProjectEndSnapshot) : defaultEnd)
 
             setSubmittingProject(true)
-            const conflictCheck = await axios.post(
-                `${import.meta.env.VITE_API_URL}/projects/check_time_conflict`,
-                {
-                    project_id: project_id,
-                    class_id: classId,
-                    start_date: formatDateTimeLocal(ProjectStartDate!),
-                    end_date: formatDateTimeLocal(ProjectEndDate!),
-                },
-                { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
-            )
-
-            if (conflictCheck?.data?.conflict) {
-                const first = conflictCheck.data.conflicts?.[0]
-                const s = first?.start ? new Date(first.start).toLocaleString() : ''
-                const e = first?.end ? new Date(first.end).toLocaleString() : ''
-                window.alert(
-                    `The selected dates overlap with an existing assignment "${first?.name ?? 'Unknown'}" (${s} - ${e}). Please adjust your dates.`
-                )
-                return
-            }
 
             const formData = new FormData()
             formData.append('id', project_id.toString())
@@ -977,19 +966,20 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                 formData.append('clearAdditionalFiles', 'true')
             }
 
-            formData.append('name', ProjectName)
-            formData.append('start_date', formatDateTimeLocal(ProjectStartDate!))
-            formData.append('end_date', formatDateTimeLocal(ProjectEndDate!))
+            formData.append('name', safeProjectName)
+            formData.append('start_date', formatDateTimeLocal(safeProjectStart))
+            formData.append('end_date', formatDateTimeLocal(safeProjectEnd))
             formData.append('language', ProjectLanguage)
             formData.append('class_id', classId.toString())
-            formData.append('practice_problems_enabled', practiceProblemsEnabled ? 'true' : 'false')
+            formData.append('module_id', moduleId.toString())
+            formData.append('practice_problems_enabled', 'true')
 
             await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_project`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
 
-            window.alert('Project information saved. Next, go to the "Test Cases" tab to create test cases.')
-            window.location.href = `/admin/${classId}/project/${project_id}/manage/`
+            window.alert('Project files saved. Next, go to the "Test Cases" tab to create or update test cases.')
+            window.location.href = `${projectBaseUrl}/manage`
         } catch (error) {
             console.log(error)
         }
@@ -1035,7 +1025,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         formData.append('hidden', hidden ? 'true' : 'false')
         formData.append('practice', isPractice ? 'true' : 'false')
         if (isPractice && practiceProblemId) {
-            formData.append('practice_problem_id', String(practiceProblemId))
+            formData.append('checkpoint_id', String(practiceProblemId))
         }
 
         try {
@@ -1184,10 +1174,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             try {
                 setSubmittingProject(true)
                 await axios.post(
-                    `${import.meta.env.VITE_API_URL}/projects/rename_practice_problem`,
+                    `${import.meta.env.VITE_API_URL}/projects/rename_checkpoint`,
                     {
                         project_id,
-                        practice_problem_id: practiceProblemId,
+                        checkpoint_id: practiceProblemId,
                         name: ProjectName,
                     },
                     { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
@@ -1216,10 +1206,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             SolutionFiles.forEach(f => formData.append('solutionFiles', f))
             formData.append('assignmentdesc', AssignmentDesc)
             selectedAddFiles.forEach(f => formData.append('additionalFiles', f))
-            formData.append('practice_problem_id', String(practiceProblemId))
+            formData.append('checkpoint_id', String(practiceProblemId))
             formData.append('name', ProjectName)
 
-            await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_practice_project_files`, formData, {
+            await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_checkpoint_project_files`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
 
@@ -1287,8 +1277,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                 SolutionFiles.length > 0 ||
                 !!AssignmentDesc ||
                 selectedAddFiles.length > 0 ||
-                showAdditionalFile ||
-                practiceProblemsEnabled
+                showAdditionalFile
             )
         }
 
@@ -1306,7 +1295,6 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             formatDateTimeLocal(ProjectStartDate) !== serverProjectStartSnapshot ||
             formatDateTimeLocal(ProjectEndDate) !== serverProjectEndSnapshot ||
             ProjectLanguage !== serverProjectLanguageSnapshot ||
-            practiceProblemsEnabled !== serverPracticeProblemsEnabledSnapshot ||
             showAdditionalFile !== serverShowAdditionalFileSnapshot ||
             !!AssignmentDesc ||
             SolutionFiles.length > 0 ||
@@ -1327,7 +1315,6 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         AssignmentDesc,
         selectedAddFiles,
         showAdditionalFile,
-        practiceProblemsEnabled,
         serverProjectNameSnapshot,
         serverProjectStartSnapshot,
         serverProjectEndSnapshot,
@@ -1336,7 +1323,6 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         serverSolutionFileNamesSnapshot,
         serverAdditionalFileNamesSnapshot,
         serverShowAdditionalFileSnapshot,
-        serverPracticeProblemsEnabledSnapshot,
         additionalFileNames,
         removedAdditionalFiles,
         descfileName,
@@ -1363,7 +1349,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         formData.append('practice', isPractice ? 'true' : 'false')
 
         if (isPractice && practiceProblemId) {
-            formData.append('practice_problem_id', String(practiceProblemId))
+            formData.append('checkpoint_id', String(practiceProblemId))
         }
 
         if (modalDraft.name === '' || modalDraft.input === '' || modalDraft.description === '') {
@@ -1388,7 +1374,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
     function get_testcase_json() {
         axios
-            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}`, {
+            .get(import.meta.env.VITE_API_URL + `/projects/get_testcases?id=${project_id}&practice=${isPractice ? 'true' : 'false'}${practiceProblemQuery}`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
@@ -1510,7 +1496,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     return (
         <div>
             <Helmet>
-                <title>[Admin] TA-Bot</title>
+                <title>[Admin] MAAT</title>
             </Helmet>
 
             <MenuComponent
@@ -1524,18 +1510,14 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: 'Class Selection', to: '/admin/classes' },
-                    { label: 'Project List', to: `/admin/${classId}/projects/` },
-                    { label: 'Project Manage', to: `/admin/${classId}/project/${project_id}/manage/` },
-                    ...(isPractice
-                        ? [
-                            {
-                                label: 'Practice Select' as const,
-                                to: `/admin/${classId}/project/${project_id}/practice/select`,
-                            },
-                            { label: 'Practice Problem' as const },
-                        ]
-                        : []),
+                    { label: 'School Selection', to: '/admin/schools' },
+                    { label: 'Class Selection', to: `/admin/school/${schoolId}/classes` },
+                    { label: 'Module List', to: moduleListUrl },
+                    {
+                        label: 'Module Details',
+                        to: project_id > 0 ? moduleOverviewUrl : moduleListUrl,
+                    },
+                    { label: pageTitleText },
                 ]}
             />
 
@@ -1544,118 +1526,58 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                     <div className={`admin-project-config-container${modalOpen ? ' blurred' : ''}`}>
                         <div className="pageTitle">{pageTitleText}</div>
 
-                        <div className="tab-menu">
-                            <button
-                                className={
-                                    activeTab === 'psettings'
-                                        ? 'active menu-item-project-settings'
-                                        : 'menu-item-project-settings'
-                                }
-                                onClick={() => setActiveTab('psettings')}
-                            >
-                                Project Settings
-                            </button>
-                            <button
-                                className={`menu-item-testcases ${activeTab === 'testcases' ? 'active' : ''}`}
-                                onClick={() => setActiveTab('testcases')}
-                                disabled={!hasSolution}
-                                title={
-                                    !hasSolution
-                                        ? 'Upload solution file(s) first to manage test cases.'
-                                        : undefined
-                                }
-
-                            >
-                                Test Cases
-                            </button>
+                        <div className="step-menu-shell">
+                            <div className="step-menu" role="tablist" aria-label="Project management pages">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={activeStep === 'files'}
+                                    aria-controls="project-files-panel"
+                                    className={`step-menu-item ${activeStep === 'files' ? 'active' : ''}${filesNeedSetup ? ' needs-setup' : ''}`}
+                                    onClick={() => setActiveStep('files')}
+                                >
+                                    <span className="step-title">
+                                        Files
+                                        {filesNeedSetup && <span className="step-needs-indicator">Needs setup</span>}
+                                    </span>
+                                    <span className="step-state">{activeStep === 'files' ? 'Current page' : 'Go to page'}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={activeStep === 'testcases'}
+                                    aria-controls="project-testcases-panel"
+                                    className={`step-menu-item ${activeStep === 'testcases' ? 'active' : ''}${testcasesNeedSetup ? ' needs-setup' : ''}`}
+                                    onClick={() => setActiveStep('testcases')}
+                                    title={
+                                        !hasSolution
+                                            ? 'Upload solution file(s) first, then create or upload test cases.'
+                                            : testcasesNeedSetup
+                                                ? 'Create or upload test cases to finish setup.'
+                                                : undefined
+                                    }
+                                >
+                                    <span className="step-title">
+                                        Test Cases
+                                        {testcasesNeedSetup && <span className="step-needs-indicator">Needs setup</span>}
+                                    </span>
+                                    <span className="step-state">{activeStep === 'testcases' ? 'Current page' : 'Go to page'}</span>
+                                </button>
+                            </div>
                         </div>
 
-                        <div className="tab-content">
-                            {activeTab === 'psettings' && (
-                                <div className="pane-project-settings">
+                        <div className="step-content">
+                            {activeStep === 'files' && (
+                                <div
+                                    id="project-files-panel"
+                                    role="tabpanel"
+                                    className={`pane-project-settings wizard-step-${activeStep}`}
+                                >
                                     <form className="form-project-settings">
                                         <div className="segment-main">
-                                            <div className="form-field input-field">
-                                                <label>{isPractice ? 'Practice Problem Name' : 'Project Name'}</label>
-                                                <input
-                                                    type="text"
-                                                    value={ProjectName}
-                                                    onChange={e => setProjectName(e.currentTarget.value)}
-                                                />
-                                            </div>
-
-                                            <div className="form-group date-range-group">
-                                                <div className={`form-field input-field ${overlapError ? 'input-error' : ''}`}>
-                                                    <label>Start Date</label>
-                                                    <DatePicker
-                                                        selected={ProjectStartDate}
-                                                        onChange={(date: Date | null) => setDate(date, true)}
-                                                        disabled={isPractice}
-                                                        showTimeSelect
-                                                        timeFormat="h:mm aa"
-                                                        timeIntervals={15}
-                                                        injectTimes={getInjectedTimes(ProjectStartDate || new Date())}
-                                                        timeCaption="Time"
-                                                        dateFormat="yyyy-MM-dd h:mm aa"
-                                                        highlightDates={[
-                                                            {
-                                                                "react-datepicker__day--highlighted": highlightDates
-                                                            },
-
-                                                            {
-                                                                "react-datepicker__day--highlighted-red": blockedDates
-                                                            }
-                                                        ]}
-                                                        timeClassName={handleTimeColors}
-                                                        selectsStart
-                                                        startDate={ProjectStartDate}
-                                                        endDate={ProjectEndDate}
-                                                        placeholderText="Select start date"
-                                                    />
-                                                </div>
-                                                <div className={`form-field input-field ${overlapError ? 'input-error' : ''}`}>
-                                                    <label>End Date</label>
-                                                    <DatePicker
-                                                        selected={ProjectEndDate}
-                                                        onChange={(date: Date | null) => setDate(date, false)}
-                                                        disabled={isPractice}
-                                                        showTimeSelect
-                                                        timeFormat="h:mm aa"
-                                                        timeIntervals={15}
-                                                        injectTimes={getInjectedTimes(ProjectEndDate || new Date())}
-                                                        timeCaption="Time"
-                                                        dateFormat="yyyy-MM-dd h:mm aa"
-                                                        highlightDates={[
-                                                            {
-                                                                highlightDates
-                                                            },
-
-                                                            {
-                                                                "react-datepicker__day--highlighted-red": blockedDates
-                                                            }
-                                                        ]}
-                                                        timeClassName={handleTimeColors}
-                                                        selectsEnd
-                                                        startDate={ProjectStartDate}
-                                                        endDate={ProjectEndDate}
-                                                        placeholderText="Select end date"
-                                                    />
-                                                </div>
-                                            </div>
-                                            {overlapError && (
-                                                <span className="overlap-error-text">
-                                                    Error: Dates overlap with another project
-                                                </span>
-                                            )}
-
-                                            <div className={`form-group language-group${isPractice ? ' disabled' : ''}`}>
-                                                <label>Language</label>
-                                                <div className="detected-language">{languageLabel}</div>
-                                            </div>
-
                                             {hasUnsavedProjectChanges && (
                                                 <div className="unsaved-project-warning" role="status" aria-live="polite">
-                                                    You have unsaved Project Settings changes. They will not be saved until you click "{SubmitButton}".
+                                                    You have unsaved file or testcase settings. They will not be saved until you click "{SubmitButton}".
                                                 </div>
                                             )}
 
@@ -1812,7 +1734,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                             e.preventDefault()
                                                             const files = e.dataTransfer.files
                                                             if (files && files.length > 0) {
-                                                                handleSolutionFilesChange({ target: { files } } as any)
+                                                                handleDescFileChange({ target: { files } } as any)
                                                             }
                                                         }}
                                                     >
@@ -1935,49 +1857,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                     )}
                                                 </div>
 
-                                                <div className={`feature-toggle-row${isPractice ? ' single-column' : ''}`}>
-                                                    {!isPractice && (
-                                                        <div className={`feature-toggle-card practice-toggle-card ${practiceProblemsEnabled ? 'enabled' : 'disabled'}`}>
-                                                            <button
-                                                                type="button"
-                                                                className="feature-toggle-button"
-                                                                aria-pressed={practiceProblemsEnabled}
-                                                                onClick={togglePracticeProblemsEnabled}
-                                                            >
-                                                                <span className="feature-toggle-button-content">
-                                                                    <span className="feature-toggle-icon" aria-hidden="true">
-                                                                        <FaClipboardCheck />
-                                                                    </span>
-                                                                    <span className="feature-toggle-copy">
-                                                                        <span className="feature-toggle-heading-row">
-                                                                            <span className="feature-toggle-label">Practice Problems</span>
-                                                                            <span className={`feature-toggle-state ${practiceProblemsEnabled ? 'enabled' : 'disabled'}`}>
-                                                                                {practiceProblemsEnabled ? 'Enabled' : 'Disabled'}
-                                                                            </span>
-                                                                        </span>
-                                                                        <span className="feature-toggle-description">
-                                                                            Enable practice problems for this assignment.
-                                                                        </span>
-                                                                    </span>
-                                                                </span>
-                                                            </button>
-
-                                                            {practiceProblemsEnabled &&
-                                                                edit &&
-                                                                project_id > 0 &&
-                                                                practiceProblemsEnabled === serverPracticeProblemsEnabledSnapshot && (
-                                                                    <button
-                                                                        type="button"
-                                                                        className="manage-practice-problems-link"
-                                                                        onClick={() => navigate(`/admin/${classId}/project/${project_id}/practice/select`)}
-                                                                    >
-                                                                        Manage practice problems
-                                                                    </button>
-                                                                )}
-                                                        </div>
-                                                    )}
-
-                                                    <div className={`feature-toggle-card additional-files-toggle-card ${showAdditionalFile ? 'enabled' : 'disabled'}${isPractice ? ' full-width' : ''}`}>
+                                                <div className="feature-toggle-row single-column">
+                                                    <div className={`feature-toggle-card additional-files-toggle-card ${showAdditionalFile ? 'enabled' : 'disabled'} full-width`}>
                                                         <button
                                                             type="button"
                                                             className="feature-toggle-button"
@@ -2062,15 +1943,15 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                 </div>
                             )}
 
-                            {activeTab === 'testcases' && (
-                                <div className="pane-testcases">
+                            {activeStep === 'testcases' && (
+                                <div id="project-testcases-panel" role="tabpanel" className="pane-testcases">
                                     <div className="testcase-management-group">
                                         {!hasSolution ? (
                                             <div style={{ padding: 16 }}>
                                                 Test cases are disabled until you upload solution file(s).
                                                 <div style={{ marginTop: 12 }}>
-                                                    Go to the Project Settings tab and upload the solution file(s),
-                                                    then return here.
+                                                    Go to Step 1: Files, upload the solution file(s), save the project,
+                                                    then return to this step.
                                                 </div>
                                             </div>
                                         ) : (
@@ -2166,7 +2047,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                             e.preventDefault()
                                                             const files = e.dataTransfer.files
                                                             if (files && files.length > 0) {
-                                                                handleDescFileChange({ target: { files } } as any)
+                                                                handleJsonFileChange({ target: { files } } as any)
                                                             }
                                                         }}
                                                     >

@@ -1,89 +1,209 @@
 import React, { Component } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import axios from 'axios';
 
 import LoginPage from './pages/public/Login';
-import LandingPage from './pages/public/Landing';
+import HomePage from './pages/public/HomePage';
 import NotFound from './pages/public/NotFound';
 
 import StudentUpload from './pages/student/StudentUpload';
 import StudentOutputDiff from './pages/student/StudentOutputDiff';
+import StudentSchoolSelect from './pages/student/StudentSchoolSelect';
 import StudentClassSelection from './pages/student/StudentClassSelection';
+import StudentModuleList from './pages/student/StudentModuleList';
+import StudentModuleDetails from './pages/student/StudentModuleDetails';
 import StudentOfficeHours from './pages/student/StudentOfficeHours';
 import StudentPastSubmissions from "./pages/student/StudentPastSubmissions";
 import StudentPracticeSelect from './pages/student/StudentPracticeSelect';
 
-import AdminClassSelection from './pages/admin/AdminClassSelection';
+import AdminSchoolSelect from './pages/admin/AdminSchoolSelect';
+import AdminClassSelect from './pages/admin/AdminClassSelect';
 import AdminGrading from './pages/admin/AdminGrading';
 import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
-import AdminProjectList from './pages/admin/AdminProjectList';
+import AdminModuleList from './pages/admin/AdminModuleList';
+import AdminModuleDetails from './pages/admin/AdminModuleDetails';
 import AdminProjectManage from './pages/admin/AdminProjectManage';
 import AdminPracticeSelect from './pages/admin/AdminPracticeSelect';
-import AdminStudentRoster from './pages/admin/AdminStudentRoster';
+import AdminStudentList from './pages/admin/AdminStudentList';
 import AdminUpload from './pages/admin/AdminUpload';
 import AdminViewStudentCode from './pages/admin/AdminViewStudentCode';
 
 import ProtectedRoute from './pages/components/ProtectedRoute';
 
+const redirectLegacyAdminRoute = () => {
+    return "/admin/schools";
+};
+
+const configureAxiosInterceptors = () => {
+    axios.interceptors.response.use(
+        function (successRes) {
+            return successRes;
+        },
+        function (error) {
+            if (error.response && (error.response.status === 401 || error.response.status === 422 || error.response.status === 419)) {
+                localStorage.removeItem("AUTOTA_AUTH_TOKEN");
+                localStorage.removeItem("AUTOTA_USER_ROLE");
+                sessionStorage.clear();
+                window.location.href = "/login";
+            }
+            return Promise.reject(error);
+        });
+};
+
+configureAxiosInterceptors();
+
 class App extends Component {
-
     render() {
-        axios.interceptors.response.use(
-            function (successRes) {
-                return successRes;
-            },
-            function (error) {
-                if (error.response && (error.response.status === 401 || error.response.status === 422 || error.response.status === 419)) {
-                    localStorage.removeItem("AUTOTA_AUTH_TOKEN");
-                    window.location.href = "/login";
-                }
-                return Promise.reject(error);
-            });
-
         return (
             <BrowserRouter>
                 <Routes>
                     <Route path="/login" element={<LoginPage />} />
-                    <Route path="/" element={<LandingPage />} />
+
+                    <Route path="/" element={<HomePage />} />
+
+                    <Route path="/admin/schools" element={
+                        <ProtectedRoute>
+                            <AdminSchoolSelect />
+                        </ProtectedRoute>
+                    } />
                     <Route path="/admin/classes" element={
                         <ProtectedRoute>
-                            <AdminClassSelection />
+                            <Navigate to="/admin/schools" replace />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:id/projects/*" element={
+                    <Route path="/admin/school/:school_id/classes" element={
                         <ProtectedRoute>
-                            <AdminProjectList />
+                            <AdminClassSelect />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:id" element={
+                    <Route path="/admin/school/:school_id/class/:class_id/modules/*" element={
                         <ProtectedRoute>
-                            <AdminStudentRoster />
+                            <AdminModuleList />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:id/manage" element={
+
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/overview" element={
+                        <ProtectedRoute>
+                            <AdminModuleDetails />
+                        </ProtectedRoute>
+                    } />
+
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/overview" element={
+                        <ProtectedRoute>
+                            <Navigate to="../../overview" replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/submissions" element={
+                        <ProtectedRoute>
+                            <AdminStudentList />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/manage" element={
                         <ProtectedRoute>
                             <AdminProjectManage />
                         </ProtectedRoute>
                     } />
 
-                    <Route path="/admin/:class_id/project/:id/practice/:practice_problem_id" element={
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/checkpoint/:checkpoint_id/submissions" element={
+                        <ProtectedRoute>
+                            <AdminStudentList />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/checkpoint/:checkpoint_id/manage" element={
                         <ProtectedRoute>
                             <AdminProjectManage practiceMode />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/:class_id/project/:id/practice/select" element={
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/checkpoint/select" element={
                         <ProtectedRoute>
                             <AdminPracticeSelect />
                         </ProtectedRoute>
                     } />
 
-                    <Route path="/admin/:class_id/project/:project_id/grade/:id" element={
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:project_id/grade/:id" element={
                         <ProtectedRoute>
                             <AdminGrading />
                         </ProtectedRoute>
                     } />
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/grade/:id" element={
+                        <ProtectedRoute>
+                            <AdminGrading />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:project_id/codeview/:id" element={
+                        <ProtectedRoute>
+                            <AdminViewStudentCode />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/codeview/:id" element={
+                        <ProtectedRoute>
+                            <AdminViewStudentCode />
+                        </ProtectedRoute>
+                    } />
+
+                    <Route path="/admin/:id/modules/*" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/module/:module_id/overview" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/overview" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/submissions" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/module/:module_id/project/:id/manage" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/module/:module_id/project/:project_id/grade/:id" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/module/:module_id/project/:project_id/codeview/:id" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+
+                    <Route path="/admin/:class_id/project/:id/overview" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:id" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:id/manage" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:project_id/grade/:id" element={
+                        <ProtectedRoute>
+                            <Navigate to={redirectLegacyAdminRoute()} replace />
+                        </ProtectedRoute>
+                    } />
                     <Route path="/admin/:class_id/project/:project_id/codeview/:id" element={
+                        <ProtectedRoute>
+                            <AdminViewStudentCode />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/:class_id/project/:project_id/checkpoint/:checkpoint_id/codeview/:id" element={
                         <ProtectedRoute>
                             <AdminViewStudentCode />
                         </ProtectedRoute>
@@ -104,22 +224,68 @@ class App extends Component {
                         </ProtectedRoute>
                     } />
 
+                    <Route path="/student/schools" element={
+                        <ProtectedRoute>
+                            <StudentSchoolSelect />
+                        </ProtectedRoute>
+                    } />
                     <Route path="/student/classes" element={
+                        <ProtectedRoute>
+                            <Navigate to="/student/schools" replace />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/school/:school_id/classes" element={
                         <ProtectedRoute>
                             <StudentClassSelection />
                         </ProtectedRoute>
                     } />
+                    <Route path="/student/school/:school_id/class/:class_id/modules/*" element={
+                        <ProtectedRoute>
+                            <StudentModuleList />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id" element={
+                        <ProtectedRoute>
+                            <StudentModuleDetails />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/upload" element={
+                        <ProtectedRoute>
+                            <StudentUpload />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/code/:id?" element={
+                        <ProtectedRoute>
+                            <StudentOutputDiff />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/select" element={
+                        <ProtectedRoute>
+                            <StudentPracticeSelect />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/upload" element={
+                        <ProtectedRoute>
+                            <StudentUpload />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/code/:id?" element={
+                        <ProtectedRoute>
+                            <StudentOutputDiff />
+                        </ProtectedRoute>
+                    } />
+
                     <Route path="/student/:class_id/upload" element={
                         <ProtectedRoute>
                             <StudentUpload />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/:class_id/practice" element={
+                    <Route path="/student/:class_id/checkpoint" element={
                         <ProtectedRoute>
                             <StudentPracticeSelect />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/:class_id/practice/:practice_problem_id/upload" element={
+                    <Route path="/student/:class_id/checkpoint/:checkpoint_id/upload" element={
                         <ProtectedRoute>
                             <StudentUpload />
                         </ProtectedRoute>
@@ -134,12 +300,11 @@ class App extends Component {
                             <StudentPastSubmissions />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/:id/OfficeHours" element={
+                    <Route path="/student/:class_id/OfficeHours" element={
                         <ProtectedRoute>
                             <StudentOfficeHours />
                         </ProtectedRoute>
                     } />
-                    {/* Catch-all for 404 */}
                     <Route path="*" element={<NotFound />} />
                 </Routes>
             </BrowserRouter>
