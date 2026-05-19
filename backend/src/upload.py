@@ -12,12 +12,13 @@ from flask import make_response
 from flask import current_app
 from http import HTTPStatus
 from datetime import datetime
+from math import ceil
 from dependency_injector.wiring import inject, Provide
 
 from container import Container
 from src.constants import ADMIN_ROLE, TEACHER_ROLE
 from src.repositories.class_repository import ClassRepository
-from src.repositories.models import Checkpoints, Classes
+from src.repositories.models import Checkpoints, Classes, Projects, Submissions
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.database import db
 from src.repositories.submission_repository import SubmissionRepository
@@ -37,6 +38,7 @@ ALLOWED_EXTENSIONS_BY_LANGUAGE = {
 }
 
 ALLOWED_SOURCE_EXTENSIONS = {".py", ".java", ".c", ".rkt"}
+SUBMISSION_COOLDOWN_SECONDS = 120
 
 
 def parse_int(v, default: int = 0) -> int:
@@ -333,6 +335,68 @@ def load_grader_status(json_out: str) -> tuple[bool, dict]:
     return status, testcase_results
 
 
+def parse_submission_datetime(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(raw[:19], fmt)
+        except ValueError:
+            pass
+
+    return None
+
+
+def get_latest_student_submission_in_class(user_id: int, class_id: int):
+    try:
+        return (
+            db.session.query(Submissions)
+            .join(Projects, Submissions.Project == Projects.Id)
+            .filter(
+                Submissions.User == int(user_id),
+                Projects.ClassId == int(class_id),
+            )
+            .order_by(Submissions.Time.desc())
+            .first()
+        )
+    except Exception:
+        return None
+
+
+def student_submission_cooldown_response(user_id: int, class_id: int):
+    latest = get_latest_student_submission_in_class(user_id, class_id)
+
+    if latest is None:
+        return None
+
+    submitted_at = parse_submission_datetime(getattr(latest, "Time", None))
+
+    if submitted_at is None:
+        return None
+
+    elapsed_seconds = (datetime.now() - submitted_at).total_seconds()
+    remaining_seconds = int(ceil(SUBMISSION_COOLDOWN_SECONDS - elapsed_seconds))
+
+    if remaining_seconds <= 0:
+        return None
+
+    response = make_response(
+        {
+            "message": f"Please wait {remaining_seconds} seconds before submitting again.",
+            "retry_after_seconds": remaining_seconds,
+            "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+        },
+        HTTPStatus.TOO_MANY_REQUESTS,
+    )
+    response.headers["Retry-After"] = str(remaining_seconds)
+    return response
+
+
 @upload_api.route("/total_students_by_cid", methods=["GET"])
 @jwt_required()
 @inject
@@ -477,6 +541,12 @@ def file_upload(
                 {"message": "Checkpoint is disabled"},
                 HTTPStatus.FORBIDDEN,
             )
+
+    if not is_staff_upload:
+        cooldown_response = student_submission_cooldown_response(user_id, class_id_int)
+
+        if cooldown_response is not None:
+            return cooldown_response
 
     upload_files = request.files.getlist("files")
 
@@ -675,6 +745,7 @@ def file_upload(
         "message": "Success",
         "remainder": 10,
         "sid": submission_id,
+        "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
     }
 
     return make_response(message, HTTPStatus.OK)

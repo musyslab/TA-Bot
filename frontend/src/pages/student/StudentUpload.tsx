@@ -14,6 +14,7 @@ import {
   FaBan,
   FaCloudUploadAlt,
   FaCode,
+  FaClock,
   FaDownload,
   FaExchangeAlt,
   FaRegFile,
@@ -22,6 +23,7 @@ import {
   FaCheckCircle,
   FaEye,
   FaFilePowerpoint,
+  FaInfoCircle,
 } from "react-icons/fa";
 
 type CheckpointLite = {
@@ -84,6 +86,8 @@ type ApiPastSubmissionsProject = {
 };
 
 const RECENT_SUBMISSION_STORAGE_PREFIX = "AUTOTA_RECENT_STUDENT_SUBMISSION";
+const SUBMISSION_COOLDOWN_SECONDS = 120;
+const SUBMISSION_COOLDOWN_STORAGE_PREFIX = "AUTOTA_SUBMISSION_COOLDOWN_UNTIL";
 
 const authHeader = () => ({
   Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
@@ -242,6 +246,8 @@ const StudentUpload = () => {
   const [testcasesPassedCount, setTestcasesPassedCount] = useState<number>(0);
   const [testcasesTotalCount, setTestcasesTotalCount] = useState<number>(0);
   const [previousSubmissionId, setPreviousSubmissionId] = useState<number | string | null>(null);
+  const [cooldownUntilMs, setCooldownUntilMs] = useState<number>(0);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   const [moduleName, setModuleName] = useState<string>("");
   const [checkpointLabel, setCheckpointLabel] = useState<string>("");
@@ -261,7 +267,35 @@ const StudentUpload = () => {
     return { total, passed, pct };
   }, [testcasesPassedCount, testcasesTotalCount]);
 
-  const canSubmit = !passedAllTests;
+  const cooldownStorageKey = useMemo(() => {
+    if (!Number.isFinite(cid) || cid <= 0) return "";
+    return `${SUBMISSION_COOLDOWN_STORAGE_PREFIX}:${cid}`;
+  }, [cid]);
+
+  const cooldownRemainingSeconds = useMemo(() => {
+    return Math.max(0, Math.ceil((cooldownUntilMs - nowMs) / 1000));
+  }, [cooldownUntilMs, nowMs]);
+
+  const isCoolingDown = cooldownRemainingSeconds > 0;
+  const canSubmit = !passedAllTests && !isCoolingDown;
+
+  const formatCooldown = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const startSubmissionCooldown = (seconds = SUBMISSION_COOLDOWN_SECONDS) => {
+    const safeSeconds = Math.max(1, Math.ceil(seconds));
+    const until = Date.now() + safeSeconds * 1000;
+
+    setCooldownUntilMs(until);
+    setNowMs(Date.now());
+
+    if (cooldownStorageKey) {
+      localStorage.setItem(cooldownStorageKey, String(until));
+    }
+  };
 
   const ALLOWED_EXTS = [".py", ".java", ".c", ".rkt"];
   const isJavaFile = (f: File) => f.name.toLowerCase().endsWith(".java");
@@ -439,6 +473,37 @@ const StudentUpload = () => {
   useEffect(() => {
     autoGrowTextarea(feedbackRef.current);
   }, [suggestions]);
+
+  useEffect(() => {
+    if (!cooldownStorageKey) {
+      setCooldownUntilMs(0);
+      return;
+    }
+
+    const storedUntil = Number(localStorage.getItem(cooldownStorageKey) || 0);
+
+    if (Number.isFinite(storedUntil) && storedUntil > Date.now()) {
+      setCooldownUntilMs(storedUntil);
+    } else {
+      setCooldownUntilMs(0);
+      localStorage.removeItem(cooldownStorageKey);
+    }
+  }, [cooldownStorageKey]);
+
+  useEffect(() => {
+    if (!isCoolingDown) return;
+
+    const timer = window.setInterval(() => {
+      const nextNow = Date.now();
+      setNowMs(nextNow);
+
+      if (cooldownStorageKey && cooldownUntilMs <= nextNow) {
+        localStorage.removeItem(cooldownStorageKey);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [isCoolingDown, cooldownUntilMs, cooldownStorageKey]);
 
   useEffect(() => {
     const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
@@ -783,6 +848,14 @@ const StudentUpload = () => {
 
     if (passedAllTests) return;
 
+    if (isCoolingDown) {
+      setError_Message(
+        `Please wait ${formatCooldown(cooldownRemainingSeconds)} before submitting again.`,
+      );
+      setIsErrorMessageHidden(false);
+      return;
+    }
+
     if (!Number.isFinite(cid) || cid <= 0) {
       setError_Message("Missing class id.");
       setIsErrorMessageHidden(false);
@@ -845,6 +918,8 @@ const StudentUpload = () => {
         headers: authHeader(),
       })
       .then((res) => {
+        startSubmissionCooldown(Number(res?.data?.cooldown_seconds) || SUBMISSION_COOLDOWN_SECONDS);
+
         const sid = getPayloadSubmissionId(res?.data);
 
         if (sid !== null) {
@@ -857,6 +932,14 @@ const StudentUpload = () => {
         window.location.href = getResultsHref();
       })
       .catch((err) => {
+        const retryAfterSeconds = Number(
+          err.response?.data?.retry_after_seconds ?? err.response?.headers?.["retry-after"],
+        );
+
+        if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+          startSubmissionCooldown(retryAfterSeconds);
+        }
+
         setError_Message(err.response?.data?.message || "Upload failed.");
         setIsErrorMessageHidden(false);
         setIsLoading(false);
@@ -1225,12 +1308,40 @@ const StudentUpload = () => {
             </div>
 
             <div className="actions">
+              <div
+                className={`tbs-submission-status ${isCoolingDown ? "is-cooling" : "is-ready"}`}
+                role="status"
+                aria-live="polite"
+              >
+                <div className="tbs-submission-status__iconWrap" aria-hidden="true">
+                  {isCoolingDown ? (
+                    <FaClock className="tbs-submission-status__icon" />
+                  ) : (
+                    <FaInfoCircle className="tbs-submission-status__icon" />
+                  )}
+                </div>
+
+                <div className="tbs-submission-status__copy">
+                  <div className="tbs-submission-status__title">
+                    {isCoolingDown
+                      ? `Next submission available in ${formatCooldown(cooldownRemainingSeconds)}`
+                      : "Submission cooldown rule"}
+                  </div>
+
+                  <div className="tbs-submission-status__text">
+                    {isCoolingDown
+                      ? "A 2 minute cooldown applies after every submission"
+                      : "After each submission, you must wait 2 minutes before submitting again"}
+                  </div>
+                </div>
+              </div>
+
               <button
                 type="submit"
-                disabled={!is_allowed_to_submit || !canSubmit || passedAllTests}
-                className={`primary ${!is_allowed_to_submit || !canSubmit ? "disabled" : ""}`}
+                disabled={!is_allowed_to_submit || !canSubmit || passedAllTests || isLoading}
+                className={`primary ${!is_allowed_to_submit || !canSubmit || isLoading ? "disabled" : ""}`}
               >
-                Upload
+                {isCoolingDown ? "Cooling Down" : "Upload"}
               </button>
             </div>
           </form>
