@@ -82,16 +82,15 @@ def create_app():
     )
 
     tabot_dir = optional_env("TABOT_DIR", "/tabot-files")
-    teacher_dir = os.path.join(tabot_dir, "project-files", "teacher-files")
-    student_dir = os.path.join(tabot_dir, "project-files", "student-files")
+    project_files_dir = os.path.join(tabot_dir, "project-files")
 
-    os.makedirs(teacher_dir, exist_ok=True)
-    os.makedirs(student_dir, exist_ok=True)
+    os.makedirs(project_files_dir, exist_ok=True)
 
     app.config.update(
         {
-            "TEACHER_FILES_DIR": teacher_dir,
-            "STUDENT_FILES_DIR": student_dir,
+            "PROJECT_FILES_DIR": project_files_dir,
+            "TEACHER_FILES_DIR": project_files_dir,
+            "STUDENT_FILES_DIR": project_files_dir,
             "JWT_SECRET_KEY": require_env("JWT_SECRET_KEY"),
             "MAX_FAILED_LOGINS": env_int("MAX_FAILED_LOGINS", 5),
             "MAX_CONTENT_LENGTH": 16 * 1000 * 1000,
