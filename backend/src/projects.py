@@ -1,4 +1,3 @@
-
 import importlib.util
 import json
 import os
@@ -579,30 +578,105 @@ def count_checkpoint_unique_users(project_id: int) -> int:
 def project_root() -> str:
     return "/tabot-files/project-files"
 
-def teacher_root() -> str:
-    return os.path.join(project_root(), "teacher-files")
 
-def student_root() -> str:
-    return os.path.join(project_root(), "student-files")
+def path_segment(value: str, fallback: str = "unnamed") -> str:
+    safe = secure_filename(str(value or "").strip()).replace(" ", "_")
+    return safe or fallback
 
-def project_dir(base_proj: str, ts: str) -> str:
-    # teacher-files/<YYYYMMDD_HHMMSS>__<projectname>
-    return os.path.join(teacher_root(), f"{ts}__{base_proj}")
 
-def checkpoint_teacher_root() -> str:
-    return os.path.join(project_root(), "teacher-checkpoint-files")
+def teacher_root_for_class(class_id: int) -> str:
+    class_item = Classes.query.filter(Classes.Id == int(class_id)).first()
+    class_name = path_segment(getattr(class_item, "Name", "") if class_item else f"class_{class_id}", f"class_{class_id}")
+    school = getattr(class_item, "School", None) if class_item else None
+    school_name = path_segment(getattr(school, "Name", "") if school else "school", "school")
+    return os.path.join(project_root(), school_name, class_name, "teacher-files")
 
-def checkpoint_project_dir(project_id: int) -> str:
-    return os.path.join(checkpoint_teacher_root(), str(int(project_id)))
 
-def checkpoint_version_dir(project_id: int, ts: str) -> str:
-    return os.path.join(checkpoint_project_dir(project_id), ts)
+def student_root_for_class(class_id: int) -> str:
+    class_item = Classes.query.filter(Classes.Id == int(class_id)).first()
+    class_name = path_segment(getattr(class_item, "Name", "") if class_item else f"class_{class_id}", f"class_{class_id}")
+    school = getattr(class_item, "School", None) if class_item else None
+    school_name = path_segment(getattr(school, "Name", "") if school else "school", "school")
+    return os.path.join(project_root(), school_name, class_name, "student-files")
+
+
+def stable_module_identity(module: Modules | None, fallback_name: str, timestamp_hint: str | None = None) -> tuple[str, str]:
+    if module is None:
+        return timestamp_hint or datetime.now().strftime("%Y%m%d_%H%M%S"), path_segment(fallback_name, "module")
+
+    changed = False
+
+    if not getattr(module, "FileTimestamp", None):
+        module.FileTimestamp = timestamp_hint or datetime.now().strftime("%Y%m%d_%H%M%S")
+        changed = True
+
+    if not getattr(module, "FirstName", None):
+        module.FirstName = getattr(module, "Name", None) or fallback_name or "module"
+        changed = True
+
+    if changed:
+        db.session.commit()
+
+    return str(module.FileTimestamp), path_segment(module.FirstName, "module")
+
+
+def stable_project_first_name(project: Projects | None, fallback_name: str) -> str:
+    if project is None:
+        return path_segment(fallback_name, "project")
+
+    if not getattr(project, "FirstName", None):
+        project.FirstName = getattr(project, "Name", None) or fallback_name or "project"
+        db.session.commit()
+
+    return path_segment(project.FirstName, "project")
+
+
+def stable_checkpoint_first_name(checkpoint: Checkpoints | None, fallback_name: str) -> str:
+    if checkpoint is None:
+        return path_segment(fallback_name, "checkpoint")
+
+    if not getattr(checkpoint, "FirstName", None):
+        checkpoint.FirstName = getattr(checkpoint, "Name", None) or fallback_name or "checkpoint"
+        db.session.commit()
+
+    return path_segment(checkpoint.FirstName, "checkpoint")
+
+
+def module_folder_name(module: Modules | None, fallback_name: str, timestamp_hint: str | None = None) -> str:
+    ts, first_name = stable_module_identity(module, fallback_name, timestamp_hint)
+    return f"{ts}_{first_name}"
+
+
+def teacher_main_project_dir(project: Projects, timestamp_hint: str | None = None) -> str:
+    module = project_module(project)
+    module_folder = module_folder_name(module, getattr(project, "Name", "module"), timestamp_hint)
+    project_folder = stable_project_first_name(project, getattr(project, "Name", "project"))
+    return os.path.join(teacher_root_for_class(int(project.ClassId)), module_folder, "main", project_folder)
+
+
+def teacher_checkpoint_project_dir(project: Projects, checkpoint: Checkpoints, timestamp_hint: str | None = None) -> str:
+    module = project_module(project)
+    module_folder = module_folder_name(module, getattr(project, "Name", "module"), timestamp_hint)
+    checkpoint_folder = stable_checkpoint_first_name(checkpoint, getattr(checkpoint, "Name", "checkpoint"))
+    return os.path.join(teacher_root_for_class(int(project.ClassId)), module_folder, "checkpoint", checkpoint_folder)
+
+
+def teacher_main_project_dir_for_new(class_id: int, module_id: int | None, project_name: str, timestamp_hint: str) -> str:
+    module = Modules.query.filter(Modules.Id == int(module_id)).first() if module_id else None
+    module_folder = module_folder_name(module, project_name, timestamp_hint)
+    return os.path.join(
+        teacher_root_for_class(int(class_id)),
+        module_folder,
+        "main",
+        path_segment(project_name, "project"),
+    )
+
 
 def is_ts_dir(name: str) -> bool:
     return bool(TS_DIR_RE.match(name or ""))
 
+
 def version_dir(proj_dir_path: str, ts: str) -> str:
-    # teacher-files/<projecttimestamp__projectname>/<submissiontimestamp>/
     return os.path.join(proj_dir_path, ts)
 
 def pick_latest_version_dir(proj_dir_path: str) -> str | None:
@@ -1273,12 +1347,18 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
     if name == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
-    base_proj = safe_name(name)
     ts = ts_str()
-    proj_dir_path = project_dir(base_proj, ts)
+    module_id_int = int(module_id) if module_id.isdigit() else None
+    proj_dir_path = teacher_main_project_dir_for_new(
+        int(class_id),
+        module_id_int,
+        name,
+        ts,
+    )
     os.makedirs(proj_dir_path, exist_ok=True)
 
-    # Save solution + description + additional into a timestamped version directory
+    # Save solution + description + additional into a timestamped version directory.
+    # The module folder uses the first module creation timestamp, not the current project name.
     path = version_dir(proj_dir_path, ts)
     os.makedirs(path, exist_ok=True)
     for up in solution_uploads:
@@ -1312,7 +1392,7 @@ def create_project(project_repo: ProjectRepository = Provide[Container.project_r
         assignmentdesc_path,
         json.dumps(add_names),
         checkpoint_enabled,
-        int(module_id) if module_id.isdigit() else None
+        module_id_int
     )
 
     try:
@@ -1359,29 +1439,19 @@ def edit_project(project_repo: ProjectRepository = Provide[Container.project_rep
     if name == '' or language == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)
 
-    # Ensure base_proj exists before any use (fix NameError) and compute project folder
-    base_proj = safe_name(name)
     ts = ts_str()
     existing_path = project_repo.get_project_path(pid)
-    if existing_path:
-        # In the new layout, existing_path is a version directory:
-        # teacher-files/<proj_ts>__<base_proj>/<version_ts>
-        proj_dir = os.path.dirname(existing_path)
-        # Derive base_proj from folder name if not set: "<timestamp>__<base_proj>"
-        if not base_proj:
-            folder = os.path.basename(proj_dir)
-            if "__" in folder:
-                base_proj = folder.split("__", 1)[1]
-            else:
-                base_proj = safe_name(name)
-    else:
-        proj_dir = project_dir(base_proj, ts)
+    existing_proj = project_repo.get_selected_project(pid)
+    if not existing_proj:
+        return make_response({'message': 'Project not found'}, HTTPStatus.NOT_FOUND)
+
+    # Preserve the original filesystem project name even if the display name changes.
+    proj_dir = teacher_main_project_dir(existing_proj, timestamp_hint=ts)
     os.makedirs(proj_dir, exist_ok=True)
 
     # Default to existing paths if no new files are uploaded
     path = existing_path
     assignmentdesc_path = project_repo.get_project_desc_path(pid)
-    existing_proj = project_repo.get_selected_project(pid)
     add_path = getattr(existing_proj, "AdditionalFilePath", "") if existing_proj else ""
 
     # Determine whether we need to mint a new version directory
@@ -2403,16 +2473,43 @@ def edit_checkpoint_project_files(project_repo: ProjectRepository = Provide[Cont
         return make_response({'message': 'Checkpoint not found'}, HTTPStatus.NOT_FOUND)
 
     ts = ts_str()
-    base_dir = os.path.join(checkpoint_project_dir(pid), str(ppid), ts)
+    checkpoint_dir = teacher_checkpoint_project_dir(proj, pp, timestamp_hint=ts)
+    base_dir = version_dir(checkpoint_dir, ts)
     os.makedirs(base_dir, exist_ok=True)
 
     # Save solution file(s)
+    uploaded_exts = set()
     for up in solution_uploads:
         orig = safe_name(up.filename)
         ext = os.path.splitext(orig)[1].lower()
         if ext not in ALLOWED_SOURCE_EXTS:
             return make_response({'message': f'Unsupported file type: {ext}'}, HTTPStatus.BAD_REQUEST)
+        uploaded_exts.add(ext)
         up.save(os.path.join(base_dir, orig))
+
+    requested_language = (request.form.get("language", "") or "").strip().lower()
+    language_aliases = {
+        "python": "python",
+        "python3": "python",
+        "py": "python",
+        "java": "java",
+        "c": "c",
+    }
+
+    inferred_language = ""
+    if ".java" in uploaded_exts:
+        inferred_language = "java"
+    elif ".py" in uploaded_exts:
+        inferred_language = "python"
+    elif ".c" in uploaded_exts:
+        inferred_language = "c"
+
+    checkpoint_language = (
+        language_aliases.get(requested_language)
+        or inferred_language
+        or getattr(proj, "Language", "")
+        or getattr(pp, "Language", "")
+    )        
 
     # Save description
     ad = request.files['assignmentdesc']
@@ -2432,7 +2529,7 @@ def edit_checkpoint_project_files(project_repo: ProjectRepository = Provide[Cont
     pp.solutionpath = base_dir
     pp.AsnDescriptionPath = desc_path
     pp.AdditionalFilePath = json.dumps(add_names)
-    pp.Language = getattr(proj, "Language", "") or pp.Language
+    pp.Language = checkpoint_language
     pp.Enabled = True
     try:
         from src.repositories.database import db
@@ -2446,7 +2543,7 @@ def edit_checkpoint_project_files(project_repo: ProjectRepository = Provide[Cont
             project_repo,
             int(pid),
             solution_override_path=base_dir,
-            language_override=getattr(proj, "Language", ""),
+            language_override=checkpoint_language,
             checkpoint_id=int(ppid),
         )
     except Exception:

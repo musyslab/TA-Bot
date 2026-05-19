@@ -12,13 +12,15 @@ from flask import make_response
 from flask import current_app
 from http import HTTPStatus
 from datetime import datetime
+from math import ceil
 from dependency_injector.wiring import inject, Provide
 
 from container import Container
 from src.constants import ADMIN_ROLE, TEACHER_ROLE
 from src.repositories.class_repository import ClassRepository
-from src.repositories.models import Checkpoints, Classes
+from src.repositories.models import Checkpoints, Classes, Projects, Submissions
 from src.repositories.project_repository import ProjectRepository
+from src.repositories.database import db
 from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.user_repository import UserRepository
 
@@ -36,6 +38,7 @@ ALLOWED_EXTENSIONS_BY_LANGUAGE = {
 }
 
 ALLOWED_SOURCE_EXTENSIONS = {".py", ".java", ".c", ".rkt"}
+SUBMISSION_COOLDOWN_SECONDS = 120
 
 
 def parse_int(v, default: int = 0) -> int:
@@ -181,6 +184,89 @@ def safe_upload_filename(filename: str) -> str:
     return f"{safe_stem or 'submission'}{extension.lower()}"
 
 
+def path_segment(value: str, fallback: str = "unnamed") -> str:
+    safe = sanitize_fs_name(value)
+    return safe if safe != "unknown" else fallback
+
+
+def project_files_root() -> str:
+    return "/tabot-files/project-files"
+
+
+def student_root_for_class(class_id: int) -> str:
+    class_item = Classes.query.filter(Classes.Id == int(class_id)).first()
+    class_name = path_segment(getattr(class_item, "Name", "") if class_item else f"class_{class_id}", f"class_{class_id}")
+    school = getattr(class_item, "School", None) if class_item else None
+    school_name = path_segment(getattr(school, "Name", "") if school else "school", "school")
+    return os.path.join(project_files_root(), school_name, class_name, "student-files")
+
+
+def project_module(project):
+    module = getattr(project, "Module", None)
+    if module:
+        return module
+    module_id = getattr(project, "ModuleId", None)
+    if module_id:
+        from src.repositories.models import Modules
+        return Modules.query.filter(Modules.Id == int(module_id)).first()
+    return None
+
+
+def module_folder_name(project, timestamp_hint: str) -> str:
+    module = project_module(project)
+    fallback_name = getattr(project, "Name", "") or "module"
+
+    if module is None:
+        return f"{timestamp_hint}_{path_segment(fallback_name, 'module')}"
+
+    changed = False
+
+    if not getattr(module, "FileTimestamp", None):
+        module.FileTimestamp = timestamp_hint
+        changed = True
+
+    if not getattr(module, "FirstName", None):
+        module.FirstName = getattr(module, "Name", None) or fallback_name
+        changed = True
+
+    if changed:
+        db.session.commit()
+
+    return f"{module.FileTimestamp}_{path_segment(module.FirstName, 'module')}"
+
+
+def project_first_folder(project) -> str:
+    if not getattr(project, "FirstName", None):
+        project.FirstName = getattr(project, "Name", None) or "project"
+        db.session.commit()
+    return path_segment(project.FirstName, "project")
+
+
+def checkpoint_first_folder(checkpoint: Checkpoints) -> str:
+    if not getattr(checkpoint, "FirstName", None):
+        checkpoint.FirstName = getattr(checkpoint, "Name", None) or "checkpoint"
+        db.session.commit()
+    return path_segment(checkpoint.FirstName, "checkpoint")
+
+
+def student_project_bucket(class_id: int, project, checkpoint: Optional[Checkpoints], timestamp_hint: str) -> str:
+    module_folder = module_folder_name(project, timestamp_hint)
+
+    if checkpoint is not None:
+        scope = "checkpoint"
+        item_folder = checkpoint_first_folder(checkpoint)
+    else:
+        scope = "main"
+        item_folder = project_first_folder(project)
+
+    return os.path.join(
+        student_root_for_class(class_id),
+        module_folder,
+        scope,
+        item_folder,
+    )
+
+
 def resolve_additional_files_payload(owner, solution_path: str) -> str:
     try:
         teacher_base_dir = (
@@ -247,6 +333,68 @@ def load_grader_status(json_out: str) -> tuple[bool, dict]:
         pass
 
     return status, testcase_results
+
+
+def parse_submission_datetime(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(raw[:19], fmt)
+        except ValueError:
+            pass
+
+    return None
+
+
+def get_latest_student_submission_in_class(user_id: int, class_id: int):
+    try:
+        return (
+            db.session.query(Submissions)
+            .join(Projects, Submissions.Project == Projects.Id)
+            .filter(
+                Submissions.User == int(user_id),
+                Projects.ClassId == int(class_id),
+            )
+            .order_by(Submissions.Time.desc())
+            .first()
+        )
+    except Exception:
+        return None
+
+
+def student_submission_cooldown_response(user_id: int, class_id: int):
+    latest = get_latest_student_submission_in_class(user_id, class_id)
+
+    if latest is None:
+        return None
+
+    submitted_at = parse_submission_datetime(getattr(latest, "Time", None))
+
+    if submitted_at is None:
+        return None
+
+    elapsed_seconds = (datetime.now() - submitted_at).total_seconds()
+    remaining_seconds = int(ceil(SUBMISSION_COOLDOWN_SECONDS - elapsed_seconds))
+
+    if remaining_seconds <= 0:
+        return None
+
+    response = make_response(
+        {
+            "message": f"Please wait {remaining_seconds} seconds before submitting again.",
+            "retry_after_seconds": remaining_seconds,
+            "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+        },
+        HTTPStatus.TOO_MANY_REQUESTS,
+    )
+    response.headers["Retry-After"] = str(remaining_seconds)
+    return response
 
 
 @upload_api.route("/total_students_by_cid", methods=["GET"])
@@ -394,6 +542,12 @@ def file_upload(
                 HTTPStatus.FORBIDDEN,
             )
 
+    if not is_staff_upload:
+        cooldown_response = student_submission_cooldown_response(user_id, class_id_int)
+
+        if cooldown_response is not None:
+            return cooldown_response
+
     upload_files = request.files.getlist("files")
 
     if not upload_files:
@@ -503,35 +657,20 @@ def file_upload(
 
     class_repo.get_class_name_withId(class_id)
 
-    student_base = current_app.config["STUDENT_FILES_DIR"]
+    ts_now = datetime.now()
+    ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
+    dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
 
-    teacher_solution_dir = (
-        solution_path
-        if os.path.isdir(solution_path)
-        else os.path.dirname(solution_path)
+    project_bucket = student_project_bucket(
+        class_id_int,
+        project,
+        checkpoint if is_checkpoint else None,
+        ts_stamp,
     )
-
-    teacher_folder_name = os.path.basename(teacher_solution_dir)
-
-    if not teacher_folder_name:
-        teacher_folder_name = sanitize_fs_name(str(getattr(project, "Name", "project")))
-
-    if is_checkpoint:
-        project_bucket = os.path.join(
-            student_base,
-            teacher_folder_name,
-            f"checkpoint_{checkpoint_id}",
-        )
-    else:
-        project_bucket = os.path.join(student_base, teacher_folder_name)
 
     safe_username = sanitize_fs_name(username)
     user_bucket = os.path.join(project_bucket, safe_username)
     os.makedirs(user_bucket, exist_ok=True)
-
-    ts_now = datetime.now()
-    ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
-    dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
 
     outputpath = project_bucket
     submission_dir = os.path.join(user_bucket, ts_stamp)
@@ -606,6 +745,7 @@ def file_upload(
         "message": "Success",
         "remainder": 10,
         "sid": submission_id,
+        "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
     }
 
     return make_response(message, HTTPStatus.OK)

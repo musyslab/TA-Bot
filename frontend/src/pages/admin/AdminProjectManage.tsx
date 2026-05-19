@@ -1208,6 +1208,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             selectedAddFiles.forEach(f => formData.append('additionalFiles', f))
             formData.append('checkpoint_id', String(practiceProblemId))
             formData.append('name', ProjectName)
+            formData.append('language', ProjectLanguage)
 
             await axios.post(`${import.meta.env.VITE_API_URL}/projects/edit_checkpoint_project_files`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },

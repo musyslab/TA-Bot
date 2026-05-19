@@ -575,27 +575,32 @@
 
 /* Upload actions */
 .actions {
-    margin-top: 12px;
+    margin-top: 14px;
     display: grid;
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 12px;
 }
 
 .primary {
     width: 100%;
-    background: #00bfff;
+    background: linear-gradient(135deg, #0284c7, #0ea5e9);
     color: #ffffff;
     border-radius: 9999px;
-    padding: 12px 18px;
+    padding: 13px 18px;
     border: none;
     cursor: pointer;
-    font-weight: 900;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16);
-    transition: transform 0.15s ease-in-out;
+    font-weight: 950;
+    letter-spacing: 0.01em;
+    box-shadow: 0 12px 24px rgba(14, 165, 233, 0.24);
+    transition:
+        transform 0.15s ease-in-out,
+        box-shadow 0.15s ease-in-out,
+        filter 0.15s ease-in-out;
 
     &:hover:not(:disabled):not(.disabled) {
-        background: #009ad6;
-        transform: scale(1.01);
+        filter: brightness(0.96);
+        transform: translateY(-1px);
+        box-shadow: 0 16px 28px rgba(14, 165, 233, 0.28);
     }
 
     &.reward {
@@ -615,6 +620,7 @@
         cursor: not-allowed !important;
         transform: none !important;
         animation: none !important;
+        filter: none !important;
     }
 }
 
@@ -729,23 +735,105 @@
     color: #374151;
 }
 
-/* Countdown block used by TBS */
-.tbs-countdown {
-    margin-top: 12px;
+/* Submission cooldown/rule status */
+.tbs-submission-status {
     width: 100%;
-    padding: 10px 12px;
-    border-radius: 14px;
-    border: 1px solid #e5e7eb;
-    background: #f9fafb;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(148, 163, 184, 0.48);
+    background:
+        linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(239, 246, 255, 0.92));
+    box-shadow:
+        0 14px 34px rgba(15, 23, 42, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    color: #0f172a;
+}
+
+.tbs-submission-status__iconWrap {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    background: #dbeafe;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    box-shadow: 0 8px 16px rgba(29, 78, 216, 0.12);
+}
+
+.tbs-submission-status__icon {
+    font-size: 20px;
+}
+
+.tbs-submission-status__copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.tbs-submission-status__title {
+    font-size: 0.98rem;
+    font-weight: 950;
+    line-height: 1.2;
+    color: #0f172a;
+}
+
+.tbs-submission-status__text {
+    font-size: 0.88rem;
+    font-weight: 700;
+    line-height: 1.45;
+    color: #475569;
+}
+
+.tbs-submission-status.is-cooling {
+    border-color: rgba(251, 191, 36, 0.65);
+    background:
+        linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(254, 243, 199, 0.88));
+    box-shadow:
+        0 14px 34px rgba(180, 83, 9, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.tbs-submission-status.is-cooling .tbs-submission-status__iconWrap {
+    background: #fef3c7;
+    border-color: #fde68a;
+    color: #b45309;
+    box-shadow: 0 8px 16px rgba(180, 83, 9, 0.13);
+}
+
+.tbs-submission-status.is-cooling .tbs-submission-status__title {
+    color: #92400e;
+}
+
+.tbs-submission-status.is-ready {
+    border-color: rgba(96, 165, 250, 0.48);
+}
+
+/* Backward compatibility for any old countdown markup still in use elsewhere */
+.tbs-countdown {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 14px;
     justify-content: center;
-    font-weight: 900;
-    color: #111827;
+    padding: 14px 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(251, 191, 36, 0.65);
+    background:
+        linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(254, 243, 199, 0.88));
+    box-shadow:
+        0 14px 34px rgba(180, 83, 9, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    font-weight: 950;
+    color: #92400e;
 
     .tbs-countdown__icon {
-        color: #6b7280;
+        color: #b45309;
     }
 }
 
@@ -848,5 +936,24 @@
 
     .testcase-summary-card__content {
         text-align: center;
+    }
+
+    .tbs-submission-status {
+        align-items: flex-start;
+        padding: 13px 14px;
+    }
+
+    .tbs-submission-status__iconWrap {
+        width: 40px;
+        height: 40px;
+        border-radius: 14px;
+    }
+
+    .tbs-submission-status__title {
+        font-size: 0.94rem;
+    }
+
+    .tbs-submission-status__text {
+        font-size: 0.84rem;
     }
 }

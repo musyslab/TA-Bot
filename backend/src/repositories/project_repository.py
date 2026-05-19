@@ -97,10 +97,34 @@ class ProjectRepository():
             return value
         return datetime.fromisoformat(str(value))
 
+    def _new_file_timestamp(self) -> str:
+        return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def ensure_module_file_identity(self, module: Modules | None, fallback_name: str = "") -> Modules | None:
+        if not module:
+            return None
+
+        changed = False
+
+        if not getattr(module, "FirstName", None):
+            module.FirstName = getattr(module, "Name", None) or fallback_name or "module"
+            changed = True
+
+        if not getattr(module, "FileTimestamp", None):
+            module.FileTimestamp = self._new_file_timestamp()
+            changed = True
+
+        if changed:
+            db.session.commit()
+
+        return module
+
     def create_module(self, class_id: int, name: str, start: datetime, end: datetime) -> int:
         module = Modules(
             ClassId=int(class_id),
             Name=name,
+            FirstName=name,
+            FileTimestamp=self._new_file_timestamp(),
             Start=self._coerce_datetime(start),
             End=self._coerce_datetime(end),
         )
@@ -111,6 +135,7 @@ class ProjectRepository():
             ClassId=int(class_id),
             ModuleId=module.Id,
             Name=name,
+            FirstName=name,
             Language="",
             solutionpath=None,
             AsnDescriptionPath=None,
@@ -144,6 +169,8 @@ class ProjectRepository():
         module = Modules(
             ClassId=project.ClassId,
             Name=project.Name,
+            FirstName=project.Name,
+            FileTimestamp=self._new_file_timestamp(),
             Start=now,
             End=now,
         )
@@ -165,6 +192,11 @@ class ProjectRepository():
         module = Modules.query.filter(Modules.Id == int(module_id)).first()
         if not module:
             return None
+
+        if not getattr(module, "FirstName", None):
+            module.FirstName = getattr(module, "Name", None) or name
+        if not getattr(module, "FileTimestamp", None):
+            module.FileTimestamp = self._new_file_timestamp()
 
         module.Name = name
         module.Start = self._coerce_datetime(start)
@@ -311,6 +343,7 @@ class ProjectRepository():
             CheckpointNumber=next_num,
             Enabled=True,
             Name=(name or f"Checkpoint {next_num}"),
+            FirstName=(name or f"Checkpoint {next_num}"),
             Language=getattr(proj, "Language", ""),
             solutionpath=None,
             AsnDescriptionPath=None,
@@ -371,8 +404,14 @@ class ProjectRepository():
         checkpoints_enabled: bool = False,
         module_id: Optional[int] = None,
     ):
+        module_obj = None
+        if module_id:
+            module_obj = Modules.query.filter(Modules.Id == int(module_id)).first()
+            self.ensure_module_file_identity(module_obj, name)
+
         project = Projects(
             Name=name,
+            FirstName=name,
             Language=language,
             ClassId=class_id,
             ModuleId=int(module_id) if module_id else None,
@@ -389,6 +428,7 @@ class ProjectRepository():
                 ProjectId=project.Id,
                 Enabled=True,
                 Name="Checkpoint 1",
+                FirstName="Checkpoint 1",
                 CheckpointNumber=1,
                 Language=language,
                 solutionpath=None,
@@ -473,6 +513,10 @@ class ProjectRepository():
         checkpoints_enabled: bool = False,
     ):
         project = Projects.query.filter(Projects.Id == project_id).first()
+        if not getattr(project, "FirstName", None):
+            project.FirstName = getattr(project, "Name", None) or name
+        module_obj = self.get_module_by_project_id(project_id)
+        self.ensure_module_file_identity(module_obj, name)
         project.Name = name
         project.Language = language
         project.solutionpath = path
