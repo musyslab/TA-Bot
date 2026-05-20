@@ -1513,12 +1513,13 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                 items={[
                     { label: 'School Selection', to: '/admin/schools' },
                     { label: 'Class Selection', to: `/admin/school/${schoolId}/classes` },
+                    { label: 'Admin Menu', to: `/admin/school/${schoolId}/class/${classId}/menu` },
                     { label: 'Module List', to: moduleListUrl },
                     {
                         label: 'Module Details',
                         to: project_id > 0 ? moduleOverviewUrl : moduleListUrl,
                     },
-                    { label: pageTitleText },
+                    { label: 'Project Manage' },
                 ]}
             />
 

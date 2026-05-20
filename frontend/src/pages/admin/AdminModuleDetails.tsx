@@ -877,14 +877,9 @@ export default function AdminModuleDetails() {
                 <DirectoryBreadcrumbs
                     items={[
                         { label: "School Selection", to: "/admin/schools" },
-                        {
-                            label: "Class Selection",
-                            to: `/admin/school/${schoolId}/classes`,
-                        },
-                        {
-                            label: "Module List",
-                            to: `/admin/school/${schoolId}/class/${classId}/modules`,
-                        },
+                        { label: "Class Selection", to: `/admin/school/${schoolId}/classes` },
+                        { label: 'Admin Menu', to: `/admin/school/${schoolId}/class/${classId}/menu` },
+                        { label: "Module List", to: `/admin/school/${schoolId}/class/${classId}/modules` },
                         { label: "Module Details" },
                     ]}
                 />
@@ -928,10 +923,8 @@ export default function AdminModuleDetails() {
                 items={[
                     { label: "School Selection", to: "/admin/schools" },
                     { label: "Class Selection", to: `/admin/school/${schoolId}/classes` },
-                    {
-                        label: "Module List",
-                        to: `/admin/school/${schoolId}/class/${classId}/modules`,
-                    },
+                    { label: 'Admin Menu', to: `/admin/school/${schoolId}/class/${classId}/menu` },
+                    { label: "Module List", to: `/admin/school/${schoolId}/class/${classId}/modules` },
                     { label: "Module Details" },
                 ]}
             />

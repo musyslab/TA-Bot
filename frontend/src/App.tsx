@@ -18,6 +18,7 @@ import StudentPracticeSelect from './pages/student/StudentPracticeSelect';
 
 import AdminSchoolSelect from './pages/admin/AdminSchoolSelect';
 import AdminClassSelect from './pages/admin/AdminClassSelect';
+import AdminMenu from './pages/admin/AdminMenu';
 import AdminGrading from './pages/admin/AdminGrading';
 import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
@@ -75,6 +76,16 @@ class App extends Component {
                     <Route path="/admin/school/:school_id/classes" element={
                         <ProtectedRoute>
                             <AdminClassSelect />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/menu" element={
+                        <ProtectedRoute>
+                            <AdminMenu />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/upload" element={
+                        <ProtectedRoute>
+                            <AdminUpload />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/school/:school_id/class/:class_id/modules/*" element={
@@ -220,7 +231,7 @@ class App extends Component {
                     } />
                     <Route path="/admin/upload" element={
                         <ProtectedRoute>
-                            <AdminUpload />
+                            <Navigate to="/admin/schools" replace />
                         </ProtectedRoute>
                     } />
 

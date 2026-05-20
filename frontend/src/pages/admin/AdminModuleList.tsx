@@ -863,7 +863,7 @@ export default function AdminModuleList() {
 
             <MenuComponent
                 showUpload={false}
-                showAdminUpload={true}
+                showAdminUpload={false}
                 showHelp={false}
                 showCreate={false}
                 showLast={false}
@@ -878,6 +878,12 @@ export default function AdminModuleList() {
                         to: schoolId
                             ? `/admin/school/${schoolId}/classes`
                             : "/admin/schools",
+                    },
+                    {
+                        label: "Admin Menu",
+                        to: schoolId
+                            ? `/admin/school/${schoolId}/class/${classId}/menu`
+                            : `/admin/${classId}/modules`,
                     },
                     { label: "Module List" },
                 ]}

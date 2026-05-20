@@ -79,7 +79,9 @@ export function AdminGrading() {
     const parsedCheckpointId = parseInt(checkpointIdParam, 10)
     const checkpointId =
         isCheckpoint && !Number.isNaN(parsedCheckpointId) && parsedCheckpointId > 0 ? parsedCheckpointId : undefined
+
     const classSelectionUrl = `/admin/school/${schoolIdStr}/classes`
+    const adminMenuUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/menu`
     const moduleListUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/modules`
     const moduleDetailsUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/overview`
     const studentListUrl = isCheckpoint && checkpointId
@@ -904,6 +906,7 @@ export function AdminGrading() {
                 items={[
                     { label: 'School Selection', to: '/admin/schools' },
                     { label: 'Class Selection', to: classSelectionUrl },
+                    { label: 'Admin Menu', to: adminMenuUrl },
                     { label: 'Module List', to: moduleListUrl },
                     { label: 'Module Details', to: moduleDetailsUrl },
                     { label: 'Student List', to: studentListUrl },

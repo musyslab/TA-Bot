@@ -1,0 +1,175 @@
+.admin-menu-page {
+    .projects-subtitle {
+        width: 95%;
+        margin: 0.5rem auto 1rem;
+        color: #64748b;
+        text-align: center;
+        line-height: 1.45;
+        font-weight: 600;
+    }
+
+    .admin-menu-shell {
+        width: 95%;
+        margin: 1rem auto 0;
+        padding: clamp(1rem, 2vw, 1.35rem);
+        border: 1px solid #dbe2ea;
+        border-radius: 24px;
+        background:
+            radial-gradient(circle at top right,
+                rgba(37, 99, 235, 0.1),
+                transparent 30%),
+            linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
+    }
+
+    .admin-menu-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+
+        h2 {
+            margin: 0;
+            color: #111827;
+            font-size: clamp(1.25rem, 2vw, 1.65rem);
+            font-weight: 950;
+        }
+    }
+
+    .admin-menu-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+        align-items: stretch;
+    }
+
+    .admin-menu-card {
+        min-height: 230px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 1.1rem;
+        border: 1px solid #dbe2ea;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.92);
+        color: inherit;
+        text-decoration: none;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.07);
+        transition:
+            transform 0.15s ease,
+            box-shadow 0.15s ease,
+            border-color 0.15s ease;
+    }
+
+    .admin-menu-card:hover,
+    .admin-menu-card:focus-visible {
+        transform: translateY(-2px);
+        border-color: #c7d2fe;
+        text-decoration: none;
+        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.11);
+        outline: none;
+    }
+
+    .admin-menu-card.is-disabled {
+        cursor: not-allowed;
+        opacity: 0.68;
+    }
+
+    .admin-menu-card.is-disabled:hover,
+    .admin-menu-card.is-disabled:focus-visible {
+        transform: none;
+        border-color: #dbe2ea;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.07);
+    }
+
+    .admin-menu-card-main {
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+    }
+
+    .admin-menu-icon {
+        width: 46px;
+        height: 46px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 0.35rem;
+        border-radius: 16px;
+        background: #eef2ff;
+        border: 1px solid #c7d2fe;
+        color: #3730a3;
+        font-size: 1.2rem;
+    }
+
+    .admin-menu-card-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+
+        h3 {
+            margin: 0;
+            color: #111827;
+            font-size: 1.12rem;
+            font-weight: 950;
+            line-height: 1.15;
+        }
+    }
+
+    .admin-menu-card-description {
+        margin: 0;
+        color: #64748b;
+        font-weight: 650;
+        line-height: 1.45;
+    }
+
+    .admin-menu-card-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.65rem;
+        flex-wrap: wrap;
+    }
+
+    .admin-menu-action {
+        min-height: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.45rem;
+        padding: 0.7rem 0.95rem;
+        border-radius: 14px;
+        font-size: 0.92rem;
+        font-weight: 900;
+        line-height: 1;
+    }
+
+    .admin-menu-action-primary {
+        background: #2563eb;
+        border: 1px solid #1d4ed8;
+        color: #ffffff;
+        box-shadow: 0 10px 20px rgba(37, 99, 235, 0.18);
+    }
+
+    .admin-menu-action-secondary {
+        background: #f8fafc;
+        border: 1px solid #dbe2ea;
+        color: #475569;
+    }
+
+    .admin-menu-disabled-action {
+        pointer-events: none;
+    }
+
+    @media (max-width: 950px) {
+        .admin-menu-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .admin-menu-card {
+            min-height: 190px;
+        }
+    }
+}

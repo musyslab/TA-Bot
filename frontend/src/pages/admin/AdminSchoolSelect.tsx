@@ -78,7 +78,7 @@ class AdminSchoolSelectInner extends Component<AdminSchoolSelectProps, SchoolSta
 
                 <MenuComponent
                     showUpload={false}
-                    showAdminUpload={true}
+                    showAdminUpload={false}
                     showHelp={false}
                     showCreate={false}
                     showLast={false}

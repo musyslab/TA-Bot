@@ -2,7 +2,6 @@ import { Component } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import {
-    FaUpload,
     FaHome,
     FaSignInAlt,
     FaSignOutAlt,
@@ -120,16 +119,6 @@ class MenuComponent extends Component<MenuComponentProps> {
                     <Link className="menu__item menu__item--header" to="/">
                         <img src={maatLogo} alt="MAAT" className="menu__logo" />
                     </Link>
-
-                    {this.props.showAdminUpload && (
-                        <>
-                            <a className="menu__item" href="/admin/upload">
-                                <FaUpload className="menu__icon" aria-hidden="true" />
-                                <span className="menu__text">Admin Upload</span>
-                            </a>
-                        </>
-                    )}
-
                     <div className="menu__right">
                         {isLoggedIn ? (
                             <>
@@ -140,7 +129,7 @@ class MenuComponent extends Component<MenuComponentProps> {
                                     title="Dashboard"
                                 >
                                     <FaHome className="menu__icon" aria-hidden="true" />
-                                    <span className="menu__text">Dashboard</span>
+                                    <span className="menu__text">Home</span>
                                 </button>
 
                                 <button
