@@ -1,6 +1,6 @@
 import React, { Component } from 'react'
 import axios from 'axios'
-import { useNavigate, NavigateFunction } from 'react-router-dom'
+import { useNavigate, NavigateFunction, useParams } from 'react-router-dom'
 import MenuComponent from '../components/MenuComponent'
 import { Helmet } from 'react-helmet'
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs"
@@ -8,11 +8,6 @@ import { FaAlignJustify, FaCloudUploadAlt, FaCode, FaExchangeAlt, FaRegFile, FaT
 import LoadingAnimation from '../components/LoadingAnimation'
 import '../../styling/AdminUploadPage.scss'
 import '../../styling/FileUploadCommon.scss'
-
-interface SchoolObject {
-    id: number
-    name: string
-}
 
 interface Student {
     name: string
@@ -59,8 +54,6 @@ interface UploadPageState {
     module_id: number
     project_id: number
     student_id: number
-    schoollist: Array<DropDownOption>
-    classlist: Array<DropDownOption>
     studentList: Array<DropDownOption>
     modules: Array<DropDownOption>
     moduleMainProjectById: Record<number, number>
@@ -71,11 +64,24 @@ interface UploadPageState {
 
 interface AdminUploadPageProps {
     navigate: NavigateFunction
+    schoolIdFromUrl: string
+    classIdFromUrl: string
 }
 
 const AdminUploadPageWrapper: React.FC = () => {
     const navigate = useNavigate()
-    return <AdminUploadPage navigate={navigate} />
+    const { school_id, class_id } = useParams<{
+        school_id: string
+        class_id: string
+    }>()
+
+    return (
+        <AdminUploadPage
+            navigate={navigate}
+            schoolIdFromUrl={school_id || ""}
+            classIdFromUrl={class_id || ""}
+        />
+    )
 }
 
 class AdminUpload extends Component<{}, {}> {
@@ -149,8 +155,6 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             module_id: 0,
             project_id: 0,
             student_id: 0,
-            schoollist: [],
-            classlist: [],
             studentList: [],
             modules: [],
             moduleMainProjectById: {},
@@ -162,8 +166,6 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         }
 
         this.handleSubmit = this.handleSubmit.bind(this)
-        this.handleSchoolIdChange = this.handleSchoolIdChange.bind(this)
-        this.handleClassIdChange = this.handleClassIdChange.bind(this)
         this.handleStudentIdChange = this.handleStudentIdChange.bind(this)
         this.handleModuleIdChange = this.handleModuleIdChange.bind(this)
         this.handleFilesChange = this.handleFilesChange.bind(this)
@@ -189,28 +191,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         })
     }
 
-    private resetFromSchoolDown(nextSchoolId: number) {
+    private resetForClassContext(nextSchoolId: number, nextClassId: number) {
         this.setState({
             school_id: nextSchoolId,
-            class_id: 0,
-            module_id: 0,
-            project_id: 0,
-            student_id: 0,
-            classlist: [],
-            studentList: [],
-            modules: [],
-            moduleMainProjectById: {},
-            moduleCheckpointsEnabledById: {},
-            checkpointsByProjectId: {},
-            selectedCheckpointId: 0,
-            files: [],
-            mainJavaFileName: '',
-            isUploading: false,
-        })
-    }
-
-    private resetFromClassDown(nextClassId: number) {
-        this.setState({
             class_id: nextClassId,
             module_id: 0,
             project_id: 0,
@@ -237,63 +220,6 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             mainJavaFileName: '',
             isUploading: false,
         })
-    }
-
-    private async loadSchools() {
-        this.setState({ isLoading: true })
-        this.clearError()
-
-        try {
-            const res = await axios.get(import.meta.env.VITE_API_URL + `/schools/all`, {
-                headers: this.authHeaders(),
-            })
-
-            const schools = res.data as Array<SchoolObject>
-            const schoolsDropdown: Array<DropDownOption> = schools
-                .map((s) => ({
-                    key: Number(s.id),
-                    text: String(s.name),
-                    value: Number(s.id),
-                }))
-                .filter((s) => s.value > 0 && s.text)
-                .sort((a, b) => a.text.localeCompare(b.text))
-
-            this.setState({ schoollist: schoolsDropdown })
-        } catch (err: any) {
-            this.setError(err.response?.data?.message ?? 'Error loading schools')
-        } finally {
-            this.setState({ isLoading: false })
-        }
-    }
-
-    private async loadClassesForSchool(schoolId: number) {
-        if (!(schoolId > 0)) return
-
-        this.setState({ isLoading: true })
-        this.clearError()
-
-        try {
-            const res = await axios.get(
-                import.meta.env.VITE_API_URL + `/class/all?school_id=${schoolId}`,
-                { headers: this.authHeaders() }
-            )
-
-            const classes = Array.isArray(res.data?.classes) ? res.data.classes : res.data
-            const classesDropdown: Array<DropDownOption> = (classes || [])
-                .map((c: any) => ({
-                    key: Number(c.id ?? c.Id),
-                    text: String(c.name ?? c.Name ?? ''),
-                    value: Number(c.id ?? c.Id),
-                }))
-                .filter((c: DropDownOption) => c.value > 0 && c.text)
-                .sort((a: DropDownOption, b: DropDownOption) => a.text.localeCompare(b.text))
-
-            this.setState({ classlist: classesDropdown })
-        } catch (err: any) {
-            this.setError(err.response?.data?.message ?? 'Error loading classes')
-        } finally {
-            this.setState({ isLoading: false })
-        }
     }
 
     private async loadStudentsForClass(classId: number) {
@@ -422,31 +348,18 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         }
     }
 
-    componentDidMount() {
-        this.loadSchools()
-    }
+    private loadClassContextFromUrl() {
+        const schoolId = Number(this.props.schoolIdFromUrl)
+        const classId = Number(this.props.classIdFromUrl)
 
-    handleSchoolIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
-        const value = parseInt(e.target.value, 10)
-        const schoolId = Number.isNaN(value) ? 0 : value
-
-        this.resetFromSchoolDown(schoolId)
-
-        if (schoolId > 0) {
-            this.loadClassesForSchool(schoolId)
+        if (!(schoolId > 0) || Number.isNaN(schoolId) || !(classId > 0) || Number.isNaN(classId)) {
+            this.props.navigate("/admin/schools", { replace: true })
+            return
         }
-    }
 
-    handleClassIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
-        const value = parseInt(e.target.value, 10)
-        const classId = Number.isNaN(value) ? 0 : value
-
-        this.resetFromClassDown(classId)
-
-        if (!(classId > 0)) return
-
-        this.setState({ isLoading: true })
+        this.resetForClassContext(schoolId, classId)
         this.clearError()
+        this.setState({ isLoading: true })
 
         Promise.all([
             this.loadStudentsForClass(classId),
@@ -454,6 +367,21 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         ]).finally(() => {
             this.setState({ isLoading: false })
         })
+    }
+
+    componentDidMount() {
+        this.loadClassContextFromUrl()
+    }
+
+    componentDidUpdate(prevProps: AdminUploadPageProps) {
+        if (
+            prevProps.schoolIdFromUrl === this.props.schoolIdFromUrl &&
+            prevProps.classIdFromUrl === this.props.classIdFromUrl
+        ) {
+            return
+        }
+
+        this.loadClassContextFromUrl()
     }
 
     handleStudentIdChange(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -537,7 +465,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         if (uploadDisabled) {
             this.setState({
                 isErrorMessageHidden: false,
-                error_message: 'Please select a school, class, student, and module before uploading.',
+                error_message: 'Please select a student and module before uploading.',
             })
             return
         }
@@ -611,15 +539,11 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
     }
 
     render() {
-        const schoolChosen = this.state.school_id > 0
-        const classChosen = this.state.class_id > 0
         const studentChosen = this.state.student_id > 0
         const moduleChosen = this.state.module_id > 0
         const projectChosen = this.state.project_id > 0
 
-        const disableSchool = this.state.isLoading || this.state.schoollist.length === 0
-        const disableClass = !schoolChosen || this.state.isLoading || this.state.classlist.length === 0
-        const disableStudent = !classChosen || this.state.isLoading || this.state.studentList.length === 0
+        const disableStudent = this.state.isLoading || this.state.studentList.length === 0
         const disableModule = !studentChosen || this.state.isLoading || this.state.modules.length === 0
         const disableUpload = !moduleChosen || !projectChosen || !studentChosen || this.state.isLoading
 
@@ -639,6 +563,14 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                 <DirectoryBreadcrumbs
                     items={[
                         { label: 'School Selection', to: '/admin/schools' },
+                        {
+                            label: 'Class Selection',
+                            to: `/admin/school/${this.state.school_id || this.props.schoolIdFromUrl}/classes`,
+                        },
+                        {
+                            label: 'Admin Menu',
+                            to: `/admin/school/${this.state.school_id || this.props.schoolIdFromUrl}/class/${this.state.class_id || this.props.classIdFromUrl}/menu`,
+                        },
                         { label: 'Admin Upload' },
                     ]}
                 />
@@ -647,49 +579,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
 
                 <div className="admin-upload-stack">
                     <div className="admin-upload-page">
-                        <p className="section-label">Please select a school</p>
-                        <select
-                            className="select school-select"
-                            value={this.state.school_id || ''}
-                            onChange={this.handleSchoolIdChange}
-                            disabled={disableSchool}
-                        >
-                            <option value="" disabled>
-                                Select school
-                            </option>
-                            {this.state.schoollist.map((opt) => (
-                                <option key={opt.key} value={opt.value}>
-                                    {opt.text}
-                                </option>
-                            ))}
-                        </select>
-
                         <div className="selection-section">
-                            <div className="spacer" aria-hidden="true">
-                                &nbsp;
-                            </div>
-
-                            <p className="section-label">Please select a class</p>
-                            <select
-                                className="select class-select"
-                                value={this.state.class_id || ''}
-                                onChange={this.handleClassIdChange}
-                                disabled={disableClass}
-                            >
-                                <option value="" disabled>
-                                    Select class
-                                </option>
-                                {this.state.classlist.map((opt) => (
-                                    <option key={opt.key} value={opt.value}>
-                                        {opt.text}
-                                    </option>
-                                ))}
-                            </select>
-
-                            <div className="spacer" aria-hidden="true">
-                                &nbsp;
-                            </div>
-
                             <p className="section-label">Please select a student</p>
                             <select
                                 className="select student-select"

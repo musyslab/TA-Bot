@@ -135,11 +135,11 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
         if (event.key !== "Enter" && event.key !== " ") return
 
         event.preventDefault()
-        this.props.navigate(this.getClassModulesUrl(classObj.Id))
+        this.props.navigate(this.getClassMenuUrl(classObj.Id))
     }
 
-    getClassModulesUrl = (classId: number): string => {
-        return `/admin/school/${this.state.selectedSchoolId}/class/${classId}/modules`
+    getClassMenuUrl = (classId: number): string => {
+        return `/admin/school/${this.state.selectedSchoolId}/class/${classId}/menu`
     }
 
     render() {
@@ -154,7 +154,7 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
 
                 <MenuComponent
                     showUpload={false}
-                    showAdminUpload={true}
+                    showAdminUpload={false}
                     showHelp={false}
                     showCreate={false}
                     showLast={false}
@@ -174,7 +174,7 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
                 </div>
 
                 <p className="projects-subtitle">
-                    Select a class to view its modules.
+                    Select a class to open its admin menu.
                 </p>
 
                 <section className="module-list-shell" aria-label="Class list">
@@ -207,7 +207,7 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
                                     key={classObj.Id}
                                     role="button"
                                     tabIndex={0}
-                                    onClick={() => this.props.navigate(this.getClassModulesUrl(classObj.Id))}
+                                    onClick={() => this.props.navigate(this.getClassMenuUrl(classObj.Id))}
                                     onKeyDown={(event) => this.handleClassCardKeyDown(event, classObj)}
                                     aria-label={`Open ${classObj.Name}`}
                                 >
@@ -219,11 +219,11 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
 
                                     <div className="module-list-card-actions">
                                         <Link
-                                            to={this.getClassModulesUrl(classObj.Id)}
+                                            to={this.getClassMenuUrl(classObj.Id)}
                                             className="project-action project-action-primary"
                                             onClick={(event) => event.stopPropagation()}
                                         >
-                                            Open Class
+                                            Open Admin Menu
                                         </Link>
                                     </div>
                                 </article>
