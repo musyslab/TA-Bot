@@ -1,4 +1,4 @@
-import React, { Component } from 'react'
+import React, { Component, CSSProperties } from 'react'
 import axios from 'axios'
 import { Helmet } from 'react-helmet'
 import { Link, useLocation, useParams } from 'react-router-dom'
@@ -133,7 +133,6 @@ interface StudentListState {
     selectedLab: number
     projectLanguage: string
 
-    // Modal "CodePage-like" UI
     activeView: 'table' | 'diff'
     selectedDiffId: string | null
     sortBy: 'lastname' | 'lastsubmitted'
@@ -147,10 +146,8 @@ interface StudentListState {
         overlap_snippet_a?: string
         overlap_snippet_b?: string
     }>
-    // Marks Code//
     plagiarismPage: number
     plagiarismPageSize: number
-    // End of Change //
 }
 
 class StudentListInternal extends Component<StudentListProps, StudentListState> {
@@ -181,9 +178,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
             sortBy: 'lastname',
             plagiarismModalIsOpen: false,
             plagiarismResults: [],
-            /* Marks Changes */
             plagiarismPage: 1,
-            /* End Of Change */
             plagiarismPageSize: 10,
         }
 
@@ -898,19 +893,47 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                 <div className="student-stats-panel" aria-label="Student submission statistics">
                     <div className="student-stat-card">
-                        <div className="student-stat-label">Students Submitted</div>
-                        <div className="student-stat-value">
-                            {submittedStudents} / {totalStudents}
+                        <div className="student-stat-copy">
+                            <div className="student-stat-label">Students Submitted</div>
+                            <div className="student-stat-value">
+                                {submittedStudents} / {totalStudents}
+                            </div>
+                            <div className="student-stat-subtext">{submittedPercent}% submitted</div>
                         </div>
-                        <div className="student-stat-subtext">{submittedPercent}% submitted</div>
+
+                        <div
+                            className="student-stat-progress-ring"
+                            style={
+                                {
+                                    "--progress-percent": `${submittedPercent}%`,
+                                } as CSSProperties
+                            }
+                            aria-label={`${submittedPercent}% submitted`}
+                        >
+                            <span>{submittedPercent}%</span>
+                        </div>
                     </div>
 
                     <div className="student-stat-card">
-                        <div className="student-stat-label">Passing All Testcases</div>
-                        <div className="student-stat-value">
-                            {passingStudents} / {totalStudents}
+                        <div className="student-stat-copy">
+                            <div className="student-stat-label">Passing All Testcases</div>
+                            <div className="student-stat-value">
+                                {passingStudents} / {totalStudents}
+                            </div>
+                            <div className="student-stat-subtext">{passingPercent}% passing</div>
                         </div>
-                        <div className="student-stat-subtext">{passingPercent}% passing</div>
+
+                        <div
+                            className="student-stat-progress-ring"
+                            style={
+                                {
+                                    "--progress-percent": `${passingPercent}%`,
+                                } as CSSProperties
+                            }
+                            aria-label={`${passingPercent}% passing`}
+                        >
+                            <span>{passingPercent}%</span>
+                        </div>
                     </div>
                 </div>
 

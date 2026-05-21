@@ -26,14 +26,24 @@
     .student-stat-card {
         background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
         border: 1px solid #d1d5db;
-        border-radius: 14px;
-        box-shadow: 0 2px 12px rgba(15, 23, 42, 0.07);
+        border-radius: 24px;
+        box-shadow:
+            0 24px 60px rgba(15, 23, 42, 0.09),
+            inset 0 1px 0 rgba(255, 255, 255, 0.9);
         padding: 1rem 1.15rem;
+        display: flex;
+        flex-direction: row-reverse;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 1rem;
+        min-height: 126px;
+    }
+
+    .student-stat-copy {
+        min-width: 0;
         display: flex;
         flex-direction: column;
         gap: 0.3rem;
-        min-height: 92px;
-        justify-content: center;
     }
 
     .student-stat-label {
@@ -55,6 +65,24 @@
         color: #64748b;
         font-size: 0.92rem;
         font-weight: 600;
+    }
+
+    .student-stat-progress-ring {
+        width: 96px;
+        height: 96px;
+        flex: 0 0 96px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background:
+            radial-gradient(circle at center, white 58%, transparent 59%),
+            conic-gradient(#10b981 0 var(--progress-percent, 0%), #e2e8f0 var(--progress-percent, 0%) 100%);
+    }
+
+    .student-stat-progress-ring span {
+        color: #132238;
+        font-weight: 950;
+        font-size: 1.25rem;
     }
 }
 
@@ -640,6 +668,10 @@
 @media (max-width: 900px) {
     .student-stats-panel {
         grid-template-columns: 1fr;
+
+        .student-stat-card {
+            align-items: center;
+        }
     }
 
     .student-sub-panel {
