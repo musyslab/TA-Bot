@@ -67,6 +67,8 @@ export function AdminGrading() {
     const projectIdStr = project_id ?? ''
 
     const params = new URLSearchParams(location.search)
+    const fromParam = (params.get('from') || '').toLowerCase()
+    const fromAnalytics = fromParam === 'analytics' || fromParam === 'analytics-dashboard'
     const truthyValues = ['1', 'true', 'yes', 'y', 'on']
     const checkpointParam = (params.get('checkpoint') || params.get('practice') || '').toLowerCase()
     const isCheckpoint = !!route_checkpoint_id || truthyValues.includes(checkpointParam)
@@ -82,6 +84,7 @@ export function AdminGrading() {
 
     const classSelectionUrl = `/admin/school/${schoolIdStr}/classes`
     const adminMenuUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/menu`
+    const analyticsDashboardUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/analytics`
     const moduleListUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/modules`
     const moduleDetailsUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/overview`
     const studentListUrl = isCheckpoint && checkpointId
@@ -907,9 +910,15 @@ export function AdminGrading() {
                     { label: 'School Selection', to: '/admin/schools' },
                     { label: 'Class Selection', to: classSelectionUrl },
                     { label: 'Admin Menu', to: adminMenuUrl },
-                    { label: 'Module List', to: moduleListUrl },
-                    { label: 'Module Details', to: moduleDetailsUrl },
-                    { label: 'Student List', to: studentListUrl },
+                    ...(fromAnalytics
+                        ? [
+                            { label: 'Analytics Dashboard', to: analyticsDashboardUrl },
+                        ]
+                        : [
+                            { label: 'Module List', to: moduleListUrl },
+                            { label: 'Module Details', to: moduleDetailsUrl },
+                            { label: 'Student List', to: studentListUrl },
+                        ]),
                     { label: 'Grade Submission' },
                 ]}
                 confirmOnNavigate={isDirty}

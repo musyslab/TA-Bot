@@ -32,6 +32,7 @@ export function AdminViewStudentCode() {
     const fromParam = (params.get('from') || '').toLowerCase()
     const fromOfficeHours = fromParam === 'office-hours'
     const fromAdminUpload = fromParam === 'admin-upload'
+    const fromAnalytics = fromParam === 'analytics' || fromParam === 'analytics-dashboard'
     const truthyValues = ['1', 'true', 'yes', 'y', 'on']
     const checkpointParam = (params.get('checkpoint') || params.get('practice') || '').toLowerCase()
     const isCheckpoint = !!route_checkpoint_id || truthyValues.includes(checkpointParam)
@@ -57,6 +58,7 @@ export function AdminViewStudentCode() {
     const classSelectionUrl = hasClassDirectoryPath ? `/admin/school/${schoolIdStr}/classes` : '/admin/schools'
     const adminMenuUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/menu`
     const adminUploadUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/upload`
+    const analyticsDashboardUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/analytics`
     const moduleListUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/modules`
     const moduleDetailsUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/overview`
     const studentListUrl = isCheckpoint && checkpointId
@@ -145,24 +147,30 @@ export function AdminViewStudentCode() {
                     { label: 'School Selection', to: '/admin/schools' },
                     ...(fromOfficeHours
                         ? [{ label: 'Office Hours', to: '/admin/OfficeHours' }]
-                        : fromAdminUpload && hasClassDirectoryPath
+                        : fromAnalytics && hasClassDirectoryPath
                             ? [
                                 { label: 'Class Selection', to: classSelectionUrl },
                                 { label: 'Admin Menu', to: adminMenuUrl },
-                                { label: 'Admin Upload', to: adminUploadUrl },
+                                { label: 'Analytics Dashboard', to: analyticsDashboardUrl },
                             ]
-                            : fromAdminUpload || !hasFullDirectoryPath
-                                ? [{ label: 'Admin Upload', to: '/admin/schools' }]
-                                : [
+                            : fromAdminUpload && hasClassDirectoryPath
+                                ? [
                                     { label: 'Class Selection', to: classSelectionUrl },
                                     { label: 'Admin Menu', to: adminMenuUrl },
-                                    { label: 'Module List', to: moduleListUrl },
-                                    { label: 'Module Details', to: moduleDetailsUrl },
-                                    {
-                                        label: 'Student List',
-                                        to: studentListUrl,
-                                    },
-                                ]),
+                                    { label: 'Admin Upload', to: adminUploadUrl },
+                                ]
+                                : fromAdminUpload || !hasFullDirectoryPath
+                                    ? [{ label: 'Admin Upload', to: '/admin/schools' }]
+                                    : [
+                                        { label: 'Class Selection', to: classSelectionUrl },
+                                        { label: 'Admin Menu', to: adminMenuUrl },
+                                        { label: 'Module List', to: moduleListUrl },
+                                        { label: 'Module Details', to: moduleDetailsUrl },
+                                        {
+                                            label: 'Student List',
+                                            to: studentListUrl,
+                                        },
+                                    ]),
                     { label: 'Code View' },
                 ]}
             />
