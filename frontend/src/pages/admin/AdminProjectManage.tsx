@@ -142,12 +142,16 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const practiceProblemQuery =
         isPractice && practiceProblemId ? `&checkpoint_id=${practiceProblemId}` : ''
 
-    // Testcases must NOT be editable unless solution exists (main or practice)
+    const hasSavedSolution = serverSolutionFileNamesSnapshot.length > 0
+    const hasSavedAssignmentDescription = serverDescFileName.trim() !== ''
+    const hasSavedProjectFiles = hasSavedSolution && hasSavedAssignmentDescription
+
     const hasSolution =
         SolutionFiles.length > 0 || serverSolutionFileNames.length > 0
+
     const hasTestcases = testcases.some((tc) => tc.id > 0)
 
-    const filesNeedSetup = !hasSolution
+    const filesNeedSetup = !hasSavedProjectFiles
     const testcasesNeedSetup = !hasTestcases
 
     const pageTitleText =
@@ -838,8 +842,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     async function handleJsonSubmit() {
         try {
             setSubmittingJson(true)
-            if (!hasSolution) {
-                window.alert('Upload solution file(s) before uploading test cases.')
+            if (!hasSavedProjectFiles) {
+                window.alert('Save both the solution file(s) and assignment description before uploading test cases.')
                 return
             }
             const formData = new FormData()
@@ -1010,8 +1014,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     }
 
     async function setHiddenFromRow(tc: Testcase, hidden: boolean) {
-        if (!hasSolution) {
-            window.alert('Upload solution file(s) before editing test cases.')
+        if (!hasSavedProjectFiles) {
+            window.alert('Save both the solution file(s) and assignment description before editing test cases.')
             return
         }
         const formData = new FormData()
@@ -1333,8 +1337,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     async function buttonhandleClick(testcase: number) {
         if (!modalDraft) return
 
-        if (!hasSolution) {
-            window.alert('Upload solution file(s) before creating or editing test cases.')
+        if (!hasSavedProjectFiles) {
+            window.alert('Save both the solution file(s) and assignment description before creating or editing test cases.')
             return
         }
 
@@ -1552,8 +1556,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                     className={`step-menu-item ${activeStep === 'testcases' ? 'active' : ''}${testcasesNeedSetup ? ' needs-setup' : ''}`}
                                     onClick={() => setActiveStep('testcases')}
                                     title={
-                                        !hasSolution
-                                            ? 'Upload solution file(s) first, then create or upload test cases.'
+                                        !hasSavedProjectFiles
+                                            ? 'Upload and save both the solution file(s) and assignment description first.'
                                             : testcasesNeedSetup
                                                 ? 'Create or upload test cases to finish setup.'
                                                 : undefined
@@ -1948,11 +1952,11 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                             {activeStep === 'testcases' && (
                                 <div id="project-testcases-panel" role="tabpanel" className="pane-testcases">
                                     <div className="testcase-management-group">
-                                        {!hasSolution ? (
+                                        {!hasSavedProjectFiles ? (
                                             <div style={{ padding: 16 }}>
-                                                Test cases are disabled until you upload solution file(s).
+                                                Test cases are disabled until both the solution file(s) and assignment description are saved.
                                                 <div style={{ marginTop: 12 }}>
-                                                    Go to Step 1: Files, upload the solution file(s), save the project,
+                                                    Go to Step 1: Files, upload both required files, save the project,
                                                     then return to this step.
                                                 </div>
                                             </div>

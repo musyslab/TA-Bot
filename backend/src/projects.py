@@ -14,7 +14,7 @@ from urllib.parse import quote
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, Response, jsonify, make_response, request
 from flask_jwt_extended import current_user, jwt_required
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from werkzeug.utils import secure_filename
 
 from container import Container
@@ -22,12 +22,18 @@ from src.constants import ADMIN_ROLE, TEACHER_ROLE
 from src.repositories.class_repository import ClassRepository
 from src.repositories.database import db
 from src.repositories.models import (
+    CheckpointGrades,
     ClassAssignments,
     Classes,
+    Labs,
+    LectureSections,
+    MainAssignmentGrades,
     Modules,
     Checkpoints,
     Projects,
+    StudentHiddenModules,
     Submissions,
+    Users,
 )
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.submission_repository import SubmissionRepository
@@ -442,16 +448,8 @@ def user_can_access_project_id(project_id: int) -> bool:
 
     return user_can_access_class_id(int(getattr(project, "ClassId", 0) or 0))
 
-def current_user_is_enrolled_in_project_class(project_id: int) -> bool:
-    project_id = parse_int(project_id, 0)
-    if project_id <= 0:
-        return False
-
-    project = Projects.query.filter(Projects.Id == project_id).first()
-    if project is None:
-        return False
-
-    class_id = parse_int(getattr(project, "ClassId", 0) or 0, 0)
+def current_user_is_enrolled_in_class(class_id: int) -> bool:
+    class_id = parse_int(class_id, 0)
     if class_id <= 0:
         return False
 
@@ -467,8 +465,87 @@ def current_user_is_enrolled_in_project_class(project_id: int) -> bool:
         return False
 
 
+def current_user_is_enrolled_in_project_class(project_id: int) -> bool:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return False
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    class_id = parse_int(getattr(project, "ClassId", 0) or 0, 0)
+    return current_user_is_enrolled_in_class(class_id)
+
+
+def student_module_is_hidden_for_current_user(module_id: int) -> bool:
+    module_id = parse_int(module_id, 0)
+    if module_id <= 0 or is_staff_user():
+        return False
+
+    try:
+        return (
+            StudentHiddenModules.query.filter(
+                StudentHiddenModules.UserId == int(current_user.Id),
+                StudentHiddenModules.ModuleId == module_id,
+            ).first()
+            is not None
+        )
+    except Exception:
+        return False
+
+
+def current_user_can_access_visible_module_id(module_id: int) -> bool:
+    module_id = parse_int(module_id, 0)
+    if module_id <= 0:
+        return False
+
+    if is_staff_user():
+        return user_can_access_module_id(module_id)
+
+    module = Modules.query.filter(Modules.Id == module_id).first()
+    if module is None:
+        return False
+
+    class_id = parse_int(getattr(module, "ClassId", 0) or 0, 0)
+    return (
+        current_user_is_enrolled_in_class(class_id)
+        and not student_module_is_hidden_for_current_user(module_id)
+    )
+
+
+def project_is_hidden_for_current_student(project) -> bool:
+    if not project or is_staff_user():
+        return False
+
+    module_id = parse_int(getattr(project, "ModuleId", 0) or 0, 0)
+    return module_id > 0 and student_module_is_hidden_for_current_user(module_id)
+
+
+def current_user_can_access_visible_project_id(project_id: int) -> bool:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return False
+
+    if is_staff_user():
+        return user_can_access_project_id(project_id)
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    class_id = parse_int(getattr(project, "ClassId", 0) or 0, 0)
+    if not current_user_is_enrolled_in_class(class_id):
+        return False
+
+    return not project_is_hidden_for_current_student(project)
+
+
 def current_user_can_download_project_files(project_id: int) -> bool:
-    return user_can_access_project_id(project_id) or current_user_is_enrolled_in_project_class(project_id)
+    if user_can_access_project_id(project_id):
+        return True
+
+    return current_user_can_access_visible_project_id(project_id)
 
 
 
@@ -810,6 +887,407 @@ def project_payload(
         **project_setup_status(project_repo, project_id),
     }
 
+def analytics_iso(value) -> str:
+    if value is None:
+        return ""
+
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value or "")
+
+
+def analytics_student_row_payload(user, lecture_name: str, lab_name: str, class_id: int, *, submission=None, attempts=0, grade=0):
+    student_id = str(getattr(user, "StudentNumber", "") or "")
+    last_name = str(getattr(user, "Lastname", "") or "")
+    first_name = str(getattr(user, "Firstname", "") or "")
+    lecture = str(lecture_name or "")
+    lab = str(lab_name or "")
+    is_locked = bool(getattr(user, "IsLocked", False))
+
+    if submission is None:
+        return [
+            last_name,
+            first_name,
+            lecture,
+            lab,
+            "N/A",
+            "N/A",
+            "N/A",
+            "N/A",
+            -1,
+            str(class_id),
+            "0",
+            student_id,
+            is_locked,
+        ]
+
+    return [
+        last_name,
+        first_name,
+        lecture,
+        lab,
+        int(attempts or 0),
+        analytics_iso(getattr(submission, "Time", None)),
+        bool(getattr(submission, "IsPassing", False)),
+        int(getattr(submission, "Id", 0) or 0),
+        str(class_id),
+        grade if grade is not None else 0,
+        student_id,
+        is_locked,
+    ]
+
+
+def analytics_submission_is_newer(candidate, current) -> bool:
+    if current is None:
+        return True
+
+    candidate_time = getattr(candidate, "Time", None)
+    current_time = getattr(current, "Time", None)
+
+    if candidate_time is not None and current_time is not None and candidate_time != current_time:
+        return candidate_time > current_time
+    if candidate_time is not None and current_time is None:
+        return True
+    if candidate_time is None and current_time is not None:
+        return False
+
+    return int(getattr(candidate, "Id", 0) or 0) > int(getattr(current, "Id", 0) or 0)
+
+
+def analytics_dashboard_students(class_id: int):
+    rows = (
+        db.session.query(Users, LectureSections.Name, Labs.Name)
+        .join(ClassAssignments, ClassAssignments.UserId == Users.Id)
+        .outerjoin(
+            LectureSections,
+            and_(
+                ClassAssignments.LectureId == LectureSections.Id,
+                LectureSections.ClassId == int(class_id),
+            ),
+        )
+        .outerjoin(
+            Labs,
+            and_(
+                ClassAssignments.LabId == Labs.Id,
+                Labs.ClassId == int(class_id),
+            ),
+        )
+        .filter(ClassAssignments.ClassId == int(class_id), Users.Role == 0)
+        .order_by(Users.Lastname.asc(), Users.Firstname.asc(), Users.Id.asc())
+        .all()
+    )
+
+    return [
+        {
+            "user": user,
+            "lecture": str(lecture_name or ""),
+            "lab": str(lab_name or ""),
+        }
+        for user, lecture_name, lab_name in rows
+    ]
+
+
+def analytics_checkpoint_payloads(
+    project_ids: list[int],
+    project_repo: ProjectRepository,
+) -> dict[str, list[dict]]:
+    if not project_ids:
+        return {}
+
+    payloads: dict[str, list[dict]] = {str(project_id): [] for project_id in project_ids}
+
+    for project_id in project_ids:
+        checkpoints = project_repo.list_checkpoints(project_id)
+
+        for index, checkpoint in enumerate(checkpoints):
+            checkpoint_id = int(getattr(checkpoint, "Id", 0) or 0)
+            if checkpoint_id <= 0:
+                continue
+
+            checkpoint_number = index + 1
+            checkpoint_name = str(
+                getattr(checkpoint, "Name", "") or default_checkpoint_name(checkpoint_number)
+            )
+
+            payloads.setdefault(str(project_id), []).append({
+                "id": checkpoint_id,
+                "Id": checkpoint_id,
+                "checkpointId": checkpoint_id,
+                "CheckpointId": checkpoint_id,
+                "number": checkpoint_number,
+                "Number": checkpoint_number,
+                "name": checkpoint_name,
+                "Name": checkpoint_name,
+                "enabled": bool(getattr(checkpoint, "Enabled", True)),
+                "Enabled": bool(getattr(checkpoint, "Enabled", True)),
+            })
+
+    return payloads
+
+
+def analytics_dashboard_progress(class_id: int, project_ids: list[int], checkpoints_by_project_id: dict[str, list[dict]]):
+    students = analytics_dashboard_students(class_id)
+    student_ids = [int(getattr(row["user"], "Id", 0) or 0) for row in students]
+
+    item_ids = [f"main-{project_id}" for project_id in project_ids]
+    checkpoint_ids_by_project: dict[int, list[int]] = defaultdict(list)
+    for project_id_key, checkpoints in checkpoints_by_project_id.items():
+        project_id = parse_int(project_id_key, 0)
+        for checkpoint in checkpoints:
+            checkpoint_id = parse_int(checkpoint.get("id") or checkpoint.get("Id"), 0)
+            if project_id > 0 and checkpoint_id > 0:
+                checkpoint_ids_by_project[project_id].append(checkpoint_id)
+                item_ids.append(f"checkpoint-{project_id}-{checkpoint_id}")
+
+    empty_progress = {item_id: {} for item_id in item_ids}
+    if not project_ids or not student_ids:
+        return empty_progress
+
+    submissions = (
+        Submissions.query
+        .filter(Submissions.Project.in_(project_ids), Submissions.User.in_(student_ids))
+        .order_by(Submissions.Project.asc(), Submissions.User.asc(), Submissions.Time.desc(), Submissions.Id.desc())
+        .all()
+    )
+
+    main_attempt_counts: dict[tuple[int, int], int] = defaultdict(int)
+    checkpoint_attempt_counts: dict[tuple[int, int, int], int] = defaultdict(int)
+    latest_main: dict[tuple[int, int], Submissions] = {}
+    latest_checkpoint: dict[tuple[int, int, int], Submissions] = {}
+
+    for submission in submissions:
+        project_id = int(getattr(submission, "Project", 0) or 0)
+        user_id = int(getattr(submission, "User", 0) or 0)
+        if project_id <= 0 or user_id <= 0:
+            continue
+
+        if bool(getattr(submission, "IsCheckpoint", False)):
+            checkpoint_id = parse_int(getattr(submission, "CheckpointId", None), 0)
+            if checkpoint_id <= 0:
+                continue
+            key = (project_id, checkpoint_id, user_id)
+            checkpoint_attempt_counts[key] += 1
+            if analytics_submission_is_newer(submission, latest_checkpoint.get(key)):
+                latest_checkpoint[key] = submission
+        else:
+            key = (project_id, user_id)
+            main_attempt_counts[key] += 1
+            if analytics_submission_is_newer(submission, latest_main.get(key)):
+                latest_main[key] = submission
+
+    main_grades = {
+        (int(row.Pid), int(row.Sid)): row.Grade
+        for row in MainAssignmentGrades.query.filter(
+            MainAssignmentGrades.Pid.in_(project_ids),
+            MainAssignmentGrades.Sid.in_(student_ids),
+        ).all()
+    }
+
+    latest_checkpoint_submission_ids = [
+        int(getattr(submission, "Id", 0) or 0)
+        for submission in latest_checkpoint.values()
+        if int(getattr(submission, "Id", 0) or 0) > 0
+    ]
+    checkpoint_grades = {}
+    if latest_checkpoint_submission_ids:
+        checkpoint_grades = {
+            int(row.SubmissionId): row.Grade
+            for row in CheckpointGrades.query.filter(
+                CheckpointGrades.SubmissionId.in_(latest_checkpoint_submission_ids)
+            ).all()
+        }
+
+    progress = {item_id: {} for item_id in item_ids}
+
+    for student_row in students:
+        user = student_row["user"]
+        user_id = int(getattr(user, "Id", 0) or 0)
+        lecture = student_row["lecture"]
+        lab = student_row["lab"]
+
+        for project_id in project_ids:
+            main_item_id = f"main-{project_id}"
+            main_key = (project_id, user_id)
+            main_submission = latest_main.get(main_key)
+            progress[main_item_id][str(user_id)] = analytics_student_row_payload(
+                user,
+                lecture,
+                lab,
+                class_id,
+                submission=main_submission,
+                attempts=main_attempt_counts.get(main_key, 0),
+                grade=main_grades.get(main_key, 0),
+            )
+
+            for checkpoint_id in checkpoint_ids_by_project.get(project_id, []):
+                checkpoint_item_id = f"checkpoint-{project_id}-{checkpoint_id}"
+                checkpoint_key = (project_id, checkpoint_id, user_id)
+                checkpoint_submission = latest_checkpoint.get(checkpoint_key)
+                checkpoint_grade = 0
+                if checkpoint_submission is not None:
+                    checkpoint_grade = checkpoint_grades.get(int(getattr(checkpoint_submission, "Id", 0) or 0), 0)
+
+                progress[checkpoint_item_id][str(user_id)] = analytics_student_row_payload(
+                    user,
+                    lecture,
+                    lab,
+                    class_id,
+                    submission=checkpoint_submission,
+                    attempts=checkpoint_attempt_counts.get(checkpoint_key, 0),
+                    grade=checkpoint_grade,
+                )
+
+    return progress
+
+
+@projects_api.route('/analytics_dashboard', methods=['GET'])
+@jwt_required()
+@inject
+def analytics_dashboard(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if not is_staff_user():
+        return access_denied_response()
+
+    class_id = parse_int(request.args.get('class_id') or request.args.get('id'), 0)
+    if class_id <= 0:
+        return make_response({'message': 'Missing class_id'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_class_id(class_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    modules = list(project_repo.get_modules_by_class_id(class_id) or [])
+    projects = list(project_repo.get_projects_by_class_id(class_id) or [])
+    project_ids = [
+        int(project.Id)
+        for project in projects
+        if int(getattr(project, "Id", 0) or 0) > 0
+    ]
+
+    checkpoints_by_project_id = analytics_checkpoint_payloads(
+        project_ids,
+        project_repo,
+    )
+
+    module_by_id = {
+        int(module.Id): module
+        for module in modules
+        if int(getattr(module, "Id", 0) or 0) > 0
+    }
+
+    project_by_module_id = {
+        int(getattr(project, "ModuleId", 0) or 0): project
+        for project in projects
+        if int(getattr(project, "ModuleId", 0) or 0) > 0
+    }
+
+    return jsonify({
+        "modules": [
+            {
+                "Id": int(module.Id),
+                "ClassId": int(module.ClassId),
+                "Name": str(module.Name or ""),
+                "Start": module.Start.strftime("%x %X") if module.Start else "",
+                "End": module.End.strftime("%x %X") if module.End else "",
+                "MainProjectId": int(project_by_module_id[int(module.Id)].Id)
+                    if int(module.Id) in project_by_module_id else None,
+                "MainProjectName": str(project_by_module_id[int(module.Id)].Name or "")
+                    if int(module.Id) in project_by_module_id else "",
+            }
+            for module in modules
+        ],
+        "projects": [
+            {
+                "Id": int(project.Id),
+                "Name": str(project.Name or ""),
+                "Start": module_by_id[int(getattr(project, "ModuleId", 0) or 0)].Start.strftime("%x %X")
+                    if int(getattr(project, "ModuleId", 0) or 0) in module_by_id
+                    and module_by_id[int(getattr(project, "ModuleId", 0) or 0)].Start
+                    else "",
+                "End": module_by_id[int(getattr(project, "ModuleId", 0) or 0)].End.strftime("%x %X")
+                    if int(getattr(project, "ModuleId", 0) or 0) in module_by_id
+                    and module_by_id[int(getattr(project, "ModuleId", 0) or 0)].End
+                    else "",
+                "ModuleId": getattr(project, "ModuleId", None),
+            }
+            for project in projects
+        ],
+        "checkpointsByProjectId": checkpoints_by_project_id,
+        "submissionsByItemId": analytics_dashboard_progress(
+            class_id,
+            project_ids,
+            checkpoints_by_project_id,
+        ),
+        "hiddenModulesByStudentId": project_repo.get_hidden_module_ids_by_student_for_class(class_id),
+    })
+
+
+@projects_api.route('/student_module_visibility', methods=['POST'])
+@jwt_required()
+@inject
+def set_student_module_visibility(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if not is_staff_user():
+        return access_denied_response()
+
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get('class_id'), 0)
+    student_id = parse_int(data.get('student_id'), 0)
+    module_id = parse_int(data.get('module_id'), 0)
+    hidden = parse_bool(data.get('hidden'))
+
+    if class_id <= 0 or student_id <= 0 or module_id <= 0:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_class_id(class_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    module = Modules.query.filter(Modules.Id == module_id).first()
+    if not module or int(getattr(module, 'ClassId', 0) or 0) != class_id:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+
+    assigned = ClassAssignments.query.filter(
+        ClassAssignments.ClassId == class_id,
+        ClassAssignments.UserId == student_id,
+    ).first()
+    if assigned is None:
+        return make_response({'message': 'Student is not enrolled in this class'}, HTTPStatus.BAD_REQUEST)
+
+    project_repo.set_student_module_hidden(student_id, module_id, hidden)
+
+    return jsonify({
+        'studentId': student_id,
+        'moduleId': module_id,
+        'hidden': bool(hidden),
+    })
+
+
+@projects_api.route('/module_visibility_for_all', methods=['POST'])
+@jwt_required()
+@inject
+def set_module_visibility_for_all(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if not is_staff_user():
+        return access_denied_response()
+
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get('class_id'), 0)
+    module_id = parse_int(data.get('module_id'), 0)
+    hidden = parse_bool(data.get('hidden'))
+
+    if class_id <= 0 or module_id <= 0:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_class_id(class_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    module = Modules.query.filter(Modules.Id == module_id).first()
+    if not module or int(getattr(module, 'ClassId', 0) or 0) != class_id:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+
+    student_ids = project_repo.set_module_hidden_for_class(module_id, hidden)
+
+    return jsonify({
+        'moduleId': module_id,
+        'hidden': bool(hidden),
+        'studentIds': student_ids,
+    })
+
+
 @projects_api.route('/all_projects', methods=['GET'])
 @jwt_required()
 @inject
@@ -893,6 +1371,8 @@ def list_checkpoints_student(project_repo: ProjectRepository = Provide[Container
     project_id = parse_int(request.args.get("project_id", ""), 0)
     if project_id <= 0:
         return jsonify({'problems': []})
+    if not current_user_can_access_visible_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     return jsonify({'problems': student_checkpoint_rows(project_repo, project_id)})
 
@@ -1142,6 +1622,9 @@ def get_projects_by_user(project_repo: ProjectRepository = Provide[Container.pro
     projects= project_repo.get_all_projects()
     student_submissions={}
     for project in projects:
+        if project_is_hidden_for_current_student(project):
+            continue
+
         subs = submission_repo.get_most_recent_submission_by_project(project.Id, [current_user.Id])
         class_name = project_repo.get_className_by_projectId(project.Id)
         if current_user.Id in subs: 
@@ -1188,6 +1671,16 @@ def past_submissions():
         .order_by(Modules.Start.asc(), Projects.Id.asc())
         .all()
     )
+
+    if not is_staff_user():
+        projects = [
+            project
+            for project in (projects or [])
+            if not project_is_hidden_for_current_student(project)
+        ]
+        proj_ids = [int(getattr(project, "Id", 0) or 0) for project in projects]
+        if not proj_ids:
+            return jsonify([])
 
     class_ids = {int(getattr(p, "ClassId", 0) or 0) for p in (projects or [])}
     class_ids.discard(0)
@@ -2113,12 +2606,26 @@ def create_module(project_repo: ProjectRepository = Provide[Container.project_re
 @jwt_required()
 @inject
 def get_modules_by_class_id_student(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    class_id = request.args.get('id')
+    class_id = parse_int(request.args.get('id'), 0)
 
-    if not class_id:
+    if class_id <= 0:
         return jsonify([])
 
-    modules = project_repo.get_modules_by_class_id(class_id)
+    if not is_staff_user() and not current_user_is_enrolled_in_class(class_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    modules = list(project_repo.get_modules_by_class_id(class_id) or [])
+    if not is_staff_user():
+        hidden_module_ids = project_repo.get_hidden_module_ids_for_student(
+            class_id,
+            int(current_user.Id),
+        )
+        modules = [
+            module
+            for module in modules
+            if int(getattr(module, "Id", 0) or 0) not in hidden_module_ids
+        ]
+
     module_projects = [project_repo.get_main_project_for_module(int(module.Id)) for module in modules]
     project_ids = [int(project.Id) for project in module_projects if project is not None]
     total_submission_counts = submission_repo.get_total_submission_for_all_projects()
@@ -2148,6 +2655,8 @@ def get_module_overview_student(project_repo: ProjectRepository = Provide[Contai
     module = project_repo.get_module(module_id)
     if not module:
         return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+    if not current_user_can_access_visible_module_id(module_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     project = project_repo.get_main_project_for_module(int(module.Id))
     checkpoint_rows = student_checkpoint_rows(project_repo, int(project.Id)) if project else []

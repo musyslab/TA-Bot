@@ -32,6 +32,7 @@ export default function AdminMenu() {
     const classId = class_id || "";
 
     const moduleListPath = `/admin/school/${schoolId}/class/${classId}/modules`;
+    const analyticsPath = `/admin/school/${schoolId}/class/${classId}/analytics`;
     const adminUploadPath = `/admin/school/${schoolId}/class/${classId}/upload`;
 
     const menuOptions: AdminMenuOption[] = [
@@ -44,10 +45,10 @@ export default function AdminMenu() {
         },
         {
             title: "Analytics Dashboard",
-            description: "View class analytics and performance trends",
+            description: "See every student's progress across every assignment and checkpoint",
+            to: analyticsPath,
             icon: <FaChartLine aria-hidden="true" />,
-            actionLabel: "Coming Soon",
-            disabled: true,
+            actionLabel: "Open Analytics",
         },
         {
             title: "Admin Upload",

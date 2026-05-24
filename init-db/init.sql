@@ -183,6 +183,21 @@ CREATE TABLE `ClassAssignments` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `StudentHiddenModules`
+--
+
+DROP TABLE IF EXISTS `StudentHiddenModules`;
+CREATE TABLE `StudentHiddenModules` (
+  `UserId` int NOT NULL,
+  `ModuleId` int NOT NULL,
+  `CreatedAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`UserId`,`ModuleId`),
+  KEY `idx_StudentHiddenModules_ModuleId` (`ModuleId`),
+  CONSTRAINT `fk_StudentHiddenModules_User` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentHiddenModules_Module` FOREIGN KEY (`ModuleId`) REFERENCES `Modules` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
 -- Table structure for table `LoginAttempts`
 --
 

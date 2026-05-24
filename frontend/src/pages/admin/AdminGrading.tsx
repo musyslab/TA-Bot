@@ -9,7 +9,7 @@ import DirectoryBreadcrumbs from '../components/DirectoryBreadcrumbs'
 import DiffView from '../components/CodeDiffView'
 import LoadingAnimation from '../components/LoadingAnimation'
 
-import { FiTrendingUp, FiChevronLeft, FiChevronRight, FiSave, FiUser } from 'react-icons/fi'
+import { FiTrendingUp, FiChevronLeft, FiChevronRight, FiSave, FiUser, FiX, FiCheckCircle } from 'react-icons/fi'
 
 const defaultpagenumber = -1
 
@@ -67,6 +67,8 @@ export function AdminGrading() {
     const projectIdStr = project_id ?? ''
 
     const params = new URLSearchParams(location.search)
+    const fromParam = (params.get('from') || '').toLowerCase()
+    const fromAnalytics = fromParam === 'analytics' || fromParam === 'analytics-dashboard'
     const truthyValues = ['1', 'true', 'yes', 'y', 'on']
     const checkpointParam = (params.get('checkpoint') || params.get('practice') || '').toLowerCase()
     const isCheckpoint = !!route_checkpoint_id || truthyValues.includes(checkpointParam)
@@ -82,6 +84,7 @@ export function AdminGrading() {
 
     const classSelectionUrl = `/admin/school/${schoolIdStr}/classes`
     const adminMenuUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/menu`
+    const analyticsDashboardUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/analytics`
     const moduleListUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/modules`
     const moduleDetailsUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/module/${moduleIdStr}/overview`
     const studentListUrl = isCheckpoint && checkpointId
@@ -799,6 +802,11 @@ export function AdminGrading() {
         return () => window.clearTimeout(timer)
     }, [showSavedBanner])
 
+    const dismissSavedBanner = () => {
+        setShowSavedBanner(false)
+        setSaveStatus((prev) => (prev === 'saved' ? 'idle' : prev))
+    }
+
     // Warn before leaving the page if there are unsaved changes (tab close/refresh/navigate away)
     useEffect(() => {
         const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -907,9 +915,15 @@ export function AdminGrading() {
                     { label: 'School Selection', to: '/admin/schools' },
                     { label: 'Class Selection', to: classSelectionUrl },
                     { label: 'Admin Menu', to: adminMenuUrl },
-                    { label: 'Module List', to: moduleListUrl },
-                    { label: 'Module Details', to: moduleDetailsUrl },
-                    { label: 'Student List', to: studentListUrl },
+                    ...(fromAnalytics
+                        ? [
+                            { label: 'Analytics Dashboard', to: analyticsDashboardUrl },
+                        ]
+                        : [
+                            { label: 'Module List', to: moduleListUrl },
+                            { label: 'Module Details', to: moduleDetailsUrl },
+                            { label: 'Student List', to: studentListUrl },
+                        ]),
                     { label: 'Grade Submission' },
                 ]}
                 confirmOnNavigate={isDirty}
@@ -993,18 +1007,32 @@ export function AdminGrading() {
             </div>
 
             <div
-                className={`grading-saved-banner-popup ${showSavedBanner ? 'is-visible' : ''}`}
-                role="status"
+                className={`grading-saved-alert ${showSavedBanner ? 'is-visible' : ''}`}
+                role="alert"
                 aria-live="polite"
                 aria-hidden={!showSavedBanner}
             >
-                <div className="grading-saved-banner-popup__icon" aria-hidden="true">
-                    ✓
+                <div className="grading-saved-alert__icon" aria-hidden="true">
+                    <FiCheckCircle />
                 </div>
-                <div className="grading-saved-banner-popup__content">
-                    <div className="grading-saved-banner-popup__title">Changes saved</div>
-                    <div className="grading-saved-banner-popup__text">Saved to the database successfully.</div>
+
+                <div className="grading-saved-alert__content">
+                    <div className="grading-saved-alert__eyebrow">Grade submitted</div>
+                    <div className="grading-saved-alert__title">Saved successfully</div>
+                    <div className="grading-saved-alert__text">
+                        The grade for {studentName || 'this student'} was saved.
+                    </div>
                 </div>
+
+                <button
+                    type="button"
+                    className="grading-saved-alert__close"
+                    onClick={dismissSavedBanner}
+                    aria-label="Dismiss saved grade alert"
+                    title="Dismiss"
+                >
+                    <FiX />
+                </button>
             </div>
 
             <DiffView
