@@ -7,11 +7,13 @@ import {
     FaClipboardCheck,
     FaExclamationTriangle,
     FaEye,
+    FaEyeSlash,
     FaFilter,
     FaFolderOpen,
     FaSearch,
     FaSortAlphaDown,
     FaTimesCircle,
+    FaUsers,
 } from "react-icons/fa";
 
 import MenuComponent from "../components/MenuComponent";
@@ -109,11 +111,18 @@ type StudentProgressRow = StudentSummary & {
 
 type SortMode = "last-asc" | "last-desc";
 
+type ModuleVisibilityOption = {
+    moduleId: number;
+    moduleName: string;
+    itemCount: number;
+};
+
 type AnalyticsDashboardPayload = {
     modules: RawModule[];
     projects: RawProject[];
     checkpointsByProjectId: Record<string, RawCheckpoint[]>;
     submissionsByItemId: Record<string, Record<string, unknown>>;
+    hiddenModulesByStudentId?: Record<string, unknown>;
 };
 
 function authHeaders() {
@@ -138,7 +147,6 @@ function parseMaybeJson<T>(value: unknown, fallback: T): T {
 
     return (value as T) ?? fallback;
 }
-
 
 function asNumber(value: unknown, fallback = 0): number {
     const parsed = Number(value);
@@ -346,6 +354,28 @@ function compareStudents(a: StudentProgressRow, b: StudentProgressRow, sortMode:
     return lastCompare !== 0 ? lastCompare : firstCompare;
 }
 
+function normalizeHiddenModuleMap(value: Record<string, unknown> | undefined): Record<number, number[]> {
+    const normalized: Record<number, number[]> = {};
+
+    Object.entries(value || {}).forEach(([userIdRaw, moduleIdsRaw]) => {
+        const userId = asNumber(userIdRaw, 0);
+
+        if (userId <= 0 || !Array.isArray(moduleIdsRaw)) {
+            return;
+        }
+
+        const moduleIds = moduleIdsRaw
+            .map((moduleId) => asNumber(moduleId, 0))
+            .filter((moduleId) => moduleId > 0);
+
+        if (moduleIds.length > 0) {
+            normalized[userId] = Array.from(new Set(moduleIds));
+        }
+    });
+
+    return normalized;
+}
+
 export default function AdminAnalyticsDashboard() {
     const { school_id, class_id } = useParams<RouteParams>();
 
@@ -362,6 +392,7 @@ export default function AdminAnalyticsDashboard() {
     const [sortMode, setSortMode] = useState<SortMode>("last-asc");
     const [hoveredStudentId, setHoveredStudentId] = useState<number | null>(null);
     const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
+    const [studentHiddenModuleIds, setStudentHiddenModuleIds] = useState<Record<number, number[]>>({});
     const tableScrollRef = useRef<HTMLDivElement | null>(null);
     const bottomScrollRef = useRef<HTMLDivElement | null>(null);
     const [bottomScrollWidth, setBottomScrollWidth] = useState(0);
@@ -378,6 +409,7 @@ export default function AdminAnalyticsDashboard() {
             if (!classId || !token) {
                 setItems([]);
                 setStudents([]);
+                setStudentHiddenModuleIds({});
                 setLoading(false);
                 setError("You must be logged in to view the analytics dashboard.");
                 return;
@@ -399,6 +431,7 @@ export default function AdminAnalyticsDashboard() {
                         projects: [],
                         checkpointsByProjectId: {},
                         submissionsByItemId: {},
+                        hiddenModulesByStudentId: {},
                     },
                 );
 
@@ -406,6 +439,9 @@ export default function AdminAnalyticsDashboard() {
                 const projects = Array.isArray(payload.projects) ? payload.projects : [];
                 const checkpointsByProjectId = payload.checkpointsByProjectId || {};
                 const submissionsByItemId = payload.submissionsByItemId || {};
+                const hiddenModulesByStudentId = normalizeHiddenModuleMap(
+                    payload.hiddenModulesByStudentId,
+                );
 
                 const moduleById = new Map<number, RawModule>();
                 modules.forEach((module) => {
@@ -544,6 +580,7 @@ export default function AdminAnalyticsDashboard() {
                 if (!cancelled) {
                     setItems(dashboardItems);
                     setStudents(rows);
+                    setStudentHiddenModuleIds(hiddenModulesByStudentId);
                 }
             } catch (err) {
                 if (!cancelled) {
@@ -626,6 +663,43 @@ export default function AdminAnalyticsDashboard() {
         return groups;
     }, [items]);
 
+    const moduleVisibilityOptions = useMemo<ModuleVisibilityOption[]>(() => {
+        return modulesForHeader.map((module) => ({
+            moduleId: module.moduleId,
+            moduleName: module.moduleName,
+            itemCount: module.span,
+        }));
+    }, [modulesForHeader]);
+
+    useEffect(() => {
+        const validModuleIds = new Set(
+            moduleVisibilityOptions.map((module) => module.moduleId),
+        );
+        const validStudentIds = new Set(students.map((student) => student.userId));
+
+        setStudentHiddenModuleIds((current) => {
+            const next: Record<number, number[]> = {};
+
+            Object.entries(current).forEach(([userIdRaw, moduleIds]) => {
+                const userId = Number(userIdRaw);
+
+                if (!validStudentIds.has(userId)) {
+                    return;
+                }
+
+                const validHiddenModules = moduleIds.filter((moduleId) => (
+                    validModuleIds.has(moduleId)
+                ));
+
+                if (validHiddenModules.length > 0) {
+                    next[userId] = validHiddenModules;
+                }
+            });
+
+            return next;
+        });
+    }, [moduleVisibilityOptions, students]);
+
     useEffect(() => {
         function updateBottomScrollWidth() {
             if (!tableScrollRef.current) {
@@ -650,7 +724,7 @@ export default function AdminAnalyticsDashboard() {
             window.removeEventListener("resize", updateBottomScrollWidth);
             resizeObserver.disconnect();
         };
-    }, [items, filteredStudents.length]);
+    }, [items, filteredStudents.length, studentHiddenModuleIds]);
 
     function syncTableScroll() {
         const table = tableScrollRef.current;
@@ -703,12 +777,250 @@ export default function AdminAnalyticsDashboard() {
         return `/admin/school/${schoolId}/class/${classId}/module/${item.moduleId}/project/${item.projectId}/submissions`;
     }
 
+    function hasGrade(cell: ProgressCell | undefined): boolean {
+        const grade = cell?.grade?.trim();
+
+        return Boolean(
+            grade &&
+            grade !== "0" &&
+            grade.toUpperCase() !== "N/A",
+        );
+    }
+
+    function isStudentModuleHidden(userId: number, moduleId: number): boolean {
+        return studentHiddenModuleIds[userId]?.includes(moduleId) ?? false;
+    }
+
+    function isModuleHiddenForEveryone(moduleId: number): boolean {
+        return students.length > 0 && students.every((student) => (
+            isStudentModuleHidden(student.userId, moduleId)
+        ));
+    }
+
+    function confirmVisibilityChange(message: string): boolean {
+        return window.confirm(message);
+    }
+
+    async function toggleStudentModuleVisibility(
+        userId: number,
+        moduleId: number,
+        studentName: string,
+        moduleName: string,
+    ) {
+        const currentlyHidden = isStudentModuleHidden(userId, moduleId);
+        const nextHidden = !currentlyHidden;
+        const action = currentlyHidden ? "show" : "hide";
+        const confirmed = confirmVisibilityChange(
+            [
+                "Change module visibility?",
+                `This will ${action} ${moduleName} for ${studentName}.`,
+            ].join("\n"),
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            await axios.post(
+                `${API_URL}/projects/student_module_visibility`,
+                {
+                    class_id: classId,
+                    student_id: userId,
+                    module_id: moduleId,
+                    hidden: nextHidden,
+                },
+                { headers: authHeaders() },
+            );
+
+            setStudentHiddenModuleIds((current) => {
+                const existingHiddenModules = current[userId] || [];
+                const nextHiddenModules = nextHidden
+                    ? Array.from(new Set([...existingHiddenModules, moduleId]))
+                    : existingHiddenModules.filter((id) => id !== moduleId);
+
+                const next = { ...current };
+
+                if (nextHiddenModules.length > 0) {
+                    next[userId] = nextHiddenModules;
+                } else {
+                    delete next[userId];
+                }
+
+                return next;
+            });
+        } catch (err) {
+            console.error(err);
+            setError("Could not update module visibility.");
+        }
+    }
+
+    async function setModuleVisibilityForAll(
+        moduleId: number,
+        hidden: boolean,
+        moduleName: string,
+    ) {
+        const action = hidden ? "hide" : "show";
+        const confirmed = confirmVisibilityChange(
+            [
+                "Change module visibility?",
+                `This will ${action} ${moduleName} for every student.`,
+            ].join("\n"),
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            const response = await axios.post(
+                `${API_URL}/projects/module_visibility_for_all`,
+                {
+                    class_id: classId,
+                    module_id: moduleId,
+                    hidden,
+                },
+                { headers: authHeaders() },
+            );
+            const responseStudentIds = Array.isArray(response.data?.studentIds)
+                ? response.data.studentIds
+                    .map((value: unknown) => asNumber(value, 0))
+                    .filter((value: number) => value > 0)
+                : [];
+            const affectedStudentIds = responseStudentIds.length > 0
+                ? responseStudentIds
+                : students.map((student) => student.userId);
+
+            setStudentHiddenModuleIds((current) => {
+                const next: Record<number, number[]> = { ...current };
+
+                affectedStudentIds.forEach((studentId) => {
+                    const existingHiddenModules = next[studentId] || [];
+                    const alreadyHidden = existingHiddenModules.includes(moduleId);
+
+                    if (hidden && !alreadyHidden) {
+                        next[studentId] = [...existingHiddenModules, moduleId];
+                    }
+
+                    if (!hidden && alreadyHidden) {
+                        const nextHiddenModules = existingHiddenModules.filter((id) => id !== moduleId);
+
+                        if (nextHiddenModules.length > 0) {
+                            next[studentId] = nextHiddenModules;
+                        } else {
+                            delete next[studentId];
+                        }
+                    }
+                });
+
+                return next;
+            });
+        } catch (err) {
+            console.error(err);
+            setError("Could not update module visibility.");
+        }
+    }
+
+    function visibleModuleCountForStudent(student: StudentProgressRow): number {
+        return moduleVisibilityOptions.filter((module) => (
+            !isStudentModuleHidden(student.userId, module.moduleId)
+        )).length;
+    }
+
+    const modulesHiddenForEveryoneCount = useMemo(() => {
+        return moduleVisibilityOptions.filter((module) => (
+            students.length > 0 && students.every((student) => (
+                studentHiddenModuleIds[student.userId]?.includes(module.moduleId) ?? false
+            ))
+        )).length;
+    }, [moduleVisibilityOptions, students, studentHiddenModuleIds]);
+
+    function renderStudentVisibilityControls(student: StudentProgressRow) {
+        const visibleCount = visibleModuleCountForStudent(student);
+
+        if (moduleVisibilityOptions.length === 0) {
+            return null;
+        }
+
+        return (
+            <details className="analytics-student-visibility">
+                <summary className="analytics-student-visibility-summary">
+                    <span className="analytics-student-visibility-label">
+                        Module access
+                    </span>
+
+                    <span className="analytics-visibility-count">
+                        {visibleCount}/{moduleVisibilityOptions.length} visible
+                    </span>
+                </summary>
+
+                <div className="analytics-student-visibility-panel">
+                    <div
+                        className="analytics-student-module-list"
+                        role="group"
+                        aria-label={`Module access for ${student.fullName}`}
+                    >
+                        {moduleVisibilityOptions.map((module) => {
+                            const hidden = isStudentModuleHidden(
+                                student.userId,
+                                module.moduleId,
+                            );
+
+                            return (
+                                <button
+                                    type="button"
+                                    className={[
+                                        "analytics-module-access-toggle",
+                                        hidden ? "analytics-module-access-toggle-hidden" : "",
+                                    ]
+                                        .join(" ")
+                                        .trim()}
+                                    key={`${student.userId}-${module.moduleId}`}
+                                    onClick={() => toggleStudentModuleVisibility(
+                                        student.userId,
+                                        module.moduleId,
+                                        student.fullName,
+                                        module.moduleName,
+                                    )}
+                                    aria-pressed={!hidden}
+                                    title={
+                                        hidden
+                                            ? "Click to show this module for this student."
+                                            : "Click to hide this module for this student."
+                                    }
+                                >
+                                    <span className="analytics-module-access-icon">
+                                        {hidden ? (
+                                            <FaEyeSlash aria-hidden="true" />
+                                        ) : (
+                                            <FaEye aria-hidden="true" />
+                                        )}
+                                    </span>
+
+                                    <span className="analytics-module-access-name">
+                                        {module.moduleName}
+                                    </span>
+
+                                    <span className="analytics-module-access-state">
+                                        {hidden ? "Hidden" : "Visible"}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </details>
+        );
+    }
+
     function renderProgressCell(student: StudentProgressRow, item: DashboardItem) {
         const cell = student.cells[item.id];
         const status = cellStatus(cell);
         const isHoveredRow = hoveredStudentId === student.userId;
         const isHoveredColumn = hoveredItemId === item.id;
         const isHoveredIntersection = isHoveredRow && isHoveredColumn;
+        const cellHasGrade = hasGrade(cell);
+        const isHidden = isStudentModuleHidden(student.userId, item.moduleId);
 
         return (
             <td
@@ -718,6 +1030,7 @@ export default function AdminAnalyticsDashboard() {
                     item.isFirstInModule ? "analytics-module-start" : "",
                     isHoveredColumn ? "analytics-column-highlight" : "",
                     isHoveredIntersection ? "analytics-intersection-highlight" : "",
+                    isHidden ? "analytics-cell-module-hidden" : "",
                 ]
                     .join(" ")
                     .trim()}
@@ -728,6 +1041,13 @@ export default function AdminAnalyticsDashboard() {
                 }}
             >
                 <div className="analytics-cell-card">
+                    {isHidden ? (
+                        <div className="analytics-cell-visibility-note">
+                            <FaEyeSlash aria-hidden="true" />
+                            <span>Hidden</span>
+                        </div>
+                    ) : null}
+
                     <div className="analytics-cell-status">
                         {statusIcon(status)}
                         <span>{statusLabel(status)}</span>
@@ -746,8 +1066,10 @@ export default function AdminAnalyticsDashboard() {
                             <span>{formatDateTime(cell.lastSubmitted)}</span>
                         ) : null}
 
-                        {cell?.grade && cell.grade !== "0" ? (
-                            <span>Grade: {cell.grade}</span>
+                        {cellHasGrade ? (
+                            <span>Grade: {cell?.grade}</span>
+                        ) : cell?.submissionId ? (
+                            <span>No grade yet</span>
                         ) : null}
                     </div>
 
@@ -759,9 +1081,12 @@ export default function AdminAnalyticsDashboard() {
                                     <span>View</span>
                                 </Link>
 
-                                <Link to={gradePath(cell)} title="Open grading">
+                                <Link
+                                    to={gradePath(cell)}
+                                    title={cellHasGrade ? "Open regrading" : "Open grading"}
+                                >
                                     <FaClipboardCheck aria-hidden="true" />
-                                    <span>Grade</span>
+                                    <span>{cellHasGrade ? "Regrade" : "Grade"}</span>
                                 </Link>
                             </>
                         ) : status !== "not-started" ? (
@@ -818,6 +1143,7 @@ export default function AdminAnalyticsDashboard() {
 
             <p className="analytics-subtitle">
                 View each student's progress across every module checkpoint and main program in this class.
+                Use the visibility controls to preview which modules students can see.
             </p>
 
             {error ? (
@@ -899,38 +1225,102 @@ export default function AdminAnalyticsDashboard() {
                                     <thead>
                                         <tr className="analytics-module-row">
                                             <th className="analytics-student-heading" rowSpan={2}>
-                                                Student
+                                                <div className="analytics-student-heading-main">
+                                                    Student
+                                                </div>
+
+                                                <div className="analytics-global-visibility-summary">
+                                                    <FaUsers aria-hidden="true" />
+                                                    <span>
+                                                        {modulesHiddenForEveryoneCount} hidden for everyone
+                                                    </span>
+                                                </div>
                                             </th>
-                                            {modulesForHeader.map((module) => (
-                                                <th
-                                                    className="analytics-module-heading"
-                                                    colSpan={module.span}
-                                                    key={`${module.moduleId}-${module.moduleName}`}
-                                                >
-                                                    {module.moduleName}
-                                                </th>
-                                            ))}
+
+                                            {modulesForHeader.map((module) => {
+                                                const hiddenForEveryone = isModuleHiddenForEveryone(module.moduleId);
+
+                                                return (
+                                                    <th
+                                                        className={[
+                                                            "analytics-module-heading",
+                                                            hiddenForEveryone ? "analytics-module-heading-hidden" : "",
+                                                        ]
+                                                            .join(" ")
+                                                            .trim()}
+                                                        colSpan={module.span}
+                                                        key={`${module.moduleId}-${module.moduleName}`}
+                                                    >
+                                                        <div className="analytics-module-heading-inner">
+                                                            <span className="analytics-module-heading-name">
+                                                                {module.moduleName}
+                                                            </span>
+
+                                                            <button
+                                                                type="button"
+                                                                className={[
+                                                                    "analytics-global-module-toggle",
+                                                                    hiddenForEveryone ? "analytics-global-module-toggle-hidden" : "",
+                                                                ]
+                                                                    .join(" ")
+                                                                    .trim()}
+                                                                onClick={() => setModuleVisibilityForAll(
+                                                                    module.moduleId,
+                                                                    !hiddenForEveryone,
+                                                                    module.moduleName,
+                                                                )}
+                                                                aria-pressed={!hiddenForEveryone}
+                                                                title={
+                                                                    hiddenForEveryone
+                                                                        ? "Click to show this module for everyone."
+                                                                        : "Click to hide this module for everyone."
+                                                                }
+                                                            >
+                                                                {hiddenForEveryone ? (
+                                                                    <FaEyeSlash aria-hidden="true" />
+                                                                ) : (
+                                                                    <FaEye aria-hidden="true" />
+                                                                )}
+                                                                <span>
+                                                                    {hiddenForEveryone ? "Show all" : "Hide all"}
+                                                                </span>
+                                                            </button>
+                                                        </div>
+                                                    </th>
+                                                );
+                                            })}
                                         </tr>
 
                                         <tr className="analytics-item-row">
-                                            {items.map((item) => (
-                                                <th
-                                                    className={[
-                                                        "analytics-item-heading",
-                                                        `analytics-item-heading-${item.kind}`,
-                                                        item.isFirstInModule ? "analytics-module-start" : "",
-                                                        hoveredItemId === item.id ? "analytics-column-header-highlight" : "",
-                                                    ]
-                                                        .join(" ")
-                                                        .trim()}
-                                                    key={item.id}
-                                                    title={item.label}
-                                                    onMouseEnter={() => setHoveredItemId(item.id)}
-                                                    onMouseLeave={() => setHoveredItemId(null)}
-                                                >
-                                                    {item.shortLabel}
-                                                </th>
-                                            ))}
+                                            {items.map((item) => {
+                                                const hiddenForEveryone = isModuleHiddenForEveryone(item.moduleId);
+
+                                                return (
+                                                    <th
+                                                        className={[
+                                                            "analytics-item-heading",
+                                                            `analytics-item-heading-${item.kind}`,
+                                                            item.isFirstInModule ? "analytics-module-start" : "",
+                                                            hoveredItemId === item.id ? "analytics-column-header-highlight" : "",
+                                                            hiddenForEveryone ? "analytics-item-heading-module-hidden" : "",
+                                                        ]
+                                                            .join(" ")
+                                                            .trim()}
+                                                        key={item.id}
+                                                        title={item.label}
+                                                        onMouseEnter={() => setHoveredItemId(item.id)}
+                                                        onMouseLeave={() => setHoveredItemId(null)}
+                                                    >
+                                                        <span>{item.shortLabel}</span>
+
+                                                        {hiddenForEveryone ? (
+                                                            <span className="analytics-item-hidden-pill">
+                                                                Hidden
+                                                            </span>
+                                                        ) : null}
+                                                    </th>
+                                                );
+                                            })}
                                         </tr>
                                     </thead>
 
@@ -971,6 +1361,8 @@ export default function AdminAnalyticsDashboard() {
                                                             <span>Lab: {student.lab}</span>
                                                         ) : null}
                                                     </div>
+
+                                                    {renderStudentVisibilityControls(student)}
                                                 </th>
 
                                                 {items.map((item) => renderProgressCell(student, item))}

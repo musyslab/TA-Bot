@@ -31,6 +31,7 @@ from src.repositories.models import (
     Modules,
     Checkpoints,
     Projects,
+    StudentHiddenModules,
     Submissions,
     Users,
 )
@@ -447,16 +448,8 @@ def user_can_access_project_id(project_id: int) -> bool:
 
     return user_can_access_class_id(int(getattr(project, "ClassId", 0) or 0))
 
-def current_user_is_enrolled_in_project_class(project_id: int) -> bool:
-    project_id = parse_int(project_id, 0)
-    if project_id <= 0:
-        return False
-
-    project = Projects.query.filter(Projects.Id == project_id).first()
-    if project is None:
-        return False
-
-    class_id = parse_int(getattr(project, "ClassId", 0) or 0, 0)
+def current_user_is_enrolled_in_class(class_id: int) -> bool:
+    class_id = parse_int(class_id, 0)
     if class_id <= 0:
         return False
 
@@ -472,8 +465,87 @@ def current_user_is_enrolled_in_project_class(project_id: int) -> bool:
         return False
 
 
+def current_user_is_enrolled_in_project_class(project_id: int) -> bool:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return False
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    class_id = parse_int(getattr(project, "ClassId", 0) or 0, 0)
+    return current_user_is_enrolled_in_class(class_id)
+
+
+def student_module_is_hidden_for_current_user(module_id: int) -> bool:
+    module_id = parse_int(module_id, 0)
+    if module_id <= 0 or is_staff_user():
+        return False
+
+    try:
+        return (
+            StudentHiddenModules.query.filter(
+                StudentHiddenModules.UserId == int(current_user.Id),
+                StudentHiddenModules.ModuleId == module_id,
+            ).first()
+            is not None
+        )
+    except Exception:
+        return False
+
+
+def current_user_can_access_visible_module_id(module_id: int) -> bool:
+    module_id = parse_int(module_id, 0)
+    if module_id <= 0:
+        return False
+
+    if is_staff_user():
+        return user_can_access_module_id(module_id)
+
+    module = Modules.query.filter(Modules.Id == module_id).first()
+    if module is None:
+        return False
+
+    class_id = parse_int(getattr(module, "ClassId", 0) or 0, 0)
+    return (
+        current_user_is_enrolled_in_class(class_id)
+        and not student_module_is_hidden_for_current_user(module_id)
+    )
+
+
+def project_is_hidden_for_current_student(project) -> bool:
+    if not project or is_staff_user():
+        return False
+
+    module_id = parse_int(getattr(project, "ModuleId", 0) or 0, 0)
+    return module_id > 0 and student_module_is_hidden_for_current_user(module_id)
+
+
+def current_user_can_access_visible_project_id(project_id: int) -> bool:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return False
+
+    if is_staff_user():
+        return user_can_access_project_id(project_id)
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    class_id = parse_int(getattr(project, "ClassId", 0) or 0, 0)
+    if not current_user_is_enrolled_in_class(class_id):
+        return False
+
+    return not project_is_hidden_for_current_student(project)
+
+
 def current_user_can_download_project_files(project_id: int) -> bool:
-    return user_can_access_project_id(project_id) or current_user_is_enrolled_in_project_class(project_id)
+    if user_can_access_project_id(project_id):
+        return True
+
+    return current_user_can_access_visible_project_id(project_id)
 
 
 
@@ -1126,6 +1198,75 @@ def analytics_dashboard(project_repo: ProjectRepository = Provide[Container.proj
         ],
         "checkpointsByProjectId": checkpoints_by_project_id,
         "submissionsByItemId": analytics_dashboard_progress(class_id, project_ids, checkpoints_by_project_id),
+        "hiddenModulesByStudentId": project_repo.get_hidden_module_ids_by_student_for_class(class_id),
+    })
+
+
+@projects_api.route('/student_module_visibility', methods=['POST'])
+@jwt_required()
+@inject
+def set_student_module_visibility(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if not is_staff_user():
+        return access_denied_response()
+
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get('class_id'), 0)
+    student_id = parse_int(data.get('student_id'), 0)
+    module_id = parse_int(data.get('module_id'), 0)
+    hidden = parse_bool(data.get('hidden'))
+
+    if class_id <= 0 or student_id <= 0 or module_id <= 0:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_class_id(class_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    module = Modules.query.filter(Modules.Id == module_id).first()
+    if not module or int(getattr(module, 'ClassId', 0) or 0) != class_id:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+
+    assigned = ClassAssignments.query.filter(
+        ClassAssignments.ClassId == class_id,
+        ClassAssignments.UserId == student_id,
+    ).first()
+    if assigned is None:
+        return make_response({'message': 'Student is not enrolled in this class'}, HTTPStatus.BAD_REQUEST)
+
+    project_repo.set_student_module_hidden(student_id, module_id, hidden)
+
+    return jsonify({
+        'studentId': student_id,
+        'moduleId': module_id,
+        'hidden': bool(hidden),
+    })
+
+
+@projects_api.route('/module_visibility_for_all', methods=['POST'])
+@jwt_required()
+@inject
+def set_module_visibility_for_all(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if not is_staff_user():
+        return access_denied_response()
+
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get('class_id'), 0)
+    module_id = parse_int(data.get('module_id'), 0)
+    hidden = parse_bool(data.get('hidden'))
+
+    if class_id <= 0 or module_id <= 0:
+        return make_response({'message': 'Missing required fields'}, HTTPStatus.BAD_REQUEST)
+    if not user_can_access_class_id(class_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    module = Modules.query.filter(Modules.Id == module_id).first()
+    if not module or int(getattr(module, 'ClassId', 0) or 0) != class_id:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+
+    student_ids = project_repo.set_module_hidden_for_class(module_id, hidden)
+
+    return jsonify({
+        'moduleId': module_id,
+        'hidden': bool(hidden),
+        'studentIds': student_ids,
     })
 
 
@@ -1212,6 +1353,8 @@ def list_checkpoints_student(project_repo: ProjectRepository = Provide[Container
     project_id = parse_int(request.args.get("project_id", ""), 0)
     if project_id <= 0:
         return jsonify({'problems': []})
+    if not current_user_can_access_visible_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     return jsonify({'problems': student_checkpoint_rows(project_repo, project_id)})
 
@@ -1461,6 +1604,9 @@ def get_projects_by_user(project_repo: ProjectRepository = Provide[Container.pro
     projects= project_repo.get_all_projects()
     student_submissions={}
     for project in projects:
+        if project_is_hidden_for_current_student(project):
+            continue
+
         subs = submission_repo.get_most_recent_submission_by_project(project.Id, [current_user.Id])
         class_name = project_repo.get_className_by_projectId(project.Id)
         if current_user.Id in subs: 
@@ -1507,6 +1653,16 @@ def past_submissions():
         .order_by(Modules.Start.asc(), Projects.Id.asc())
         .all()
     )
+
+    if not is_staff_user():
+        projects = [
+            project
+            for project in (projects or [])
+            if not project_is_hidden_for_current_student(project)
+        ]
+        proj_ids = [int(getattr(project, "Id", 0) or 0) for project in projects]
+        if not proj_ids:
+            return jsonify([])
 
     class_ids = {int(getattr(p, "ClassId", 0) or 0) for p in (projects or [])}
     class_ids.discard(0)
@@ -2432,12 +2588,26 @@ def create_module(project_repo: ProjectRepository = Provide[Container.project_re
 @jwt_required()
 @inject
 def get_modules_by_class_id_student(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    class_id = request.args.get('id')
+    class_id = parse_int(request.args.get('id'), 0)
 
-    if not class_id:
+    if class_id <= 0:
         return jsonify([])
 
-    modules = project_repo.get_modules_by_class_id(class_id)
+    if not is_staff_user() and not current_user_is_enrolled_in_class(class_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    modules = list(project_repo.get_modules_by_class_id(class_id) or [])
+    if not is_staff_user():
+        hidden_module_ids = project_repo.get_hidden_module_ids_for_student(
+            class_id,
+            int(current_user.Id),
+        )
+        modules = [
+            module
+            for module in modules
+            if int(getattr(module, "Id", 0) or 0) not in hidden_module_ids
+        ]
+
     module_projects = [project_repo.get_main_project_for_module(int(module.Id)) for module in modules]
     project_ids = [int(project.Id) for project in module_projects if project is not None]
     total_submission_counts = submission_repo.get_total_submission_for_all_projects()
@@ -2467,6 +2637,8 @@ def get_module_overview_student(project_repo: ProjectRepository = Provide[Contai
     module = project_repo.get_module(module_id)
     if not module:
         return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+    if not current_user_can_access_visible_module_id(module_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
 
     project = project_repo.get_main_project_for_module(int(module.Id))
     checkpoint_rows = student_checkpoint_rows(project_repo, int(project.Id)) if project else []

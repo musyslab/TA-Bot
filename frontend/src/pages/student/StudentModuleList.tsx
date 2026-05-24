@@ -21,6 +21,8 @@ interface ModuleObject {
     End: string
     MainProjectId?: number
     PracticeProblemsEnabled?: boolean
+    Hidden?: boolean
+    IsHidden?: boolean
 }
 
 type CalendarDay = {
@@ -208,11 +210,12 @@ export default function StudentModuleList() {
                 const parsed: ModuleObject[] = (res.data as any[]).map(
                     (item: any) => typeof item === "string" ? JSON.parse(item) as ModuleObject : item as ModuleObject
                 )
+                const visibleModules = parsed.filter((module) => !module.Hidden && !module.IsHidden)
 
-                setModules(parsed)
+                setModules(visibleModules)
                 setIsLoading(false)
 
-                const firstModuleDate = parsed
+                const firstModuleDate = visibleModules
                     .map((m) => parseDate(m.Start))
                     .filter((d): d is Date => !!d)
                     .sort((a, b) => a.getTime() - b.getTime())[0]

@@ -117,6 +117,13 @@ class ClassAssignments(db.Model):
     LectureId = Column(Integer, ForeignKey('LectureSections.Id'))
 
 
+class StudentHiddenModules(db.Model):
+    __tablename__ = "StudentHiddenModules"
+    UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
+    ModuleId = Column(Integer, ForeignKey('Modules.Id'), primary_key=True)
+    CreatedAt = Column(DateTime)
+
+
 class Testcases(db.Model):
     __tablename__ = "Testcases"
     Id = Column(Integer, primary_key=True, autoincrement=True)

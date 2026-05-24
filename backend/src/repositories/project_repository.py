@@ -6,7 +6,17 @@ import subprocess
 from typing import Optional, Dict
 from flask import send_file
 from sqlalchemy.sql.expression import asc
-from .models import Projects, Checkpoints, MainAssignmentGrades, Submissions, Testcases, Classes, Modules
+from .models import (
+    Projects,
+    Checkpoints,
+    MainAssignmentGrades,
+    Submissions,
+    Testcases,
+    Classes,
+    Modules,
+    ClassAssignments,
+    StudentHiddenModules,
+)
 from src.repositories.database import db
 from sqlalchemy import desc, and_, func
 from datetime import datetime
@@ -157,6 +167,109 @@ class ProjectRepository():
 
     def get_module(self, module_id: int):
         return Modules.query.filter(Modules.Id == int(module_id)).first()
+
+    def get_hidden_module_ids_for_student(self, class_id: int, user_id: int) -> set[int]:
+        rows = (
+            db.session.query(StudentHiddenModules.ModuleId)
+            .join(Modules, StudentHiddenModules.ModuleId == Modules.Id)
+            .filter(
+                Modules.ClassId == int(class_id),
+                StudentHiddenModules.UserId == int(user_id),
+            )
+            .all()
+        )
+
+        return {
+            int(row[0])
+            for row in rows
+            if row and row[0] is not None and int(row[0] or 0) > 0
+        }
+
+    def get_hidden_module_ids_by_student_for_class(self, class_id: int) -> dict[int, list[int]]:
+        rows = (
+            db.session.query(StudentHiddenModules.UserId, StudentHiddenModules.ModuleId)
+            .join(Modules, StudentHiddenModules.ModuleId == Modules.Id)
+            .join(
+                ClassAssignments,
+                and_(
+                    ClassAssignments.UserId == StudentHiddenModules.UserId,
+                    ClassAssignments.ClassId == Modules.ClassId,
+                ),
+            )
+            .filter(Modules.ClassId == int(class_id))
+            .order_by(StudentHiddenModules.UserId.asc(), StudentHiddenModules.ModuleId.asc())
+            .all()
+        )
+
+        hidden_by_student: dict[int, list[int]] = {}
+        for user_id, module_id in rows:
+            user_id_int = int(user_id or 0)
+            module_id_int = int(module_id or 0)
+
+            if user_id_int <= 0 or module_id_int <= 0:
+                continue
+
+            hidden_by_student.setdefault(user_id_int, []).append(module_id_int)
+
+        return hidden_by_student
+
+    def set_student_module_hidden(self, user_id: int, module_id: int, hidden: bool) -> bool:
+        user_id = int(user_id)
+        module_id = int(module_id)
+
+        existing = StudentHiddenModules.query.filter(
+            StudentHiddenModules.UserId == user_id,
+            StudentHiddenModules.ModuleId == module_id,
+        ).first()
+
+        if hidden and existing is None:
+            db.session.add(StudentHiddenModules(
+                UserId=user_id,
+                ModuleId=module_id,
+                CreatedAt=datetime.now(),
+            ))
+
+        if not hidden and existing is not None:
+            db.session.delete(existing)
+
+        db.session.commit()
+        return True
+
+    def set_module_hidden_for_class(self, module_id: int, hidden: bool) -> list[int]:
+        module = Modules.query.filter(Modules.Id == int(module_id)).first()
+        if not module:
+            return []
+
+        student_rows = (
+            db.session.query(ClassAssignments.UserId)
+            .filter(ClassAssignments.ClassId == int(module.ClassId))
+            .order_by(ClassAssignments.UserId.asc())
+            .all()
+        )
+        student_ids = [int(row[0]) for row in student_rows if row and int(row[0] or 0) > 0]
+
+        if hidden:
+            existing_rows = (
+                db.session.query(StudentHiddenModules.UserId)
+                .filter(StudentHiddenModules.ModuleId == int(module_id))
+                .all()
+            )
+            existing_user_ids = {int(row[0]) for row in existing_rows if row and int(row[0] or 0) > 0}
+
+            for student_id in student_ids:
+                if student_id not in existing_user_ids:
+                    db.session.add(StudentHiddenModules(
+                        UserId=student_id,
+                        ModuleId=int(module_id),
+                        CreatedAt=datetime.now(),
+                    ))
+        else:
+            StudentHiddenModules.query.filter(
+                StudentHiddenModules.ModuleId == int(module_id)
+            ).delete(synchronize_session=False)
+
+        db.session.commit()
+        return student_ids
 
     def get_module_by_project_id(self, project_id: int):
         project = Projects.query.filter(Projects.Id == int(project_id)).first()
