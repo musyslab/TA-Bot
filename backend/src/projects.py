@@ -988,27 +988,27 @@ def analytics_dashboard_students(class_id: int):
     ]
 
 
-def analytics_checkpoint_payloads(project_ids: list[int]) -> dict[str, list[dict]]:
+def analytics_checkpoint_payloads(
+    project_ids: list[int],
+    project_repo: ProjectRepository,
+) -> dict[str, list[dict]]:
     if not project_ids:
         return {}
 
-    checkpoint_rows = (
-        Checkpoints.query
-        .filter(Checkpoints.ProjectId.in_(project_ids))
-        .order_by(Checkpoints.ProjectId.asc(), Checkpoints.CheckpointNumber.asc(), Checkpoints.Id.asc())
-        .all()
-    )
-
-    grouped: dict[int, list] = defaultdict(list)
-    for checkpoint in checkpoint_rows:
-        grouped[int(getattr(checkpoint, "ProjectId", 0) or 0)].append(checkpoint)
-
     payloads: dict[str, list[dict]] = {str(project_id): [] for project_id in project_ids}
-    for project_id, checkpoints in grouped.items():
+
+    for project_id in project_ids:
+        checkpoints = project_repo.list_checkpoints(project_id)
+
         for index, checkpoint in enumerate(checkpoints):
             checkpoint_id = int(getattr(checkpoint, "Id", 0) or 0)
+            if checkpoint_id <= 0:
+                continue
+
             checkpoint_number = index + 1
-            checkpoint_name = str(getattr(checkpoint, "Name", "") or default_checkpoint_name(checkpoint_number))
+            checkpoint_name = str(
+                getattr(checkpoint, "Name", "") or default_checkpoint_name(checkpoint_number)
+            )
 
             payloads.setdefault(str(project_id), []).append({
                 "id": checkpoint_id,
@@ -1156,9 +1156,23 @@ def analytics_dashboard(project_repo: ProjectRepository = Provide[Container.proj
 
     modules = list(project_repo.get_modules_by_class_id(class_id) or [])
     projects = list(project_repo.get_projects_by_class_id(class_id) or [])
-    project_ids = [int(project.Id) for project in projects if int(getattr(project, "Id", 0) or 0) > 0]
-    checkpoints_by_project_id = analytics_checkpoint_payloads(project_ids)
-    module_by_id = {int(module.Id): module for module in modules if int(getattr(module, "Id", 0) or 0) > 0}
+    project_ids = [
+        int(project.Id)
+        for project in projects
+        if int(getattr(project, "Id", 0) or 0) > 0
+    ]
+
+    checkpoints_by_project_id = analytics_checkpoint_payloads(
+        project_ids,
+        project_repo,
+    )
+
+    module_by_id = {
+        int(module.Id): module
+        for module in modules
+        if int(getattr(module, "Id", 0) or 0) > 0
+    }
+
     project_by_module_id = {
         int(getattr(project, "ModuleId", 0) or 0): project
         for project in projects
@@ -1197,7 +1211,11 @@ def analytics_dashboard(project_repo: ProjectRepository = Provide[Container.proj
             for project in projects
         ],
         "checkpointsByProjectId": checkpoints_by_project_id,
-        "submissionsByItemId": analytics_dashboard_progress(class_id, project_ids, checkpoints_by_project_id),
+        "submissionsByItemId": analytics_dashboard_progress(
+            class_id,
+            project_ids,
+            checkpoints_by_project_id,
+        ),
         "hiddenModulesByStudentId": project_repo.get_hidden_module_ids_by_student_for_class(class_id),
     })
 
