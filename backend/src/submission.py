@@ -13,7 +13,7 @@ from flask_jwt_extended import jwt_required
 from flask_jwt_extended import current_user
 from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.project_repository import ProjectRepository
-from src.constants import ADMIN_ROLE, TEACHER_ROLE
+from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
 import json
 import zipfile
 from io import BytesIO
@@ -72,12 +72,46 @@ def parse_bool(v) -> bool:
     s = str(v or "").strip().lower()
     return s in ("1", "true", "yes", "y", "on")
 
+def role_from_row(role_row, default: int = STUDENT_ROLE) -> int:
+    if hasattr(role_row, "Role"):
+        raw_role = role_row.Role
+    elif isinstance(role_row, (tuple, list)):
+        raw_role = role_row[0] if role_row else default
+    else:
+        raw_role = role_row
+
+    return parse_int(raw_role, default)
+
+
+def current_user_id() -> int:
+    return parse_int(getattr(current_user, "Id", 0), 0)
+
+
+def get_user_assignment_roles(user_id: int) -> list[int]:
+    user_id = parse_int(user_id, 0)
+    if user_id <= 0:
+        return []
+
+    try:
+        role_rows = ClassAssignments.query.with_entities(ClassAssignments.Role).filter(
+            ClassAssignments.UserId == user_id
+        ).all()
+    except Exception:
+        return []
+
+    return [role_from_row(role_row) for role_row in role_rows]
+
+
+def current_user_effective_role() -> int:
+    return max([STUDENT_ROLE] + get_user_assignment_roles(current_user_id()))
+
+
 def is_admin_user() -> bool:
-    return int(getattr(current_user, "Role", -1) or -1) == ADMIN_ROLE
+    return current_user_effective_role() >= ADMIN_ROLE
 
 
 def is_teacher_user() -> bool:
-    return int(getattr(current_user, "Role", -1) or -1) == TEACHER_ROLE
+    return current_user_effective_role() >= TEACHER_ROLE
 
 
 def class_exists(class_id: int) -> bool:
@@ -120,26 +154,16 @@ def get_class_assignment_role(user_id: int, class_id: int) -> int | None:
 
 
 def current_user_class_role(class_id: int) -> int | None:
-    return get_class_assignment_role(int(current_user.Id), class_id)
+    return get_class_assignment_role(current_user_id(), class_id)
 
 
 def current_user_is_enrolled_in_class_id(class_id: int) -> bool:
-    return get_class_assignment(int(current_user.Id), class_id) is not None
+    return get_class_assignment(current_user_id(), class_id) is not None
 
 
 def user_is_student_in_class_id(user_id: int, class_id: int) -> bool:
-    assignment = get_class_assignment(user_id, class_id)
-
-    if assignment is None:
-        return False
-
-    if hasattr(assignment, "Role"):
-        try:
-            return int(getattr(assignment, "Role", 0) or 0) == 0
-        except Exception:
-            return True
-
-    return True
+    assignment_role = get_class_assignment_role(user_id, class_id)
+    return assignment_role == STUDENT_ROLE
 
 
 def is_staff_user() -> bool:
@@ -149,7 +173,7 @@ def is_staff_user() -> bool:
     try:
         return (
             ClassAssignments.query.filter(
-                ClassAssignments.UserId == int(current_user.Id),
+                ClassAssignments.UserId == current_user_id(),
                 ClassAssignments.Role >= TEACHER_ROLE,
             ).first()
             is not None
@@ -187,7 +211,7 @@ def user_can_access_class_id(class_id: int) -> bool:
 
     if is_teacher_user():
         class_item = Classes.query.filter(Classes.Id == class_id).first()
-        return teacher_id_is_on_class(int(current_user.Id), class_item)
+        return teacher_id_is_on_class(current_user_id(), class_item)
 
     return False
 
@@ -651,7 +675,7 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
     if not current_user_can_view_submission(submission, submission_repo):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
 
-    output = convert_tap_to_json(submission.OutputFilepath, current_user.Role, 0, False)
+    output = convert_tap_to_json(submission.OutputFilepath, current_user_effective_role(), 0, False)
     output = apply_hidden_flags_to_results(output, int(projectid), checkpoint_id)
 
     return make_response(output, HTTPStatus.OK)
@@ -1027,7 +1051,7 @@ def log_ui_click():
     checkpoint_id = data.get('checkpoint_id', None)
 
     username = getattr(current_user, 'Username', None) or 'unknown'
-    role = getattr(current_user, 'Role', None) or 0
+    role = current_user_effective_role()
 
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
