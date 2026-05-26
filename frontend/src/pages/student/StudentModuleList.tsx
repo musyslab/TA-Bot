@@ -376,10 +376,10 @@ export default function StudentModuleList() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: "School Selection", to: "/student/schools" },
+                    { label: "School Selection", to: "/schools" },
                     {
                         label: "Class Selection",
-                        to: schoolId ? `/student/school/${schoolId}/classes` : "/student/schools"
+                        to: schoolId ? `/student/school/${schoolId}/classes` : "/schools"
                     },
                     { label: "Module List" }
                 ]}

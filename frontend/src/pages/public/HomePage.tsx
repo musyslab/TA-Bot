@@ -29,7 +29,6 @@ const getValidStoredToken = (): string | null => {
     cleanedToken.toLowerCase() === "undefined"
   ) {
     localStorage.removeItem("AUTOTA_AUTH_TOKEN");
-    localStorage.removeItem("AUTOTA_USER_ROLE");
     return null;
   }
 
@@ -38,12 +37,7 @@ const getValidStoredToken = (): string | null => {
 
 function HomePage() {
   const isLoggedIn = Boolean(getValidStoredToken());
-  const storedRole = localStorage.getItem("AUTOTA_USER_ROLE");
-  const numericRole = storedRole === null ? null : parseInt(storedRole, 10);
-  const dashboardPath =
-    numericRole !== null && !Number.isNaN(numericRole) && numericRole > 0
-      ? "/admin/schools"
-      : "/student/schools";
+  const dashboardPath = "/schools";
 
   return (
     <div className="home-page">

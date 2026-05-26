@@ -876,7 +876,7 @@ export default function AdminModuleDetails() {
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: "School Selection", to: "/admin/schools" },
+                        { label: "School Selection", to: "/schools" },
                         { label: "Class Selection", to: `/admin/school/${schoolId}/classes` },
                         { label: 'Admin Menu', to: `/admin/school/${schoolId}/class/${classId}/menu` },
                         { label: "Module List", to: `/admin/school/${schoolId}/class/${classId}/modules` },
@@ -921,7 +921,7 @@ export default function AdminModuleDetails() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: "School Selection", to: "/admin/schools" },
+                    { label: "School Selection", to: "/schools" },
                     { label: "Class Selection", to: `/admin/school/${schoolId}/classes` },
                     { label: 'Admin Menu', to: `/admin/school/${schoolId}/class/${classId}/menu` },
                     { label: "Module List", to: `/admin/school/${schoolId}/class/${classId}/modules` },

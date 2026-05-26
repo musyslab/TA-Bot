@@ -353,7 +353,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         const classId = Number(this.props.classIdFromUrl)
 
         if (!(schoolId > 0) || Number.isNaN(schoolId) || !(classId > 0) || Number.isNaN(classId)) {
-            this.props.navigate("/admin/schools", { replace: true })
+            this.props.navigate("/schools", { replace: true })
             return
         }
 
@@ -562,7 +562,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: 'School Selection', to: '/admin/schools' },
+                        { label: 'School Selection', to: '/schools' },
                         {
                             label: 'Class Selection',
                             to: `/admin/school/${this.state.school_id || this.props.schoolIdFromUrl}/classes`,

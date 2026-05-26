@@ -395,7 +395,7 @@ export function StudentOutputDiff() {
                 : `/student/school/${school_id}/class/${class_id}/module/${module_id}/project/${project_id}/upload`
 
             return [
-                { label: 'School Selection', to: '/student/schools' },
+                { label: 'School Selection', to: '/schools' },
                 { label: 'Class Selection', to: `/student/school/${school_id}/classes` },
                 { label: 'Module List', to: `/student/school/${school_id}/class/${class_id}/modules` },
                 { label: 'Module Details', to: `/student/school/${school_id}/class/${class_id}/module/${module_id}` },
@@ -405,7 +405,7 @@ export function StudentOutputDiff() {
         }
 
         return [
-            { label: 'School Selection', to: '/student/schools' },
+            { label: 'School Selection', to: '/schools' },
             { label: 'Class Selection', to: '/student/classes' },
             { label: 'Module List' },
             { label: 'Module Details' },

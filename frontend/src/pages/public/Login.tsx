@@ -75,6 +75,13 @@ interface OAuthProfile {
   display_name: string;
 }
 
+interface SessionAccessSummary {
+  role?: number;
+  can_teach?: boolean;
+  can_study?: boolean;
+  default_dashboard?: "admin" | "student";
+}
+
 type NewUserSource = "pam" | "oauth" | null;
 
 const GOOGLE_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
@@ -109,16 +116,18 @@ function loadGoogleScript(): Promise<void> {
   });
 }
 
+
 function Login() {
   const apiBase = (import.meta.env.VITE_API_URL as string) || "";
 
   const storedToken = localStorage.getItem("AUTOTA_AUTH_TOKEN");
-  const storedRole = localStorage.getItem("AUTOTA_USER_ROLE");
-  const initialRole = storedRole !== null ? Number(storedRole) : -1;
-  const initialLoggedIn = storedToken !== null && storedRole !== null;
-
+  const initialLoggedIn = Boolean(
+    storedToken &&
+    storedToken.trim() &&
+    storedToken.trim().toLowerCase() !== "null" &&
+    storedToken.trim().toLowerCase() !== "undefined"
+  );
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(initialLoggedIn);
-  const [role, setRole] = useState<number>(Number.isNaN(initialRole) ? -1 : initialRole);
 
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
@@ -153,10 +162,12 @@ function Login() {
 
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
 
-  const persistSession = useCallback((accessToken: string, userRole: number) => {
+  const persistSession = useCallback((
+    accessToken: string,
+    _userRole: number,
+    _accessSummary?: SessionAccessSummary,
+  ) => {
     localStorage.setItem("AUTOTA_AUTH_TOKEN", accessToken);
-    localStorage.setItem("AUTOTA_USER_ROLE", String(userRole));
-    setRole(userRole);
     setIsLoggedIn(true);
   }, []);
 
@@ -295,7 +306,7 @@ function Login() {
           setEmail(res.data.oauth_profile?.email || "");
           setNewUserError("");
         } else {
-          persistSession(res.data.access_token, Number(res.data.role || 0));
+          persistSession(res.data.access_token, Number(res.data.role || 0), res.data as SessionAccessSummary);
         }
       } catch (err: any) {
         const msg = err.response?.data?.message || "OAuth login failed.";
@@ -369,7 +380,7 @@ function Login() {
         setOAuthProfile(null);
         setNewUserError("");
       } else {
-        persistSession(res.data.access_token, Number(res.data.role || 0));
+        persistSession(res.data.access_token, Number(res.data.role || 0), res.data as SessionAccessSummary);
       }
     } catch (err: any) {
       const msg = err.response?.data?.message || "Login failed.";
@@ -401,7 +412,7 @@ function Login() {
           redirectUri: window.location.origin,
         },
         cache: {
-          cacheLocation: "sessionStorage",
+          cacheLocation: "memoryStorage",
         },
       });
 
@@ -502,7 +513,7 @@ function Login() {
         });
       }
 
-      persistSession(res.data.access_token, Number(res.data.role || 0));
+      persistSession(res.data.access_token, Number(res.data.role || 0), res.data as SessionAccessSummary);
     } catch (err: any) {
       const msg = err.response?.data?.message || "Account creation failed.";
       setNewUserError(msg);
@@ -512,8 +523,7 @@ function Login() {
   };
 
   if (isLoggedIn) {
-    const redirectPath = role === 0 ? "/student/schools" : "/admin/schools";
-    return <Navigate to={redirectPath} replace />;
+    return <Navigate to="/schools" replace />;
   }
 
   return (

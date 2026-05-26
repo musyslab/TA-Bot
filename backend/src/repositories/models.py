@@ -61,7 +61,6 @@ class Users(db.Model):
     Lastname = Column(String)
     Email = Column(String)
     StudentNumber = Column(String)
-    Role = Column(Integer)
     IsLocked = Column(Boolean)
     Submissions=relationship('Submissions')
     ClassAssignments=relationship('ClassAssignments')
@@ -115,6 +114,7 @@ class ClassAssignments(db.Model):
     ClassId = Column(Integer, ForeignKey('Classes.Id'), primary_key=True)
     LabId = Column(Integer, ForeignKey('Labs.Id'))
     LectureId = Column(Integer, ForeignKey('LectureSections.Id'))
+    Role = Column(Integer, nullable=False, default=0)
 
 
 class StudentHiddenModules(db.Model):
@@ -149,7 +149,6 @@ class MainAssignmentGrades(db.Model):
     UpdatedAt = Column(DateTime)
 
 
-
 class CheckpointGrades(db.Model):
     __tablename__ = "CheckpointGrades"
     SubmissionId = Column(Integer, ForeignKey('Submissions.Id'), primary_key=True)
@@ -161,6 +160,14 @@ class CheckpointGrades(db.Model):
     ErrorDefsJson = Column(Text)
     UpdatedAt = Column(DateTime)
 
+
+class StudentUploadState(db.Model):
+    __tablename__ = "StudentUploadState"
+    UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
+    ClassId = Column(Integer, ForeignKey('Classes.Id'), primary_key=True)
+    ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
+    CheckpointId = Column(Integer, primary_key=True, nullable=False, default=0)
+    CooldownLiftedAt = Column(DateTime, nullable=True)
 
 
 class StudentSuggestions(db.Model):

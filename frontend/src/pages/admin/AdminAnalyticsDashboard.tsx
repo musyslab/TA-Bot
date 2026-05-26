@@ -1123,12 +1123,12 @@ export default function AdminAnalyticsDashboard() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: "School Selection", to: "/admin/schools" },
+                    { label: "School Selection", to: "/schools" },
                     {
                         label: "Class Selection",
                         to: schoolId
                             ? `/admin/school/${schoolId}/classes`
-                            : "/admin/schools",
+                            : "/schools",
                     },
                     {
                         label: "Admin Menu",

@@ -24,7 +24,6 @@ const getValidStoredToken = (): string | null => {
     cleanedToken.toLowerCase() === "undefined"
   ) {
     localStorage.removeItem("AUTOTA_AUTH_TOKEN")
-    localStorage.removeItem("AUTOTA_USER_ROLE")
     return null
   }
 
@@ -33,7 +32,6 @@ const getValidStoredToken = (): string | null => {
 
 const clearStoredAuth = () => {
   localStorage.removeItem("AUTOTA_AUTH_TOKEN")
-  localStorage.removeItem("AUTOTA_USER_ROLE")
 }
 
 const getRouteScope = (pathname: string): RouteScope | null => {
@@ -50,18 +48,14 @@ const getRouteScope = (pathname: string): RouteScope | null => {
   }
 }
 
-const getKickoutPath = (section: "admin" | "student"): string => {
-  return section === "admin" ? "/admin/schools" : "/student/schools"
-}
-
-const pageLoadsAndValidatesOwnSchoolScope = (pathname: string): boolean => {
-  return /^\/(admin|student)\/school\/\d+\/classes\/?$/.test(pathname)
+const getKickoutPath = (_section: "admin" | "student"): string => {
+  return "/schools"
 }
 
 const getAccessCacheKey = (pathname: string): string | null => {
   const scope = getRouteScope(pathname)
 
-  if (!scope || !scope.schoolId || pageLoadsAndValidatesOwnSchoolScope(pathname)) {
+  if (!scope || !scope.schoolId) {
     return null
   }
 
@@ -104,34 +98,23 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
         return
       }
 
-      const cachedAccess = sessionStorage.getItem(accessCacheKey)
-      if (cachedAccess === "ok") {
-        if (isMounted) {
-          setHasAccess(true)
-          setCheckedAccessKey(accessCacheKey)
-          setIsCheckingAccess(false)
-        }
-        return
-      }
-
       setIsCheckingAccess(true)
 
       try {
         const headers = {
           Authorization: `Bearer ${token}`
         }
+        const roleContext = encodeURIComponent(scope.section)
 
         if (scope.classId) {
-          await axios.get(`${import.meta.env.VITE_API_URL}/class/id/${scope.classId}/access?school_id=${scope.schoolId}`, {
+          await axios.get(`${import.meta.env.VITE_API_URL}/class/id/${scope.classId}/access?school_id=${scope.schoolId}&role_context=${roleContext}`, {
             headers
           })
         } else {
-          await axios.get(`${import.meta.env.VITE_API_URL}/schools/id/${scope.schoolId}/access`, {
+          await axios.get(`${import.meta.env.VITE_API_URL}/class/all?school_id=${scope.schoolId}&role_context=${roleContext}`, {
             headers
           })
         }
-
-        sessionStorage.setItem(accessCacheKey, "ok")
 
         if (isMounted) {
           setHasAccess(true)
@@ -139,9 +122,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           setIsCheckingAccess(false)
         }
       } catch (err: any) {
-        sessionStorage.removeItem(accessCacheKey)
-
-        if (err?.response?.status === 401 || err?.response?.status === 422 || err?.response?.status === 403) {
+        if (err?.response?.status === 401 || err?.response?.status === 422) {
           clearStoredAuth()
 
           if (isMounted) {

@@ -1,4 +1,4 @@
-import React, { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import MenuComponent from "../components/MenuComponent";
 import ErrorMessage from "../components/ErrorMessage";
@@ -85,9 +85,12 @@ type ApiPastSubmissionsProject = {
   practices?: PastSubmissionCheckpoint[];
 };
 
-const RECENT_SUBMISSION_STORAGE_PREFIX = "AUTOTA_RECENT_STUDENT_SUBMISSION";
+type UploadStatePatch = {
+  cooldown_seconds?: number;
+  cooldown_lifted_at?: string | null;
+};
+
 const SUBMISSION_COOLDOWN_SECONDS = 120;
-const SUBMISSION_COOLDOWN_STORAGE_PREFIX = "AUTOTA_SUBMISSION_COOLDOWN_UNTIL";
 
 const authHeader = () => ({
   Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
@@ -246,7 +249,7 @@ const StudentUpload = () => {
   const [testcasesPassedCount, setTestcasesPassedCount] = useState<number>(0);
   const [testcasesTotalCount, setTestcasesTotalCount] = useState<number>(0);
   const [previousSubmissionId, setPreviousSubmissionId] = useState<number | string | null>(null);
-  const [cooldownUntilMs, setCooldownUntilMs] = useState<number>(0);
+  const [cooldownLiftedAtMs, setCooldownLiftedAtMs] = useState<number>(0);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   const [moduleName, setModuleName] = useState<string>("");
@@ -267,14 +270,9 @@ const StudentUpload = () => {
     return { total, passed, pct };
   }, [testcasesPassedCount, testcasesTotalCount]);
 
-  const cooldownStorageKey = useMemo(() => {
-    if (!Number.isFinite(cid) || cid <= 0) return "";
-    return `${SUBMISSION_COOLDOWN_STORAGE_PREFIX}:${cid}`;
-  }, [cid]);
-
   const cooldownRemainingSeconds = useMemo(() => {
-    return Math.max(0, Math.ceil((cooldownUntilMs - nowMs) / 1000));
-  }, [cooldownUntilMs, nowMs]);
+    return Math.max(0, Math.ceil((cooldownLiftedAtMs - nowMs) / 1000));
+  }, [cooldownLiftedAtMs, nowMs]);
 
   const isCoolingDown = cooldownRemainingSeconds > 0;
   const canSubmit = !passedAllTests && !isCoolingDown;
@@ -285,16 +283,104 @@ const StudentUpload = () => {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  const cooldownLiftedAtToMs = (
+    cooldownLiftedAt: unknown,
+    remainingSeconds: unknown,
+  ): number => {
+    if (typeof cooldownLiftedAt === "string" && cooldownLiftedAt.trim()) {
+      const parsed = Date.parse(cooldownLiftedAt);
+      if (Number.isFinite(parsed) && parsed > Date.now()) {
+        return parsed;
+      }
+    }
+
+    const fallbackSeconds = Number(remainingSeconds);
+    if (Number.isFinite(fallbackSeconds) && fallbackSeconds > 0) {
+      return Date.now() + Math.ceil(fallbackSeconds) * 1000;
+    }
+
+    return 0;
+  };
+
+  const buildUploadStateScope = useCallback(() => {
+    if (!Number.isFinite(cid) || cid <= 0 || !project_id || project_id <= 0 || project_id === -1) {
+      return null;
+    }
+
+    return {
+      class_id: cid,
+      project_id,
+      checkpoint: Boolean(isCheckpoint),
+      checkpoint_id: isCheckpoint && checkpointId ? checkpointId : null,
+    };
+  }, [cid, project_id, isCheckpoint, checkpointId]);
+
+  const saveStudentUploadState = useCallback(
+    (patch: UploadStatePatch) => {
+      const scope = buildUploadStateScope();
+      const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+      if (!scope || !token) {
+        return;
+      }
+
+      axios
+        .post(
+          `${import.meta.env.VITE_API_URL}/submissions/student-upload-state`,
+          {
+            ...scope,
+            ...patch,
+          },
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        )
+        .catch(() => {
+          // The upload API remains the source of truth. This state endpoint only
+          // keeps the UI in sync across page refreshes.
+        });
+    },
+    [buildUploadStateScope],
+  );
+
+  const loadStudentUploadState = useCallback(() => {
+    const scope = buildUploadStateScope();
+    const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+    if (!scope || !token) {
+      setCooldownLiftedAtMs(0);
+      return;
+    }
+
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/submissions/student-upload-state`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: scope,
+      })
+      .then((res) => {
+        const latestSubmission = normalizePositiveSubmissionId(
+          res?.data?.last_submission_id ?? res?.data?.previous_submission_id,
+        );
+        const cooldownUntil = cooldownLiftedAtToMs(
+          res?.data?.cooldown_lifted_at,
+          res?.data?.cooldown_remaining_seconds,
+        );
+
+        setPreviousSubmissionId(latestSubmission);
+        setCooldownLiftedAtMs(cooldownUntil);
+      })
+      .catch(() => {
+        setCooldownLiftedAtMs(0);
+      });
+  }, [buildUploadStateScope]);
+
   const startSubmissionCooldown = (seconds = SUBMISSION_COOLDOWN_SECONDS) => {
     const safeSeconds = Math.max(1, Math.ceil(seconds));
     const until = Date.now() + safeSeconds * 1000;
 
-    setCooldownUntilMs(until);
+    setCooldownLiftedAtMs(until);
     setNowMs(Date.now());
-
-    if (cooldownStorageKey) {
-      localStorage.setItem(cooldownStorageKey, String(until));
-    }
+    saveStudentUploadState({ cooldown_seconds: safeSeconds });
   };
 
   const ALLOWED_EXTS = [".py", ".java", ".c", ".rkt"];
@@ -306,17 +392,6 @@ const StudentUpload = () => {
     return ALLOWED_EXTS.includes(ext);
   };
 
-  const previousSubmissionStorageKey = useMemo(() => {
-    if (!Number.isFinite(cid) || cid <= 0 || !project_id || project_id <= 0 || project_id === -1) {
-      return "";
-    }
-
-    const checkpointPart =
-      isCheckpoint && checkpointId ? `checkpoint:${checkpointId}` : "main";
-
-    return `${RECENT_SUBMISSION_STORAGE_PREFIX}:${cid}:${project_id}:${checkpointPart}`;
-  }, [cid, project_id, isCheckpoint, checkpointId]);
-
   const rememberPreviousSubmissionId = (submissionId: number | string | null) => {
     const normalized = normalizePositiveSubmissionId(submissionId);
 
@@ -325,18 +400,10 @@ const StudentUpload = () => {
     }
 
     setPreviousSubmissionId(normalized);
-
-    if (previousSubmissionStorageKey) {
-      localStorage.setItem(previousSubmissionStorageKey, String(normalized));
-    }
   };
 
   const clearPreviousSubmissionId = () => {
     setPreviousSubmissionId(null);
-
-    if (previousSubmissionStorageKey) {
-      localStorage.removeItem(previousSubmissionStorageKey);
-    }
   };
 
   const resolveLatestSubmissionFromPastSubmissions = (
@@ -475,35 +542,18 @@ const StudentUpload = () => {
   }, [suggestions]);
 
   useEffect(() => {
-    if (!cooldownStorageKey) {
-      setCooldownUntilMs(0);
-      return;
-    }
-
-    const storedUntil = Number(localStorage.getItem(cooldownStorageKey) || 0);
-
-    if (Number.isFinite(storedUntil) && storedUntil > Date.now()) {
-      setCooldownUntilMs(storedUntil);
-    } else {
-      setCooldownUntilMs(0);
-      localStorage.removeItem(cooldownStorageKey);
-    }
-  }, [cooldownStorageKey]);
+    loadStudentUploadState();
+  }, [loadStudentUploadState]);
 
   useEffect(() => {
     if (!isCoolingDown) return;
 
     const timer = window.setInterval(() => {
-      const nextNow = Date.now();
-      setNowMs(nextNow);
-
-      if (cooldownStorageKey && cooldownUntilMs <= nextNow) {
-        localStorage.removeItem(cooldownStorageKey);
-      }
+      setNowMs(Date.now());
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [isCoolingDown, cooldownUntilMs, cooldownStorageKey]);
+  }, [isCoolingDown]);
 
   useEffect(() => {
     const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
@@ -544,17 +594,6 @@ const StudentUpload = () => {
     getSubmissionDetails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cid, routeProjectId, moduleId]);
-
-  useEffect(() => {
-    if (!previousSubmissionStorageKey) {
-      return;
-    }
-
-    const storedSubmissionId = localStorage.getItem(previousSubmissionStorageKey);
-    if (storedSubmissionId) {
-      setPreviousSubmissionId(storedSubmissionId);
-    }
-  }, [previousSubmissionStorageKey]);
 
   useEffect(() => {
     if (!project_id || project_id <= 0 || project_id === -1) {
@@ -983,7 +1022,7 @@ const StudentUpload = () => {
 
     if (hasModuleRoute && schoolId && moduleId) {
       return [
-        { label: "School Selection", to: "/student/schools" },
+        { label: "School Selection", to: "/schools" },
         { label: "Class Selection", to: `/student/school/${schoolId}/classes` },
         {
           label: "Module List",

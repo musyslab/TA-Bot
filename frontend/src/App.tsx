@@ -5,10 +5,10 @@ import axios from 'axios';
 import LoginPage from './pages/public/Login';
 import HomePage from './pages/public/HomePage';
 import NotFound from './pages/public/NotFound';
+import SchoolSelect from './pages/public/SchoolSelect';
 
 import StudentUpload from './pages/student/StudentUpload';
 import StudentOutputDiff from './pages/student/StudentOutputDiff';
-import StudentSchoolSelect from './pages/student/StudentSchoolSelect';
 import StudentClassSelection from './pages/student/StudentClassSelection';
 import StudentModuleList from './pages/student/StudentModuleList';
 import StudentModuleDetails from './pages/student/StudentModuleDetails';
@@ -16,7 +16,6 @@ import StudentOfficeHours from './pages/student/StudentOfficeHours';
 import StudentPastSubmissions from "./pages/student/StudentPastSubmissions";
 import StudentPracticeSelect from './pages/student/StudentPracticeSelect';
 
-import AdminSchoolSelect from './pages/admin/AdminSchoolSelect';
 import AdminClassSelect from './pages/admin/AdminClassSelect';
 import AdminMenu from './pages/admin/AdminMenu';
 import AdminAnalyticsDashboard from './pages/admin/AdminAnalyticsDashboard';
@@ -45,8 +44,6 @@ const configureAxiosInterceptors = () => {
         function (error) {
             if (error.response && (error.response.status === 401 || error.response.status === 422 || error.response.status === 419)) {
                 localStorage.removeItem("AUTOTA_AUTH_TOKEN");
-                localStorage.removeItem("AUTOTA_USER_ROLE");
-                sessionStorage.clear();
                 window.location.href = "/login";
             }
             return Promise.reject(error);
@@ -64,11 +61,12 @@ class App extends Component {
 
                     <Route path="/" element={<HomePage />} />
 
-                    <Route path="/admin/schools" element={
+                    <Route path="/schools" element={
                         <ProtectedRoute>
-                            <AdminSchoolSelect />
+                            <SchoolSelect />
                         </ProtectedRoute>
                     } />
+
                     <Route path="/admin/classes" element={
                         <ProtectedRoute>
                             <Navigate to="/admin/schools" replace />
@@ -233,22 +231,6 @@ class App extends Component {
                     <Route path="/admin/OfficeHours" element={
                         <ProtectedRoute>
                             <AdminOfficeHours />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/admin/upload" element={
-                        <ProtectedRoute>
-                            <Navigate to="/admin/schools" replace />
-                        </ProtectedRoute>
-                    } />
-
-                    <Route path="/student/schools" element={
-                        <ProtectedRoute>
-                            <StudentSchoolSelect />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/student/classes" element={
-                        <ProtectedRoute>
-                            <Navigate to="/student/schools" replace />
                         </ProtectedRoute>
                     } />
                     <Route path="/student/school/:school_id/classes" element={
