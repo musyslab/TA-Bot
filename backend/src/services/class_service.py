@@ -90,21 +90,13 @@ class ClassService:
             return class_repo.get_classes()
 
         assigned_class_ids = self.get_assigned_class_ids(user_id)
-        classes_by_id = {}
 
-        if assigned_class_ids:
-            assigned_classes = Classes.query.filter(
-                Classes.Id.in_(assigned_class_ids)
-            ).all()
+        if not assigned_class_ids:
+            return []
 
-            for class_item in assigned_classes:
-                classes_by_id[int(class_item.Id)] = class_item
-
-        for class_item in class_repo.get_classes():
-            if self.teacher_id_is_on_class(user_id, class_item):
-                classes_by_id[int(class_item.Id)] = class_item
-
-        return list(classes_by_id.values())
+        return Classes.query.filter(
+            Classes.Id.in_(assigned_class_ids)
+        ).order_by(Classes.Name.asc()).all()
 
     def user_can_access_school(self, current_user: Users, school_id: int, class_repo: ClassRepository) -> bool:
         user_id = self.get_user_id(current_user)
@@ -147,10 +139,7 @@ class ClassService:
 
         assignment = self.get_assignment_for_user_and_class(user_id, class_id)
 
-        if assignment is not None:
-            return True
-
-        return self.teacher_id_is_on_class(user_id, class_item)
+        return assignment is not None
 
     def user_can_teach_class_item(self, current_user: Users, class_item: Classes) -> bool:
         if class_item is None:
@@ -167,10 +156,7 @@ class ClassService:
 
         assignment_role = self.get_assignment_role_for_class(user_id, class_id)
 
-        if assignment_role is not None and assignment_role >= TEACHER_ROLE:
-            return True
-
-        return self.teacher_id_is_on_class(user_id, class_item)
+        return assignment_role is not None and assignment_role >= TEACHER_ROLE
 
     def user_can_study_class_item(self, current_user: Users, class_item: Classes) -> bool:
         if class_item is None:
@@ -185,17 +171,3 @@ class ClassService:
         assignment_role = self.get_assignment_role_for_class(user_id, class_id)
 
         return assignment_role == STUDENT_ROLE
-
-    def teacher_id_is_on_class(self, teacher_id: int, class_item: Classes) -> bool:
-        if class_item is None or class_item.Tid is None:
-            return False
-
-        teacher_ids = [
-            token
-            for token in "".join(
-                character if character.isdigit() else " "
-                for character in str(class_item.Tid)
-            ).split()
-        ]
-
-        return str(teacher_id) in teacher_ids

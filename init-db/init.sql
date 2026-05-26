@@ -47,7 +47,6 @@ CREATE TABLE `Classes` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `Name` varchar(45) NOT NULL,
   `SchoolId` int NOT NULL,
-  `Tid` varchar(400) DEFAULT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Name_UNIQUE` (`Name`),
   KEY `fk_Classes_1_idx` (`SchoolId`),
@@ -381,8 +380,8 @@ CREATE TABLE `SubmissionManualErrors` (
 INSERT INTO `Schools` (`Id`, `Name`)
 VALUES (1, 'Marquette University');
 
-INSERT INTO `Classes` (`Id`, `Name`, `SchoolId`, `Tid`)
-VALUES (1, 'COSC 1010', 1, '1');
+INSERT INTO `Classes` (`Id`, `Name`, `SchoolId`)
+VALUES (1, 'COSC 1010', 1);
 
 INSERT INTO `Labs` (`Id`, `Name`, `ClassId`)
 VALUES (1, '401', 1);

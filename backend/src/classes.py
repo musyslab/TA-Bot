@@ -85,29 +85,6 @@ def get_assignment_role(assignment):
     return parse_optional_int(getattr(assignment, "Role", None))
 
 
-def parse_tid_user_ids(tid_value):
-    cleaned = str(tid_value or "").replace(";", ",").replace("|", ",")
-    user_ids = set()
-
-    for part in cleaned.split(","):
-        parsed = parse_optional_int(part.strip())
-        if parsed is not None:
-            user_ids.add(parsed)
-
-    return user_ids
-
-
-def user_is_listed_teacher_for_class(user, class_item) -> bool:
-    if user is None or class_item is None:
-        return False
-
-    user_id = parse_optional_int(getattr(user, "Id", None))
-    if user_id is None:
-        return False
-
-    return user_id in parse_tid_user_ids(getattr(class_item, "Tid", ""))
-
-
 def user_can_access_class_for_context(user, class_item, role_context, repository, service) -> bool:
     if user is None or class_item is None:
         return False
@@ -117,22 +94,13 @@ def user_can_access_class_for_context(user, class_item, role_context, repository
     global_role = get_user_global_role(user)
 
     if role_context == ROLE_CONTEXT_STUDENT:
-        if assignment_role is not None:
-            return assignment_role == STUDENT_ROLE
-
-        return global_role == STUDENT_ROLE and service.user_can_access_class_item(user, class_item, repository)
+        return assignment_role == STUDENT_ROLE
 
     if role_context == ROLE_CONTEXT_ADMIN:
-        if assignment_role is not None:
-            return assignment_role >= TEACHER_ROLE
-
-        if user_is_listed_teacher_for_class(user, class_item):
-            return True
-
         if global_role >= ADMIN_ROLE:
             return True
 
-        return global_role >= TEACHER_ROLE and service.user_can_access_class_item(user, class_item, repository)
+        return assignment_role is not None and assignment_role >= TEACHER_ROLE
 
     return service.user_can_access_class_item(user, class_item, repository)
 

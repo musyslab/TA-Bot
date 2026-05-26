@@ -2,86 +2,123 @@ from flask import Blueprint, jsonify, abort
 from flask_jwt_extended import jwt_required, current_user, get_current_user
 
 from src.repositories.models import Schools, Classes, ClassAssignments
-from src.constants import STUDENT_ROLE, TEACHER_ROLE, ADMIN_ROLE
+from src.constants import STUDENT_ROLE, ADMIN_ROLE
 
 school_api = Blueprint("school_api", __name__)
 
 
-def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
-    if class_item.Tid is None:
-        return False
+def parse_optional_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
-    teacher_ids = [
-        token
-        for token in "".join(
-            character if character.isdigit() else " "
-            for character in str(class_item.Tid)
-        ).split()
-    ]
 
-    return str(teacher_id) in teacher_ids
+def get_user_id(user):
+    if user is None:
+        return None
+
+    return parse_optional_int(getattr(user, "Id", None))
+
+
+def get_user_global_role(user) -> int:
+    user_id = get_user_id(user)
+
+    if user_id is None:
+        return STUDENT_ROLE
+
+    role_rows = (
+        ClassAssignments.query
+        .with_entities(ClassAssignments.Role)
+        .filter(ClassAssignments.UserId == user_id)
+        .all()
+    )
+
+    roles = []
+
+    for role_row in role_rows:
+        if hasattr(role_row, "Role"):
+            role_value = role_row.Role
+        elif isinstance(role_row, (tuple, list)):
+            role_value = role_row[0]
+        else:
+            role_value = role_row
+
+        parsed_role = parse_optional_int(role_value)
+
+        if parsed_role is not None:
+            roles.append(parsed_role)
+
+    return max([STUDENT_ROLE] + roles)
+
+
+def get_assigned_school_ids(user_id: int):
+    school_rows = (
+        Classes.query
+        .with_entities(Classes.SchoolId)
+        .join(ClassAssignments, Classes.Id == ClassAssignments.ClassId)
+        .filter(
+            ClassAssignments.UserId == user_id,
+            Classes.SchoolId.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+
+    school_ids = set()
+
+    for row in school_rows:
+        school_id = row.SchoolId if hasattr(row, "SchoolId") else row[0]
+        parsed_school_id = parse_optional_int(school_id)
+
+        if parsed_school_id is not None:
+            school_ids.add(parsed_school_id)
+
+    return school_ids
 
 
 def get_accessible_schools_for_user(user):
     if user is None:
         return Schools.query.order_by(Schools.Name.asc()).all()
 
-    if user.Role == ADMIN_ROLE:
+    user_id = get_user_id(user)
+
+    if user_id is None:
+        return []
+
+    if get_user_global_role(user) >= ADMIN_ROLE:
         return Schools.query.order_by(Schools.Name.asc()).all()
 
-    if user.Role == TEACHER_ROLE:
-        classes = Classes.query.filter(Classes.SchoolId.isnot(None)).order_by(Classes.Name.asc()).all()
-        school_ids = {
-            class_item.SchoolId
-            for class_item in classes
-            if teacher_id_is_on_class(user.Id, class_item)
-        }
+    school_ids = get_assigned_school_ids(user_id)
 
-        if not school_ids:
-            return []
+    if not school_ids:
+        return []
 
-        return Schools.query.filter(Schools.Id.in_(school_ids)).order_by(Schools.Name.asc()).all()
-
-    if user.Role == STUDENT_ROLE:
-        classes = (
-            Classes.query
-            .join(ClassAssignments, Classes.Id == ClassAssignments.ClassId)
-            .filter(ClassAssignments.UserId == user.Id, Classes.SchoolId.isnot(None))
-            .all()
-        )
-        school_ids = {class_item.SchoolId for class_item in classes}
-
-        if not school_ids:
-            return []
-
-        return Schools.query.filter(Schools.Id.in_(school_ids)).order_by(Schools.Name.asc()).all()
-
-    return []
+    return Schools.query.filter(Schools.Id.in_(school_ids)).order_by(Schools.Name.asc()).all()
 
 
 def user_can_access_school(user, school_id: int) -> bool:
     if user is None:
         return False
 
-    if user.Role == ADMIN_ROLE:
+    user_id = get_user_id(user)
+    parsed_school_id = parse_optional_int(school_id)
+
+    if user_id is None or parsed_school_id is None:
+        return False
+
+    if get_user_global_role(user) >= ADMIN_ROLE:
         return True
 
-    if user.Role == TEACHER_ROLE:
-        classes = Classes.query.filter(Classes.SchoolId == school_id).all()
-        return any(teacher_id_is_on_class(user.Id, class_item) for class_item in classes)
-
-    if user.Role == STUDENT_ROLE:
-        return (
-            Classes.query
-            .join(ClassAssignments, Classes.Id == ClassAssignments.ClassId)
-            .filter(
-                ClassAssignments.UserId == user.Id,
-                Classes.SchoolId == school_id,
-            )
-            .first()
-        ) is not None
-
-    return False
+    return (
+        Classes.query
+        .join(ClassAssignments, Classes.Id == ClassAssignments.ClassId)
+        .filter(
+            ClassAssignments.UserId == user_id,
+            Classes.SchoolId == parsed_school_id,
+        )
+        .first()
+    ) is not None
 
 
 def serialize_school(school):

@@ -91,7 +91,6 @@ class Classes(db.Model):
     Id = Column(Integer, primary_key=True)
     Name = Column(String)
     SchoolId = Column(Integer, ForeignKey('Schools.Id'))
-    Tid = Column(String)
     School = relationship('Schools', back_populates='Classes')
 
 class Labs(db.Model):

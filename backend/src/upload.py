@@ -92,21 +92,6 @@ def is_teacher_user() -> bool:
     return current_user_global_role() == TEACHER_ROLE
 
 
-def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
-    if class_item is None or class_item.Tid is None:
-        return False
-
-    teacher_ids = [
-        token
-        for token in "".join(
-            character if character.isdigit() else " "
-            for character in str(class_item.Tid)
-        ).split()
-    ]
-
-    return str(teacher_id) in teacher_ids
-
-
 def class_assignment_for_user(class_id: int, user_id: int):
     class_id = parse_int(class_id, 0)
     user_id = parse_int(user_id, 0)
@@ -147,25 +132,15 @@ def current_user_has_staff_assignment() -> bool:
         return False
 
     try:
-        if (
+        return (
             ClassAssignments.query.filter(
                 ClassAssignments.UserId == user_id,
                 ClassAssignments.Role >= TEACHER_ROLE,
             ).first()
             is not None
-        ):
-            return True
+        )
     except Exception:
-        pass
-
-    try:
-        for class_item in Classes.query.filter(Classes.Tid.isnot(None)).all():
-            if teacher_id_is_on_class(user_id, class_item):
-                return True
-    except Exception:
-        pass
-
-    return False
+        return False
 
 
 def is_staff_user() -> bool:
@@ -186,10 +161,8 @@ def user_can_access_class_id(class_id: int) -> bool:
         return True
 
     assignment_role = current_user_assignment_role_for_class(class_id)
-    if assignment_role is not None and assignment_role >= TEACHER_ROLE:
-        return True
 
-    return teacher_id_is_on_class(current_user_id(), class_item)
+    return assignment_role is not None and assignment_role >= TEACHER_ROLE
 
 
 def normalize_grader_language(language: str, solution_root: str = "") -> str:
