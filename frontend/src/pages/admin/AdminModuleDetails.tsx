@@ -40,6 +40,13 @@ interface ModuleObject {
     MainProjectId?: number;
 }
 
+interface ClassAccessResponse {
+    id?: number;
+    name?: string;
+    school_id?: number;
+    school_name?: string;
+}
+
 interface ProjectObject {
     Id: number;
     Name: string;
@@ -145,6 +152,7 @@ export default function AdminModuleDetails() {
     const routeProjectId = Number(id || 0);
     const routeModuleId = Number(module_id || 0);
 
+    const [className, setClassName] = useState("");
     const [module, setModule] = useState<ModuleObject | null>(null);
     const [project, setProject] = useState<ProjectObject | null>(null);
     const [practiceProblems, setPracticeProblems] = useState<
@@ -241,6 +249,31 @@ export default function AdminModuleDetails() {
         setEditingPracticeNames({});
     };
 
+    const loadClassName = async (): Promise<void> => {
+        if (!schoolId || !classId) {
+            setClassName("");
+            return;
+        }
+
+        try {
+            const res = await axios.get<ClassAccessResponse>(
+                `${import.meta.env.VITE_API_URL}/class/id/${classId}/access`,
+                {
+                    headers: authHeader(),
+                    params: {
+                        school_id: schoolId,
+                        role_context: "admin",
+                    },
+                },
+            );
+
+            setClassName(res.data?.name || "");
+        } catch (err) {
+            console.log(err);
+            setClassName("");
+        }
+    };
+
     const loadOverview = async (showPageLoading = true): Promise<boolean> => {
         if (!classId || (!routeModuleId && !routeProjectId)) {
             hydrateState(null, null, []);
@@ -291,9 +324,10 @@ export default function AdminModuleDetails() {
     };
 
     useEffect(() => {
+        void loadClassName();
         void loadOverview();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [classId, routeProjectId, routeModuleId]);
+    }, [schoolId, classId, routeProjectId, routeModuleId]);
 
     const sortedCheckpoints = useMemo(() => {
         return [...practiceProblems].sort((a, b) => {
@@ -878,7 +912,7 @@ export default function AdminModuleDetails() {
                     items={[
                         { label: "School Selection", to: "/schools" },
                         { label: "Class Selection", to: `/admin/school/${schoolId}/classes` },
-                        { label: 'Admin Menu', to: `/admin/school/${schoolId}/class/${classId}/menu` },
+                        { label: "Admin Menu", to: `/admin/school/${schoolId}/class/${classId}/menu` },
                         { label: "Module List", to: `/admin/school/${schoolId}/class/${classId}/modules` },
                         { label: "Module Details" },
                     ]}
@@ -923,13 +957,15 @@ export default function AdminModuleDetails() {
                 items={[
                     { label: "School Selection", to: "/schools" },
                     { label: "Class Selection", to: `/admin/school/${schoolId}/classes` },
-                    { label: 'Admin Menu', to: `/admin/school/${schoolId}/class/${classId}/menu` },
+                    { label: "Admin Menu", to: `/admin/school/${schoolId}/class/${classId}/menu` },
                     { label: "Module List", to: `/admin/school/${schoolId}/class/${classId}/modules` },
                     { label: "Module Details" },
                 ]}
             />
 
-            <div className="pageTitle">Admin Module Details</div>
+            <div className="pageTitle">
+                {className ? `${className} Admin Module Details` : "Admin Module Details"}
+            </div>
 
             <div className={`project-detail-hero is-${moduleStatus}`}>
                 <div className="project-detail-hero-copy">

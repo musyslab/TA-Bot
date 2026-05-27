@@ -38,6 +38,13 @@ interface ModuleObject {
     PracticeProblemsEnabled?: boolean;
 }
 
+interface ClassAccessResponse {
+    id?: number;
+    name?: string;
+    school_id?: number;
+    school_name?: string;
+}
+
 type CalendarDay = {
     date: Date;
     isCurrentMonth: boolean;
@@ -261,6 +268,7 @@ export default function AdminModuleList() {
     const schoolId = school_id || "";
     const classId = class_id || id || "";
 
+    const [className, setClassName] = useState("");
     const [modules, setModules] = useState<ModuleObject[]>([]);
     const [calendarDate, setCalendarDate] = useState<Date>(new Date());
     const [showCreateModule, setShowCreateModule] = useState(false);
@@ -405,6 +413,32 @@ export default function AdminModuleList() {
         return `${formatShortDate(module.Start)}, ${formatTime(module.Start)} - ${formatShortDate(module.End)}, ${formatTime(module.End)}`;
     };
 
+    const loadClassName = () => {
+        if (!classId) {
+            setClassName("");
+            return;
+        }
+
+        axios
+            .get<ClassAccessResponse>(
+                `${import.meta.env.VITE_API_URL}/class/id/${classId}/access`,
+                {
+                    headers: authHeader(),
+                    params: {
+                        ...(schoolId ? { school_id: schoolId } : {}),
+                        role_context: "admin",
+                    },
+                },
+            )
+            .then((res) => {
+                setClassName(res.data?.name || "");
+            })
+            .catch((err) => {
+                console.log(err);
+                setClassName("");
+            });
+    };
+
     const loadModules = () => {
         if (!classId) {
             setModules([]);
@@ -449,9 +483,10 @@ export default function AdminModuleList() {
     };
 
     useEffect(() => {
+        loadClassName();
         loadModules();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [classId]);
+    }, [schoolId, classId]);
 
     const sortedModules = useMemo(() => {
         return [...modules].sort((a, b) => {
@@ -889,7 +924,9 @@ export default function AdminModuleList() {
                 ]}
             />
 
-            <div className="pageTitle">Admin Module List</div>
+            <div className="pageTitle">
+                {className ? `${className} Admin Module List` : "Admin Module List"}
+            </div>
 
             <div className="module-calendar-command-row">
                 <button

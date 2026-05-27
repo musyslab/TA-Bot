@@ -29,6 +29,13 @@ type RouteParams = {
     class_id: string;
 };
 
+type ClassAccessResponse = {
+    id?: number;
+    name?: string;
+    school_id?: number;
+    school_name?: string;
+};
+
 type RawModule = {
     Id: number;
     ClassId: number;
@@ -382,6 +389,7 @@ export default function AdminAnalyticsDashboard() {
     const schoolId = school_id || "";
     const classId = class_id || "";
 
+    const [className, setClassName] = useState("");
     const [items, setItems] = useState<DashboardItem[]>([]);
     const [students, setStudents] = useState<StudentProgressRow[]>([]);
     const [loading, setLoading] = useState(true);
@@ -399,6 +407,38 @@ export default function AdminAnalyticsDashboard() {
 
     useEffect(() => {
         let cancelled = false;
+
+        async function loadClassName() {
+            const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+            if (!schoolId || !classId || !token) {
+                setClassName("");
+                return;
+            }
+
+            try {
+                const classResponse = await axios.get<ClassAccessResponse>(
+                    `${API_URL}/class/id/${classId}/access`,
+                    {
+                        headers: authHeaders(),
+                        params: {
+                            school_id: schoolId,
+                            role_context: "admin",
+                        },
+                    },
+                );
+
+                if (!cancelled) {
+                    setClassName(classResponse.data?.name || "");
+                }
+            } catch (err) {
+                console.error(err);
+
+                if (!cancelled) {
+                    setClassName("");
+                }
+            }
+        }
 
         async function loadDashboard() {
             setLoading(true);
@@ -594,12 +634,13 @@ export default function AdminAnalyticsDashboard() {
             }
         }
 
+        loadClassName();
         loadDashboard();
 
         return () => {
             cancelled = true;
         };
-    }, [classId]);
+    }, [schoolId, classId]);
 
     const lectureOptions = useMemo(() => {
         return Array.from(
@@ -1139,7 +1180,9 @@ export default function AdminAnalyticsDashboard() {
                 trailingSeparator={true}
             />
 
-            <div className="pageTitle">Analytics Dashboard</div>
+            <div className="pageTitle">
+                {className ? `${className} Analytics Dashboard` : "Analytics Dashboard"}
+            </div>
 
             <p className="analytics-subtitle">
                 View each student's progress across every module checkpoint and main program in this class.

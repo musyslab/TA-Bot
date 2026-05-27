@@ -25,6 +25,13 @@ interface ModuleObject {
     IsHidden?: boolean
 }
 
+interface ClassAccessResponse {
+    id?: number
+    name?: string
+    school_id?: number
+    school_name?: string
+}
+
 type CalendarDay = {
     date: Date
     isCurrentMonth: boolean
@@ -57,6 +64,7 @@ export default function StudentModuleList() {
     const schoolId = school_id || ""
     const classId = class_id || ""
 
+    const [className, setClassName] = useState("")
     const [modules, setModules] = useState<ModuleObject[]>([])
     const [calendarDate, setCalendarDate] = useState<Date>(new Date())
     const [viewMode, setViewMode] = useState<"list" | "calendar">("list")
@@ -191,6 +199,32 @@ export default function StudentModuleList() {
         return `${formatShortDate(module.Start)}, ${formatTime(module.Start)} - ${formatShortDate(module.End)}, ${formatTime(module.End)}`
     }
 
+    const loadClassName = () => {
+        if (!classId) {
+            setClassName("")
+            return
+        }
+
+        axios
+            .get<ClassAccessResponse>(
+                `${import.meta.env.VITE_API_URL}/class/id/${classId}/access`,
+                {
+                    headers: authHeader(),
+                    params: {
+                        ...(schoolId ? { school_id: schoolId } : {}),
+                        role_context: "student"
+                    }
+                }
+            )
+            .then((res) => {
+                setClassName(res.data?.name || "")
+            })
+            .catch((err) => {
+                console.log(err)
+                setClassName("")
+            })
+    }
+
     const loadModules = () => {
         if (!classId) {
             setModules([])
@@ -233,9 +267,10 @@ export default function StudentModuleList() {
     }
 
     useEffect(() => {
+        loadClassName()
         loadModules()
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [classId])
+    }, [schoolId, classId])
 
     const sortedModules = useMemo(() => {
         return [...modules].sort((a, b) => {
@@ -385,7 +420,9 @@ export default function StudentModuleList() {
                 ]}
             />
 
-            <div className="pageTitle">Student Module List</div>
+            <div className="pageTitle">
+                {className ? `${className} Student Module List` : "Student Module List"}
+            </div>
 
             <div className="module-calendar-command-row">
                 <div className="module-view-toggle" aria-label="Module view selector">

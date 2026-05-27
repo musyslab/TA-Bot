@@ -38,6 +38,13 @@ interface ModuleObject {
     MainCompleted?: boolean;
 }
 
+interface ClassAccessResponse {
+    id?: number;
+    name?: string;
+    school_id?: number;
+    school_name?: string;
+}
+
 interface Checkpoint {
     id: number;
     number: number;
@@ -76,6 +83,7 @@ export default function StudentModuleDetails() {
     const classId = class_id || "";
     const moduleId = Number(module_id || 0);
 
+    const [className, setClassName] = useState("");
     const [module, setModule] = useState<ModuleObject | null>(null);
     const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -238,6 +246,32 @@ export default function StudentModuleDetails() {
         });
     }, [pathCompletionStates]);
 
+    const loadClassName = () => {
+        if (!classId) {
+            setClassName("");
+            return;
+        }
+
+        axios
+            .get<ClassAccessResponse>(
+                `${import.meta.env.VITE_API_URL}/class/id/${classId}/access`,
+                {
+                    headers: authHeader(),
+                    params: {
+                        ...(schoolId ? { school_id: schoolId } : {}),
+                        role_context: "student",
+                    },
+                },
+            )
+            .then((res) => {
+                setClassName(res.data?.name || "");
+            })
+            .catch((err) => {
+                console.log(err);
+                setClassName("");
+            });
+    };
+
     const loadModuleDetails = () => {
         if (!classId || !moduleId) {
             setErrorMessage("Could not find this module.");
@@ -280,9 +314,10 @@ export default function StudentModuleDetails() {
     };
 
     useEffect(() => {
+        loadClassName();
         loadModuleDetails();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [classId, moduleId]);
+    }, [schoolId, classId, moduleId]);
 
     useLayoutEffect(() => {
         recalculatePathConnectors();
@@ -382,7 +417,9 @@ export default function StudentModuleDetails() {
                 ]}
             />
 
-            <div className="pageTitle">Student Module Details</div>
+            <div className="pageTitle">
+                {className ? `${className} Student Module Details` : "Student Module Details"}
+            </div>
 
             <div className="student-module-details-shell">
                 {isLoading ? (

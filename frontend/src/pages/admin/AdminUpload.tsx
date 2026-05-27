@@ -42,6 +42,13 @@ interface CheckpointOption {
     enabled: boolean
 }
 
+interface ClassAccessResponse {
+    id?: number
+    name?: string
+    school_id?: number
+    school_name?: string
+}
+
 interface UploadPageState {
     files: File[]
     mainJavaFileName: string
@@ -51,6 +58,7 @@ interface UploadPageState {
     isErrorMessageHidden: boolean
     school_id: number
     class_id: number
+    className: string
     module_id: number
     project_id: number
     student_id: number
@@ -152,6 +160,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             isErrorMessageHidden: true,
             school_id: 0,
             class_id: 0,
+            className: '',
             module_id: 0,
             project_id: 0,
             student_id: 0,
@@ -195,6 +204,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         this.setState({
             school_id: nextSchoolId,
             class_id: nextClassId,
+            className: '',
             module_id: 0,
             project_id: 0,
             student_id: 0,
@@ -220,6 +230,27 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             mainJavaFileName: '',
             isUploading: false,
         })
+    }
+
+    private async loadClassNameForClass(schoolId: number, classId: number) {
+        if (!(schoolId > 0) || !(classId > 0)) return
+
+        try {
+            const res = await axios.get<ClassAccessResponse>(
+                import.meta.env.VITE_API_URL +
+                    `/class/id/${classId}/access?school_id=${schoolId}&role_context=admin`,
+                { headers: this.authHeaders() }
+            )
+
+            this.setState({
+                className: res.data?.name || '',
+            })
+        } catch (err) {
+            console.error(err)
+            this.setState({
+                className: '',
+            })
+        }
     }
 
     private async loadStudentsForClass(classId: number) {
@@ -362,6 +393,7 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         this.setState({ isLoading: true })
 
         Promise.all([
+            this.loadClassNameForClass(schoolId, classId),
             this.loadStudentsForClass(classId),
             this.loadModulesForClass(classId),
         ]).finally(() => {
@@ -575,7 +607,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                     ]}
                 />
 
-                <div className="pageTitle">Admin Upload</div>
+                <div className="pageTitle">
+                    {this.state.className ? `${this.state.className} Admin Upload` : 'Admin Upload'}
+                </div>
 
                 <div className="admin-upload-stack">
                     <div className="admin-upload-page">
