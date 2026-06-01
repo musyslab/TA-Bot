@@ -5,6 +5,7 @@ from typing import Dict, List
 
 from sqlalchemy import asc, desc
 
+from src.constants import STUDENT_ROLE
 from src.repositories.database import db
 from .models import ClassAssignments, LectureSections, Users, LoginAttempts, Labs
 from flask_jwt_extended import current_user
@@ -13,7 +14,31 @@ from flask_jwt_extended import current_user
 class UserRepository():
 
     def get_user_status(self) -> str:
-        return str(current_user.Role)
+        return str(self.get_highest_class_role(getattr(current_user, "Id", None)))
+
+    def get_highest_class_role(self, user_id: int) -> int:
+        if user_id is None:
+            return STUDENT_ROLE
+
+        roles = ClassAssignments.query.with_entities(ClassAssignments.Role).filter(
+            ClassAssignments.UserId == user_id
+        ).all()
+
+        parsed_roles = []
+        for role_row in roles:
+            if hasattr(role_row, "Role"):
+                role_value = role_row.Role
+            elif isinstance(role_row, (tuple, list)):
+                role_value = role_row[0]
+            else:
+                role_value = role_row
+
+            try:
+                parsed_roles.append(int(role_value))
+            except (TypeError, ValueError):
+                parsed_roles.append(STUDENT_ROLE)
+
+        return max([STUDENT_ROLE] + parsed_roles)
 
     def getUserByName(self, username: str) -> Users:
         """
@@ -42,18 +67,17 @@ class UserRepository():
         return user
 
     #TODO: Remove in favor of calling get_user
-    def get_user_by_id(self,user_id: int) -> str:
+    def get_user_by_id(self, user_id: int) -> Users:
         """
-        Returns the username of a user given their ID.
+        Retrieves a user from the database by their ID.
 
         Args:
             user_id (int): The ID of the user to retrieve.
 
         Returns:
-            str: The username of the user with the given ID.
+            Users: The user object if found, otherwise None.
         """
-        user = Users.query.filter(Users.Id==user_id).one_or_none()
-        return user.Username
+        return Users.query.filter(Users.Id == user_id).one_or_none()
     def doesUserExist(self, username: str) -> bool:
         """Checks if a user with the given username exists in the database.
 
@@ -80,7 +104,7 @@ class UserRepository():
         Returns:
             None
         """
-        user = Users(Username=username,Firstname=first_name,Lastname=last_name,Email=email,StudentNumber=student_number,Role = 0,IsLocked=False)
+        user = Users(Username=username,Firstname=first_name,Lastname=last_name,Email=email,StudentNumber=student_number,IsLocked=False)
         db.session.add(user)
         db.session.commit()
     def get_all_users(self) -> List[Users]:
@@ -101,7 +125,7 @@ class UserRepository():
             List[Users]: A list of all users associated with the given class ID.
         """
         users_in_class = db.session.query(ClassAssignments).join(Users, ClassAssignments.UserId == Users.Id).filter(
-            and_(ClassAssignments.ClassId == class_id, Users.Role != 1)
+            and_(ClassAssignments.ClassId == class_id, ClassAssignments.Role == STUDENT_ROLE)
         ).all()
         users = []
         for user in users_in_class:

@@ -65,7 +65,7 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
         const schoolId = Number(this.props.schoolIdFromUrl)
 
         if (!schoolId || Number.isNaN(schoolId)) {
-            this.props.navigate("/admin/schools", { replace: true })
+            this.props.navigate("/schools", { replace: true })
             return
         }
 
@@ -117,7 +117,7 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
                 console.error(err)
 
                 if (err.response && (err.response.status === 403 || err.response.status === 404)) {
-                    this.props.navigate("/admin/schools", { replace: true })
+                    this.props.navigate("/schools", { replace: true })
                     return
                 }
 
@@ -163,7 +163,7 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: "School Selection", to: "/admin/schools" },
+                        { label: "School Selection", to: "/schools" },
                         { label: "Class Selection" }
                     ]}
                     trailingSeparator={true}
@@ -188,7 +188,7 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
 
                     {!hasSelectedSchool ? (
                         <Link
-                            to="/admin/schools"
+                            to="/schools"
                             className="project-action project-action-secondary"
                         >
                             Go to School Selection

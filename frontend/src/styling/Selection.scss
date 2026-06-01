@@ -20,6 +20,10 @@
     box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
   }
 
+  .module-list-shell+.module-list-shell {
+    margin-top: 1rem;
+  }
+
   .module-list-header-row {
     display: flex;
     align-items: center;
@@ -230,6 +234,10 @@
     line-height: 1.4;
   }
 
+  .school-selection-empty-state {
+    width: 95%;
+  }
+
   .school-selection-action-row {
     width: 95%;
     margin: 0 auto 1rem;
@@ -244,7 +252,8 @@
     .pageTitle,
     .projects-subtitle,
     .module-list-shell,
-    .school-selection-action-row {
+    .school-selection-action-row,
+    .school-selection-empty-state {
       width: 92%;
     }
 

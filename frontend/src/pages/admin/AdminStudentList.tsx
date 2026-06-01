@@ -876,7 +876,7 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: 'School Selection', to: '/admin/schools' },
+                        { label: 'School Selection', to: '/schools' },
                         { label: 'Class Selection', to: `/admin/school/${this.props.school_id}/classes` },
                         { label: 'Admin Menu', to: `/admin/school/${this.props.school_id}/class/${this.props.class_id}/menu` },
                         { label: 'Module List', to: moduleListUrl },

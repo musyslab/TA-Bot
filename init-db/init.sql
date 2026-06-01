@@ -25,7 +25,6 @@ DROP TABLE IF EXISTS `Users`;
 CREATE TABLE `Users` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `Username` varchar(45) NOT NULL,
-  `Role` int NOT NULL,
   `Firstname` varchar(45) NOT NULL,
   `Lastname` varchar(45) NOT NULL,
   `Email` varchar(256) NOT NULL,
@@ -48,7 +47,6 @@ CREATE TABLE `Classes` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `Name` varchar(45) NOT NULL,
   `SchoolId` int NOT NULL,
-  `Tid` varchar(400) DEFAULT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Name_UNIQUE` (`Name`),
   KEY `fk_Classes_1_idx` (`SchoolId`),
@@ -171,6 +169,7 @@ CREATE TABLE `ClassAssignments` (
   `ClassId` int NOT NULL,
   `LabId` int NOT NULL,
   `LectureId` int NOT NULL,
+  `Role` int NOT NULL DEFAULT 0,
   PRIMARY KEY (`UserId`,`ClassId`),
   KEY `fk_ClassAssignments_1_idx` (`ClassId`),
   KEY `fk_ClassAssignments_4_idx` (`LectureId`),
@@ -242,6 +241,27 @@ CREATE TABLE `Submissions` (
   CONSTRAINT `fk_Submissions_Checkpoint` FOREIGN KEY (`CheckpointId`) REFERENCES `Checkpoints` (`Id`) ON DELETE SET NULL
 ) ENGINE=InnoDB AUTO_INCREMENT=2507 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `StudentUploadState`
+--
+
+DROP TABLE IF EXISTS `StudentUploadState`;
+CREATE TABLE `StudentUploadState` (
+  `UserId` int NOT NULL,
+  `ClassId` int NOT NULL,
+  `ProjectId` int NOT NULL,
+  `CheckpointId` int NOT NULL DEFAULT 0,
+  `CooldownLiftedAt` datetime DEFAULT NULL,
+  PRIMARY KEY (`UserId`,`ClassId`,`ProjectId`,`CheckpointId`),
+  KEY `idx_StudentUploadState_ClassId` (`ClassId`),
+  KEY `idx_StudentUploadState_ProjectId` (`ProjectId`),
+  KEY `idx_StudentUploadState_CheckpointId` (`CheckpointId`),
+  KEY `idx_StudentUploadState_CooldownLiftedAt` (`CooldownLiftedAt`),
+  CONSTRAINT `fk_StudentUploadState_User` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentUploadState_Class` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentUploadState_Project` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 --
 -- Table structure for table `Testcases`
@@ -360,8 +380,8 @@ CREATE TABLE `SubmissionManualErrors` (
 INSERT INTO `Schools` (`Id`, `Name`)
 VALUES (1, 'Marquette University');
 
-INSERT INTO `Classes` (`Id`, `Name`, `SchoolId`, `Tid`)
-VALUES (1, 'COSC 1010', 1, '1');
+INSERT INTO `Classes` (`Id`, `Name`, `SchoolId`)
+VALUES (1, 'COSC 1010', 1);
 
 INSERT INTO `Labs` (`Id`, `Name`, `ClassId`)
 VALUES (1, '401', 1);

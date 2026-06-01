@@ -912,7 +912,7 @@ export function AdminGrading() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: 'School Selection', to: '/admin/schools' },
+                    { label: 'School Selection', to: '/schools' },
                     { label: 'Class Selection', to: classSelectionUrl },
                     { label: 'Admin Menu', to: adminMenuUrl },
                     ...(fromAnalytics

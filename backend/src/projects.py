@@ -18,7 +18,7 @@ from sqlalchemy import and_, func
 from werkzeug.utils import secure_filename
 
 from container import Container
-from src.constants import ADMIN_ROLE, TEACHER_ROLE
+from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
 from src.repositories.class_repository import ClassRepository
 from src.repositories.database import db
 from src.repositories.models import (
@@ -188,16 +188,87 @@ def parse_bool(v) -> bool:
     s = str(v or "").strip().lower()
     return s in ("1", "true", "yes", "y", "on")
 
+def current_user_id() -> int:
+    return parse_int(getattr(current_user, "Id", 0), 0)
+
+
+def current_user_global_role() -> int:
+    user_id = current_user_id()
+
+    if user_id <= 0:
+        return STUDENT_ROLE
+
+    role_rows = db.session.query(ClassAssignments.Role).filter(
+        ClassAssignments.UserId == user_id
+    ).all()
+
+    roles = []
+    for role_row in role_rows:
+        if hasattr(role_row, "Role"):
+            role_value = role_row.Role
+        elif isinstance(role_row, (tuple, list)):
+            role_value = role_row[0]
+        else:
+            role_value = role_row
+
+        roles.append(parse_int(role_value, STUDENT_ROLE))
+
+    return max([STUDENT_ROLE] + roles)
+
+
 def is_admin_user() -> bool:
-    return int(getattr(current_user, "Role", -1) or -1) == ADMIN_ROLE
+    return current_user_global_role() >= ADMIN_ROLE
 
 
 def is_teacher_user() -> bool:
-    return int(getattr(current_user, "Role", -1) or -1) == TEACHER_ROLE
+    return current_user_global_role() == TEACHER_ROLE
+
+
+def current_user_assignment_for_class(class_id: int):
+    class_id = parse_int(class_id, 0)
+    user_id = current_user_id()
+
+    if class_id <= 0 or user_id <= 0:
+        return None
+
+    try:
+        return ClassAssignments.query.filter(
+            ClassAssignments.UserId == user_id,
+            ClassAssignments.ClassId == class_id,
+        ).first()
+    except Exception:
+        return None
+
+
+def current_user_assignment_role_for_class(class_id: int) -> int | None:
+    assignment = current_user_assignment_for_class(class_id)
+
+    if assignment is None:
+        return None
+
+    return parse_int(getattr(assignment, "Role", None), STUDENT_ROLE)
+
+
+def current_user_has_staff_assignment() -> bool:
+    user_id = current_user_id()
+
+    if user_id <= 0:
+        return False
+
+    try:
+        return (
+            ClassAssignments.query.filter(
+                ClassAssignments.UserId == user_id,
+                ClassAssignments.Role >= TEACHER_ROLE,
+            ).first()
+            is not None
+        )
+    except Exception:
+        return False
 
 
 def is_staff_user() -> bool:
-    return is_admin_user() or is_teacher_user()
+    return current_user_global_role() >= TEACHER_ROLE or current_user_has_staff_assignment()
 
 
 def access_denied_response(status=HTTPStatus.UNAUTHORIZED):
@@ -407,34 +478,21 @@ def main_completed_project_ids(project_ids: list[int]) -> set[int]:
     except Exception:
         return set()
 
-def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
-    if class_item is None or class_item.Tid is None:
-        return False
-
-    teacher_ids = [
-        token
-        for token in "".join(
-            character if character.isdigit() else " "
-            for character in str(class_item.Tid)
-        ).split()
-    ]
-
-    return str(teacher_id) in teacher_ids
-
-
 def user_can_access_class_id(class_id: int) -> bool:
     class_id = parse_int(class_id, 0)
     if class_id <= 0:
         return False
 
+    class_item = Classes.query.filter(Classes.Id == class_id).first()
+    if class_item is None:
+        return False
+
     if is_admin_user():
-        return Classes.query.filter(Classes.Id == class_id).first() is not None
+        return True
 
-    if is_teacher_user():
-        class_item = Classes.query.filter(Classes.Id == class_id).first()
-        return teacher_id_is_on_class(int(current_user.Id), class_item)
+    assignment_role = current_user_assignment_role_for_class(class_id)
 
-    return False
+    return assignment_role is not None and assignment_role >= TEACHER_ROLE
 
 
 def user_can_access_project_id(project_id: int) -> bool:
@@ -480,8 +538,15 @@ def current_user_is_enrolled_in_project_class(project_id: int) -> bool:
 
 def student_module_is_hidden_for_current_user(module_id: int) -> bool:
     module_id = parse_int(module_id, 0)
-    if module_id <= 0 or is_staff_user():
+    if module_id <= 0:
         return False
+
+    try:
+        module = Modules.query.filter(Modules.Id == module_id).first()
+        if module is not None and user_can_access_class_id(int(getattr(module, "ClassId", 0) or 0)):
+            return False
+    except Exception:
+        pass
 
     try:
         return (
@@ -500,8 +565,8 @@ def current_user_can_access_visible_module_id(module_id: int) -> bool:
     if module_id <= 0:
         return False
 
-    if is_staff_user():
-        return user_can_access_module_id(module_id)
+    if user_can_access_module_id(module_id):
+        return True
 
     module = Modules.query.filter(Modules.Id == module_id).first()
     if module is None:
@@ -515,7 +580,11 @@ def current_user_can_access_visible_module_id(module_id: int) -> bool:
 
 
 def project_is_hidden_for_current_student(project) -> bool:
-    if not project or is_staff_user():
+    if not project:
+        return False
+
+    project_id = parse_int(getattr(project, "Id", 0) or 0, 0)
+    if project_id > 0 and user_can_access_project_id(project_id):
         return False
 
     module_id = parse_int(getattr(project, "ModuleId", 0) or 0, 0)
@@ -527,8 +596,8 @@ def current_user_can_access_visible_project_id(project_id: int) -> bool:
     if project_id <= 0:
         return False
 
-    if is_staff_user():
-        return user_can_access_project_id(project_id)
+    if user_can_access_project_id(project_id):
+        return True
 
     project = Projects.query.filter(Projects.Id == project_id).first()
     if project is None:
@@ -581,17 +650,11 @@ def user_can_access_student_id(student_id: int) -> bool:
     if is_admin_user():
         return True
 
-    if not is_teacher_user():
-        return False
-
     assignments = ClassAssignments.query.filter(ClassAssignments.UserId == student_id).all()
     return any(user_can_access_class_id(int(assignment.ClassId)) for assignment in assignments)
 
 
 def filter_projects_for_current_user(projects):
-    if is_admin_user():
-        return projects
-
     return [
         project
         for project in projects
@@ -957,7 +1020,7 @@ def analytics_submission_is_newer(candidate, current) -> bool:
 
 def analytics_dashboard_students(class_id: int):
     rows = (
-        db.session.query(Users, LectureSections.Name, Labs.Name)
+        db.session.query(Users, LectureSections.Name, Labs.Name, ClassAssignments.Role)
         .join(ClassAssignments, ClassAssignments.UserId == Users.Id)
         .outerjoin(
             LectureSections,
@@ -973,19 +1036,24 @@ def analytics_dashboard_students(class_id: int):
                 Labs.ClassId == int(class_id),
             ),
         )
-        .filter(ClassAssignments.ClassId == int(class_id), Users.Role == 0)
+        .filter(ClassAssignments.ClassId == int(class_id))
         .order_by(Users.Lastname.asc(), Users.Firstname.asc(), Users.Id.asc())
         .all()
     )
 
-    return [
-        {
+    student_rows = []
+    for user, lecture_name, lab_name, assignment_role in rows:
+        role = parse_int(assignment_role, STUDENT_ROLE)
+        if role != STUDENT_ROLE:
+            continue
+
+        student_rows.append({
             "user": user,
             "lecture": str(lecture_name or ""),
             "lab": str(lab_name or ""),
-        }
-        for user, lecture_name, lab_name in rows
-    ]
+        })
+
+    return student_rows
 
 
 def analytics_checkpoint_payloads(

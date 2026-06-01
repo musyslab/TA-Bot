@@ -12,8 +12,9 @@ from jwt import PyJWKClient
 
 from container import Container
 from src.api_utils import get_value_or_empty
+from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
 from src.jwt_manager import jwt
-from src.repositories.models import Classes, Labs, LectureSections, Schools, Users
+from src.repositories.models import ClassAssignments, Classes, Labs, LectureSections, Schools, Users
 from src.repositories.class_repository import ClassRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authentication_service import PAMAuthenticationService
@@ -61,6 +62,63 @@ def normalize_email(value: str) -> str:
 
 def is_user_locked(user: Any) -> bool:
     return bool(getattr(user, "IsLocked", False))
+
+
+def get_user_global_role(user: Any) -> int:
+    assignments = user_class_assignments(user)
+    roles = [get_assignment_role(assignment) for assignment in assignments]
+    return max([STUDENT_ROLE] + roles)
+
+
+def get_assignment_role(assignment: Any) -> int:
+    return parse_int(getattr(assignment, "Role", STUDENT_ROLE))
+
+
+def user_class_assignments(user: Any):
+    if user is None:
+        return []
+
+    return ClassAssignments.query.filter(ClassAssignments.UserId == user.Id).all()
+
+
+def build_access_summary(user: Any) -> Dict[str, Any]:
+    assignments = user_class_assignments(user)
+    assignment_roles = [get_assignment_role(assignment) for assignment in assignments]
+    effective_role = max([STUDENT_ROLE] + assignment_roles)
+
+    can_study = any(role == STUDENT_ROLE for role in assignment_roles)
+    can_teach = any(role >= TEACHER_ROLE for role in assignment_roles)
+
+    if not assignments:
+        can_study = True
+
+    default_dashboard = "admin" if can_teach else "student"
+
+    return {
+        "role": effective_role,
+        "can_teach": can_teach,
+        "can_study": can_study,
+        "default_dashboard": default_dashboard,
+    }
+
+
+def build_session_payload(user: Any, access_token: str, message: str = "Success") -> Dict[str, Any]:
+    return {
+        "message": message,
+        "access_token": access_token,
+        **build_access_summary(user),
+    }
+
+
+def set_class_assignment_role(user_id: int, class_id: int, role: int) -> None:
+    assignment = ClassAssignments.query.filter(
+        ClassAssignments.UserId == user_id,
+        ClassAssignments.ClassId == class_id,
+    ).first()
+
+    if assignment is not None:
+        assignment.Role = role
+        ClassAssignments.query.session.commit()
 
 def is_valid_school_selection(school_id: int, class_id: int, lab_id: int, lecture_id: int) -> bool:
     if school_id <= 0 or class_id <= 0 or lab_id <= 0 or lecture_id <= 0:
@@ -223,6 +281,12 @@ def get_user_role(user_repo: UserRepository = Provide[Container.user_repo]):
     return user_repo.get_user_status()
 
 
+@auth_api.route("/access-summary", methods=["GET"])
+@jwt_required()
+def access_summary():
+    return make_response(build_access_summary(current_user), HTTPStatus.OK)
+
+
 @auth_api.route("/oauth/config", methods=["GET"])
 def oauth_config():
     tenant_id = (os.environ.get("MICROSOFT_TENANT_ID") or "").strip()
@@ -293,17 +357,11 @@ def auth(
         return make_response({"message": "New User"}, HTTPStatus.OK)
 
     user = user_repo.getUserByName(username)
-    role = int(getattr(user, "Role", 0) or 0)
-
     user_repo.clear_failed_attempts(username)
     access_token = create_access_token(identity=user)
 
     return make_response(
-        {
-            "message": "Success",
-            "access_token": access_token,
-            "role": role,
-        },
+        build_session_payload(user, access_token),
         HTTPStatus.OK,
     )
 
@@ -341,11 +399,7 @@ def oauth_login(user_repo: UserRepository = Provide[Container.user_repo]):
 
         access_token = create_access_token(identity=user)
         return make_response(
-            {
-                "message": "Success",
-                "access_token": access_token,
-                "role": int(getattr(user, "Role", 0) or 0),
-            },
+            build_session_payload(user, access_token),
             HTTPStatus.OK,
         )
 
@@ -417,14 +471,11 @@ def create_user(
     user_repo.create_user(username, first_name, last_name, email, student_number)
     user = user_repo.getUserByName(username)
     class_repo.create_assignments(class_id, lab_id, int(user.Id), lecture_id)
+    set_class_assignment_role(int(user.Id), class_id, STUDENT_ROLE)
 
     access_token = create_access_token(identity=user)
     return make_response(
-        {
-            "message": "Success",
-            "access_token": access_token,
-            "role": 0,
-        },
+        build_session_payload(user, access_token),
         HTTPStatus.OK,
     )
 
@@ -455,9 +506,15 @@ def create_oauth_user(
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
-    if class_id == -1 or lab_id == -1 or lecture_id == -1:
+    if school_id == -1 or class_id == -1 or lab_id == -1 or lecture_id == -1:
         return make_response(
-            {"message": "Please fill in valid class data."},
+            {"message": "Please fill in valid school, class, lecture, and lab data."},
+            HTTPStatus.NOT_ACCEPTABLE,
+        )
+
+    if not is_valid_school_selection(school_id, class_id, lab_id, lecture_id):
+        return make_response(
+            {"message": "The selected school, class, lecture, and lab combination is invalid."},
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
@@ -497,14 +554,11 @@ def create_oauth_user(
         user = user_repo.getUserByName(username)
 
     class_repo.create_assignments(class_id, lab_id, int(user.Id), lecture_id)
+    set_class_assignment_role(int(user.Id), class_id, STUDENT_ROLE)
 
     access_token = create_access_token(identity=user)
     return make_response(
-        {
-            "message": "Success",
-            "access_token": access_token,
-            "role": int(getattr(user, "Role", 0) or 0),
-        },
+        build_session_payload(user, access_token),
         HTTPStatus.OK,
     )
 
@@ -525,15 +579,16 @@ def add_class(
     lecture_id = class_repo.get_lecture_id_withName(lecture_name)
     user_id = current_user.Id
 
-    user = user_repo.get_user_by_id(user_id)
+    user = user_repo.get_user(user_id)
+
+    if user is None:
+        return make_response({"message": "User not found"}, HTTPStatus.NOT_FOUND)
+
     class_repo.add_class_assignment(class_id, int(lab_id), int(user.Id), int(lecture_id))
+    set_class_assignment_role(int(user.Id), int(class_id), get_user_global_role(user))
 
     access_token = create_access_token(identity=user)
     return make_response(
-        {
-            "message": "Success",
-            "access_token": access_token,
-            "role": int(getattr(user, "Role", 0) or 0),
-        },
+        build_session_payload(user, access_token),
         HTTPStatus.OK,
     )

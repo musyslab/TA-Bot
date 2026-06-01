@@ -55,7 +55,7 @@ export function AdminViewStudentCode() {
     const hasClassDirectoryPath = !!schoolIdStr && !!classIdStr
     const hasFullDirectoryPath = !!schoolIdStr && !!classIdStr && !!moduleIdStr && !!projectIdStr
 
-    const classSelectionUrl = hasClassDirectoryPath ? `/admin/school/${schoolIdStr}/classes` : '/admin/schools'
+    const classSelectionUrl = hasClassDirectoryPath ? `/admin/school/${schoolIdStr}/classes` : '/schools'
     const adminMenuUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/menu`
     const adminUploadUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/upload`
     const analyticsDashboardUrl = `/admin/school/${schoolIdStr}/class/${classIdStr}/analytics`
@@ -144,7 +144,7 @@ export function AdminViewStudentCode() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: 'School Selection', to: '/admin/schools' },
+                    { label: 'School Selection', to: '/schools' },
                     ...(fromOfficeHours
                         ? [{ label: 'Office Hours', to: '/admin/OfficeHours' }]
                         : fromAnalytics && hasClassDirectoryPath
@@ -160,7 +160,7 @@ export function AdminViewStudentCode() {
                                     { label: 'Admin Upload', to: adminUploadUrl },
                                 ]
                                 : fromAdminUpload || !hasFullDirectoryPath
-                                    ? [{ label: 'Admin Upload', to: '/admin/schools' }]
+                                    ? [{ label: 'Admin Upload', to: '/schools' }]
                                     : [
                                         { label: 'Class Selection', to: classSelectionUrl },
                                         { label: 'Admin Menu', to: adminMenuUrl },

@@ -33,7 +33,6 @@ const getValidStoredToken = (): string | null => {
         cleanedToken.toLowerCase() === "undefined"
     ) {
         localStorage.removeItem("AUTOTA_AUTH_TOKEN");
-        localStorage.removeItem("AUTOTA_USER_ROLE");
         return null;
     }
 
@@ -43,29 +42,12 @@ const getValidStoredToken = (): string | null => {
 class MenuComponent extends Component<MenuComponentProps> {
     handleLogout = () => {
         localStorage.removeItem("AUTOTA_AUTH_TOKEN");
-        localStorage.removeItem("AUTOTA_USER_ROLE");
         window.location.replace("/login");
     };
 
     handleLogin = () => {
         window.location.replace("/login");
     };
-
-    getStoredDashboardPath(): string | null {
-        const storedRole = localStorage.getItem("AUTOTA_USER_ROLE");
-
-        if (storedRole === null) {
-            return null;
-        }
-
-        const role = parseInt(storedRole, 10);
-
-        if (Number.isNaN(role)) {
-            return null;
-        }
-
-        return role > 0 ? "/admin/schools" : "/student/schools";
-    }
 
     handleDashboard = () => {
         const token = getValidStoredToken();
@@ -75,27 +57,17 @@ class MenuComponent extends Component<MenuComponentProps> {
             return;
         }
 
-        const storedPath = this.getStoredDashboardPath();
-        if (storedPath) {
-            window.location.replace(storedPath);
-            return;
-        }
-
         axios
-            .get(`${import.meta.env.VITE_API_URL}/auth/get-role`, {
+            .get(`${import.meta.env.VITE_API_URL}/auth/access-summary`, {
                 headers: {
                     Authorization: `Bearer ${token}`,
                 },
             })
-            .then((res) => {
-                const role = parseInt(res.data, 10);
-                localStorage.setItem("AUTOTA_USER_ROLE", String(role));
-                const path = role > 0 ? "/admin/schools" : "/student/schools";
-                window.location.replace(path);
+            .then(() => {
+                window.location.replace("/schools");
             })
             .catch(() => {
                 localStorage.removeItem("AUTOTA_AUTH_TOKEN");
-                localStorage.removeItem("AUTOTA_USER_ROLE");
                 window.location.replace("/login");
             });
     };
@@ -109,8 +81,6 @@ class MenuComponent extends Component<MenuComponentProps> {
     }
 
     render() {
-        const classId = this.getClassIdFromUrl();
-        const officeHoursPath = classId ? `/student/${classId}/OfficeHours` : "/student/schools";
         const isLoggedIn = Boolean(getValidStoredToken());
 
         return (

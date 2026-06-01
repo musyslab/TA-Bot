@@ -1,4 +1,5 @@
-import { KeyboardEvent } from "react";
+import { KeyboardEvent, useEffect, useState } from "react";
+import axios from "axios";
 import { Link, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import {
@@ -22,6 +23,13 @@ type AdminMenuOption = {
     disabled?: boolean;
 };
 
+type ClassAccessResponse = {
+    id?: number;
+    name?: string;
+    school_id?: number;
+    school_name?: string;
+};
+
 export default function AdminMenu() {
     const { school_id, class_id } = useParams<{
         school_id: string;
@@ -30,6 +38,32 @@ export default function AdminMenu() {
 
     const schoolId = school_id || "";
     const classId = class_id || "";
+    const [className, setClassName] = useState("");
+
+    useEffect(() => {
+        if (!schoolId || !classId) {
+            setClassName("");
+            return;
+        }
+
+        axios
+            .get<ClassAccessResponse>(
+                import.meta.env.VITE_API_URL +
+                `/class/id/${classId}/access?school_id=${schoolId}&role_context=admin`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
+                    },
+                },
+            )
+            .then((res) => {
+                setClassName(res.data?.name || "");
+            })
+            .catch((err) => {
+                console.error(err);
+                setClassName("");
+            });
+    }, [schoolId, classId]);
 
     const moduleListPath = `/admin/school/${schoolId}/class/${classId}/modules`;
     const analyticsPath = `/admin/school/${schoolId}/class/${classId}/analytics`;
@@ -87,19 +121,21 @@ export default function AdminMenu() {
 
             <DirectoryBreadcrumbs
                 items={[
-                    { label: "School Selection", to: "/admin/schools" },
+                    { label: "School Selection", to: "/schools" },
                     {
                         label: "Class Selection",
                         to: schoolId
                             ? `/admin/school/${schoolId}/classes`
-                            : "/admin/schools",
+                            : "/schools",
                     },
                     { label: "Admin Menu" },
                 ]}
                 trailingSeparator={true}
             />
 
-            <div className="pageTitle">Admin Menu</div>
+            <div className="pageTitle">
+                {className ? `${className} Admin Menu` : "Admin Menu"}
+            </div>
 
             <p className="projects-subtitle">
                 Choose where you want to go for this class.
@@ -140,8 +176,8 @@ export default function AdminMenu() {
                                 <div className="admin-menu-card-actions">
                                     <span
                                         className={`admin-menu-action ${option.disabled
-                                            ? "admin-menu-action-secondary admin-menu-disabled-action"
-                                            : "admin-menu-action-primary"
+                                                ? "admin-menu-action-secondary admin-menu-disabled-action"
+                                                : "admin-menu-action-primary"
                                             }`}
                                     >
                                         {option.actionLabel}

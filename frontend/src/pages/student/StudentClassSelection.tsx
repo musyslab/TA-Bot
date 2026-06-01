@@ -66,7 +66,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
         const schoolId = Number(this.props.schoolIdFromUrl)
 
         if (!schoolId || Number.isNaN(schoolId)) {
-            this.props.navigate("/student/schools", { replace: true })
+            this.props.navigate("/schools", { replace: true })
             return
         }
 
@@ -118,7 +118,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
                 console.error(err)
 
                 if (err.response && (err.response.status === 403 || err.response.status === 404)) {
-                    this.props.navigate("/student/schools", { replace: true })
+                    this.props.navigate("/schools", { replace: true })
                     return
                 }
 
@@ -164,7 +164,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
 
                 <DirectoryBreadcrumbs
                     items={[
-                        { label: "School Selection", to: "/student/schools" },
+                        { label: "School Selection", to: "/schools" },
                         { label: "Class Selection" }
                     ]}
                     trailingSeparator={true}
@@ -189,7 +189,7 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
 
                     {!hasSelectedSchool ? (
                         <Link
-                            to="/student/schools"
+                            to="/schools"
                             className="project-action project-action-secondary"
                         >
                             Go to School Selection

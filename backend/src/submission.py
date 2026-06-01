@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import threading
 import requests
@@ -13,20 +13,20 @@ from flask_jwt_extended import jwt_required
 from flask_jwt_extended import current_user
 from src.repositories.submission_repository import SubmissionRepository
 from src.repositories.project_repository import ProjectRepository
-from src.constants import ADMIN_ROLE, TEACHER_ROLE
+from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
 import json
 import zipfile
 from io import BytesIO
 from tap.parser import Parser
 from flask import jsonify
-from datetime import datetime
 from dependency_injector.wiring import inject, Provide
 from container import Container
 from urllib.parse import unquote
 import csv
 from io import StringIO
 from src.ai_suggestions import ERROR_DEFS
-from src.repositories.models import Testcases, Submissions, Projects, Classes
+from src.repositories.models import Checkpoints, ClassAssignments, Classes, Projects, StudentUploadState, Submissions, Testcases
+from src.repositories.database import db
 
 # Default grading error definitions (must match AdminGrading.tsx BASE_ERROR_DEFS).
 # We store them here so exports can resolve default point values when ErrorPointsJson
@@ -72,16 +72,114 @@ def parse_bool(v) -> bool:
     s = str(v or "").strip().lower()
     return s in ("1", "true", "yes", "y", "on")
 
+def role_from_row(role_row, default: int = STUDENT_ROLE) -> int:
+    if hasattr(role_row, "Role"):
+        raw_role = role_row.Role
+    elif isinstance(role_row, (tuple, list)):
+        raw_role = role_row[0] if role_row else default
+    else:
+        raw_role = role_row
+
+    return parse_int(raw_role, default)
+
+
+def current_user_id() -> int:
+    return parse_int(getattr(current_user, "Id", 0), 0)
+
+
+def get_user_assignment_roles(user_id: int) -> list[int]:
+    user_id = parse_int(user_id, 0)
+    if user_id <= 0:
+        return []
+
+    try:
+        role_rows = ClassAssignments.query.with_entities(ClassAssignments.Role).filter(
+            ClassAssignments.UserId == user_id
+        ).all()
+    except Exception:
+        return []
+
+    return [role_from_row(role_row) for role_row in role_rows]
+
+
+def current_user_effective_role() -> int:
+    return max([STUDENT_ROLE] + get_user_assignment_roles(current_user_id()))
+
+
 def is_admin_user() -> bool:
-    return int(getattr(current_user, "Role", -1) or -1) == ADMIN_ROLE
+    return current_user_effective_role() >= ADMIN_ROLE
 
 
 def is_teacher_user() -> bool:
-    return int(getattr(current_user, "Role", -1) or -1) == TEACHER_ROLE
+    return current_user_effective_role() >= TEACHER_ROLE
+
+
+def class_exists(class_id: int) -> bool:
+    class_id = parse_int(class_id, 0)
+    if class_id <= 0:
+        return False
+
+    return Classes.query.filter(Classes.Id == class_id).first() is not None
+
+
+def get_class_assignment(user_id: int, class_id: int):
+    user_id = parse_int(user_id, 0)
+    class_id = parse_int(class_id, 0)
+
+    if user_id <= 0 or class_id <= 0:
+        return None
+
+    try:
+        return ClassAssignments.query.filter(
+            ClassAssignments.UserId == user_id,
+            ClassAssignments.ClassId == class_id,
+        ).first()
+    except Exception:
+        return None
+
+
+def get_class_assignment_role(user_id: int, class_id: int) -> int | None:
+    assignment = get_class_assignment(user_id, class_id)
+
+    if assignment is None:
+        return None
+
+    if hasattr(assignment, "Role"):
+        try:
+            return int(getattr(assignment, "Role", 0) or 0)
+        except Exception:
+            return 0
+
+    return 0
+
+
+def current_user_class_role(class_id: int) -> int | None:
+    return get_class_assignment_role(current_user_id(), class_id)
+
+
+def current_user_is_enrolled_in_class_id(class_id: int) -> bool:
+    return get_class_assignment(current_user_id(), class_id) is not None
+
+
+def user_is_student_in_class_id(user_id: int, class_id: int) -> bool:
+    assignment_role = get_class_assignment_role(user_id, class_id)
+    return assignment_role == STUDENT_ROLE
 
 
 def is_staff_user() -> bool:
-    return is_admin_user() or is_teacher_user()
+    if is_admin_user() or is_teacher_user():
+        return True
+
+    try:
+        return (
+            ClassAssignments.query.filter(
+                ClassAssignments.UserId == current_user_id(),
+                ClassAssignments.Role >= TEACHER_ROLE,
+            ).first()
+            is not None
+        )
+    except Exception:
+        return False
 
 
 def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
@@ -104,14 +202,26 @@ def user_can_access_class_id(class_id: int) -> bool:
     if class_id <= 0:
         return False
 
+    assignment_role = current_user_class_role(class_id)
+    if assignment_role is not None and assignment_role >= TEACHER_ROLE:
+        return True
+
     if is_admin_user():
-        return Classes.query.filter(Classes.Id == class_id).first() is not None
+        return class_exists(class_id)
 
     if is_teacher_user():
         class_item = Classes.query.filter(Classes.Id == class_id).first()
-        return teacher_id_is_on_class(int(current_user.Id), class_item)
+        return teacher_id_is_on_class(current_user_id(), class_item)
 
     return False
+
+
+def current_user_can_view_class_id(class_id: int) -> bool:
+    class_id = parse_int(class_id, 0)
+    if class_id <= 0:
+        return False
+
+    return user_can_access_class_id(class_id) or current_user_is_enrolled_in_class_id(class_id)
 
 
 def user_can_access_project_id(project_id: int) -> bool:
@@ -126,11 +236,226 @@ def user_can_access_project_id(project_id: int) -> bool:
     return user_can_access_class_id(int(getattr(project, "ClassId", 0) or 0))
 
 
+def current_user_can_view_project_id(project_id: int) -> bool:
+    project_id = parse_int(project_id, 0)
+    if project_id <= 0:
+        return False
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    class_id = int(getattr(project, "ClassId", 0) or 0)
+    return current_user_can_view_class_id(class_id)
+
+
+def current_utc_datetime() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def parse_cooldown_lifted_at(value) -> datetime | None:
+    if value is None or value == "":
+        return None
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            raw = str(value).strip()
+            if not raw:
+                return None
+            if raw.endswith("Z"):
+                raw = f"{raw[:-1]}+00:00"
+            parsed = datetime.fromisoformat(raw)
+        except Exception:
+            return None
+
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return parsed
+
+
+def serialize_cooldown_lifted_at(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return f"{value.isoformat()}Z"
+
+
+def seconds_until(value: datetime | None) -> int:
+    if value is None:
+        return 0
+
+    return max(0, int((value - current_utc_datetime()).total_seconds() + 0.999))
+
+
+def cooldown_lifted_at_from_mapping(mapping) -> datetime | None:
+    if "cooldown_seconds" in mapping:
+        seconds = parse_int(mapping.get("cooldown_seconds", 0), 0)
+        if seconds <= 0:
+            return None
+        return current_utc_datetime() + timedelta(seconds=seconds)
+
+    if "cooldown_lifted_at" in mapping:
+        return parse_cooldown_lifted_at(mapping.get("cooldown_lifted_at"))
+
+    return None
+
+
+def upload_state_scope_from_mapping(mapping) -> tuple[int, int, bool, int]:
+    class_id = parse_int(mapping.get("class_id", 0), 0)
+    project_id = parse_int(mapping.get("project_id", 0), 0)
+    checkpoint = parse_bool(mapping.get("checkpoint", False))
+    checkpoint_id = parse_int(mapping.get("checkpoint_id", 0), 0) if checkpoint else 0
+
+    return class_id, project_id, checkpoint, max(0, checkpoint_id)
+
+
+def current_user_can_use_upload_state(class_id: int, project_id: int, checkpoint_id: int) -> bool:
+    class_id = parse_int(class_id, 0)
+    project_id = parse_int(project_id, 0)
+    checkpoint_id = parse_int(checkpoint_id, 0)
+
+    if class_id <= 0 or project_id <= 0:
+        return False
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return False
+
+    if parse_int(getattr(project, "ClassId", 0), 0) != class_id:
+        return False
+
+    if not current_user_can_view_project_id(project_id):
+        return False
+
+    if checkpoint_id > 0:
+        checkpoint = Checkpoints.query.filter(
+            Checkpoints.Id == checkpoint_id,
+            Checkpoints.ProjectId == project_id,
+        ).first()
+        return checkpoint is not None
+
+    return True
+
+
+def get_student_upload_state_row(class_id: int, project_id: int, checkpoint_id: int):
+    return StudentUploadState.query.filter(
+        StudentUploadState.UserId == int(current_user.Id),
+        StudentUploadState.ClassId == int(class_id),
+        StudentUploadState.ProjectId == int(project_id),
+        StudentUploadState.CheckpointId == int(checkpoint_id or 0),
+    ).first()
+
+
+def latest_submission_for_upload_state(
+    submission_repo: SubmissionRepository,
+    project_id: int,
+    checkpoint: bool,
+    checkpoint_id: int,
+):
+    if checkpoint:
+        return latest_checkpoint_submission(
+            int(project_id),
+            int(current_user.Id),
+            int(checkpoint_id) if checkpoint_id > 0 else None,
+        )
+
+    return submission_repo.get_submission_by_user_and_projectid(
+        int(current_user.Id),
+        int(project_id),
+    )
+
+
+def submission_matches_upload_state(submission, project_id: int, checkpoint: bool, checkpoint_id: int) -> bool:
+    if submission is None:
+        return False
+
+    if int(getattr(submission, "User", -1) or -1) != int(current_user.Id):
+        return False
+
+    if int(getattr(submission, "Project", -1) or -1) != int(project_id):
+        return False
+
+    if checkpoint:
+        if not bool(getattr(submission, "IsCheckpoint", False)):
+            return False
+
+        if checkpoint_id > 0 and int(getattr(submission, "CheckpointId", 0) or 0) != int(checkpoint_id):
+            return False
+
+    elif bool(getattr(submission, "IsCheckpoint", False)):
+        return False
+
+    return True
+
+
+def serialize_student_upload_state(
+    row,
+    submission_repo: SubmissionRepository,
+    project_id: int,
+    checkpoint: bool,
+    checkpoint_id: int,
+) -> dict:
+    latest_submission = latest_submission_for_upload_state(
+        submission_repo,
+        int(project_id),
+        bool(checkpoint),
+        int(checkpoint_id or 0),
+    )
+    latest_submission_id = (
+        int(getattr(latest_submission, "Id", 0) or 0)
+        if latest_submission is not None
+        else None
+    )
+
+    cooldown_lifted_at = getattr(row, "CooldownLiftedAt", None) if row else None
+
+    if cooldown_lifted_at is not None and cooldown_lifted_at <= current_utc_datetime():
+        if row is not None:
+            db.session.delete(row)
+            db.session.commit()
+        cooldown_lifted_at = None
+
+    return {
+        "last_submission_id": latest_submission_id,
+        "previous_submission_id": latest_submission_id,
+        "cooldown_lifted_at": serialize_cooldown_lifted_at(cooldown_lifted_at),
+        "cooldown_remaining_seconds": seconds_until(cooldown_lifted_at),
+    }
+
+
 def user_can_access_submission(submission) -> bool:
     if submission is None:
         return False
 
     return user_can_access_project_id(int(getattr(submission, "Project", 0) or 0))
+
+
+def current_user_can_view_submission(submission, submission_repo: SubmissionRepository | None = None) -> bool:
+    if submission is None:
+        return False
+
+    if user_can_access_submission(submission):
+        return True
+
+    if int(getattr(submission, "User", -1) or -1) == int(current_user.Id):
+        return True
+
+    if submission_repo is not None:
+        try:
+            return submission_repo.submission_view_verification(
+                int(current_user.Id),
+                int(getattr(submission, "Id", -1) or -1),
+            )
+        except Exception:
+            return False
+
+    return False
 
 def opt_int(raw) -> int | None:
     s = str(raw or "").strip()
@@ -153,7 +478,7 @@ def latest_checkpoint_submission(project_id: int, user_id: int, checkpoint_id: i
         )
         if checkpoint_id is not None and hasattr(Submissions, "CheckpointId"):
             q = q.filter(Submissions.CheckpointId == int(checkpoint_id))
-        return q.order_by(Submissions.Time.desc()).first()
+        return q.order_by(Submissions.Time.desc(), Submissions.Id.desc()).first()
     except Exception:
         return None
 
@@ -252,7 +577,7 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
             return json.dumps({"results": []}, sort_keys=True, indent=4)
 
         # Raw JSON string fallback
-        if (s.startswith("{") or s.startswith("[")) and "\n" in s:
+        if (s.startswith("{") or s.startswith("[") and "\n" in s):
             try:
                 obj = json.loads(s) or {}
                 return json.dumps(obj, sort_keys=True, indent=4)
@@ -347,14 +672,10 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
     if submission is None:
         return make_response(json.dumps({"results": []}), HTTPStatus.OK)
 
-    if not is_staff_user():
-        real_sub_id = int(getattr(submission, "Id", -1) or -1)
-        if real_sub_id <= 0 or not submission_repo.submission_view_verification(int(current_user.Id), real_sub_id):
-            return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
-    elif not user_can_access_submission(submission):
+    if not current_user_can_view_submission(submission, submission_repo):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
-   
-    output = convert_tap_to_json(submission.OutputFilepath, current_user.Role, 0, False)
+
+    output = convert_tap_to_json(submission.OutputFilepath, current_user_effective_role(), 0, False)
     output = apply_hidden_flags_to_results(output, int(projectid), checkpoint_id)
 
     return make_response(output, HTTPStatus.OK)
@@ -373,7 +694,7 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
     code_output = ""
     if submissionid != -1:
         sub = submission_repo.get_submission_by_submission_id(submissionid)
-        if sub is not None and ((is_staff_user() and user_can_access_submission(sub)) or submission_repo.submission_view_verification(current_user.Id, submissionid)):
+        if sub is not None and current_user_can_view_submission(sub, submission_repo):
             code_output = submission_repo.get_code_path_by_submission_id(submissionid)
         else:
             resolved, _, _ = resolve_submission_for_current_user(
@@ -386,8 +707,16 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
             )
             code_output = getattr(resolved, "CodeFilepath", "") if resolved else ""
     else:
-        projectid = project_repo.get_current_project_by_class(class_id).Id
-        code_output = submission_repo.get_submission_by_user_and_projectid(current_user.Id,projectid).CodeFilepath
+        if not current_user_can_view_class_id(class_id):
+            return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+        current_project = project_repo.get_current_project_by_class(class_id)
+        if current_project is None:
+            return make_response("Not Found", HTTPStatus.NOT_FOUND)
+
+        projectid = current_project.Id
+        latest_submission = submission_repo.get_submission_by_user_and_projectid(current_user.Id, projectid)
+        code_output = getattr(latest_submission, "CodeFilepath", "") if latest_submission else ""
     # JSON preview mode (used by CodePage) so the UI can render readable source
     if want_json:
         files_payload = []
@@ -417,6 +746,9 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
         return resp
 
     # Download mode (used by StudentList download) stays as attachments/zip
+    if not code_output or not os.path.exists(code_output):
+        return make_response("Not Found", HTTPStatus.NOT_FOUND)
+
     if not os.path.isdir(code_output):
         resp = send_file(
             code_output,
@@ -454,48 +786,130 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
     resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
     return resp
 
+@submission_api.route('/student-upload-state', methods=['GET', 'POST', 'DELETE'])
+@jwt_required()
+@inject
+def student_upload_state(submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
+    source = request.args if request.method == 'GET' else (request.get_json(silent=True) or {})
+    class_id, project_id, checkpoint, checkpoint_id = upload_state_scope_from_mapping(source)
+
+    if class_id <= 0 or project_id <= 0:
+        return make_response({"message": "class_id and project_id are required."}, HTTPStatus.BAD_REQUEST)
+
+    if not current_user_can_use_upload_state(class_id, project_id, checkpoint_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    row = get_student_upload_state_row(class_id, project_id, checkpoint_id)
+
+    if request.method == 'GET':
+        return jsonify(
+            serialize_student_upload_state(
+                row,
+                submission_repo,
+                project_id,
+                checkpoint,
+                checkpoint_id,
+            )
+        )
+
+    if request.method == 'DELETE':
+        if row is not None:
+            db.session.delete(row)
+            db.session.commit()
+
+        return jsonify({
+            "last_submission_id": None,
+            "previous_submission_id": None,
+            "cooldown_lifted_at": None,
+            "cooldown_remaining_seconds": 0,
+        })
+
+    cooldown_lifted_at = cooldown_lifted_at_from_mapping(source)
+
+    if cooldown_lifted_at is None or cooldown_lifted_at <= current_utc_datetime():
+        if row is not None:
+            db.session.delete(row)
+            db.session.commit()
+
+        return jsonify(
+            serialize_student_upload_state(
+                None,
+                submission_repo,
+                project_id,
+                checkpoint,
+                checkpoint_id,
+            )
+        )
+
+    if row is None:
+        row = StudentUploadState(
+            UserId=int(current_user.Id),
+            ClassId=int(class_id),
+            ProjectId=int(project_id),
+            CheckpointId=int(checkpoint_id or 0),
+        )
+        db.session.add(row)
+
+    row.CooldownLiftedAt = cooldown_lifted_at
+    db.session.commit()
+
+    return jsonify(
+        serialize_student_upload_state(
+            row,
+            submission_repo,
+            project_id,
+            checkpoint,
+            checkpoint_id,
+        )
+    )
+
+
 @submission_api.route('/recentsubproject', methods=['POST'])
 @jwt_required()
 @inject
-def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo],project_repo: ProjectRepository = Provide[Container.project_repo] ):
-    if not is_staff_user():
-        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
-    input_json = request.get_json()
+def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
+    input_json = request.get_json() or {}
     projectid = input_json['project_id']
+
     if not user_can_access_project_id(int(projectid)):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
-    checkpoint_raw = (input_json or {}).get('checkpoint', False)
+
+    checkpoint_raw = input_json.get('checkpoint', False)
     checkpoint = str(checkpoint_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
-    
-    ppid_raw = (input_json or {}).get('checkpoint_id', None)
+
+    ppid_raw = input_json.get('checkpoint_id', None)
     try:
         checkpoint_id = int(ppid_raw) if ppid_raw is not None else None
     except (TypeError, ValueError):
         checkpoint_id = None
-    
-    class_name = project_repo.get_className_by_projectId(projectid)
-    class_id = project_repo.get_class_id_by_name(class_name)
-    users = user_repo.get_all_users_by_cid(class_id)
-    studentattempts={}
-    userids=[]
-    for user in users:
-        userids.append(user.Id)
+
+    project = project_repo.get_selected_project(projectid)
+    if project is None:
+        return make_response("Not Found", HTTPStatus.NOT_FOUND)
+
+    class_id = int(getattr(project, "ClassId", 0) or 0)
+    users = [
+        user
+        for user in user_repo.get_all_users_by_cid(class_id)
+        if user_is_student_in_class_id(int(getattr(user, "Id", 0) or 0), class_id)
+    ]
+
+    studentattempts = {}
+    userids = [user.Id for user in users]
 
     if checkpoint and hasattr(Submissions, "IsCheckpoint"):
         bucket = {}
         submission_counter_dict = {uid: 0 for uid in userids}
-        
-        q = (
-            Submissions.query
-            .filter(
-                Submissions.Project == projectid,
-                Submissions.User.in_(userids),
-                Submissions.IsCheckpoint == True,
-            )
+
+        q = Submissions.query.filter(
+            Submissions.Project == projectid,
+            Submissions.User.in_(userids),
+            Submissions.IsCheckpoint == True,
         )
-        # If the UI requested a specific checkpoint, scope to it.
+
         if checkpoint_id is not None and hasattr(Submissions, "CheckpointId"):
             q = q.filter(Submissions.CheckpointId == checkpoint_id)
+
         subs = q.order_by(Submissions.User.asc(), Submissions.Time.desc()).all()
 
         for s in subs:
@@ -510,46 +924,48 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
 
     user_lectures_dict = user_repo.get_user_lectures(userids, class_id)
     user_labs_dict = user_repo.get_user_labs(userids, class_id)
+
     for user in users:
-        if int(user.Role) == 0:
-            if user.Id in bucket:
-                if checkpoint:
-                    manual_grade = submission_repo.get_manual_grade_for_submission(bucket[user.Id].Id)
-                    student_grade = manual_grade.get('grade') if manual_grade and manual_grade.get('grade') is not None else 0
-                else:
-                    student_grade = project_repo.get_student_grade(projectid, user.Id)
-                student_id = user_repo.get_StudentNumber(user.Id)
-                studentattempts[user.Id]=[
-                    user.Lastname,
-                    user.Firstname,
-                    user_lectures_dict[user.Id],
-                    user_labs_dict[user.Id],
-                    submission_counter_dict[user.Id],
-                    bucket[user.Id].Time.isoformat(),
-                    bucket[user.Id].IsPassing,
-                    bucket[user.Id].Id,
-                    str(class_id),
-                    student_grade,
-                    student_id,
-                    user.IsLocked
-                ]
+        if user.Id in bucket:
+            if checkpoint:
+                manual_grade = submission_repo.get_manual_grade_for_submission(bucket[user.Id].Id)
+                student_grade = manual_grade.get('grade') if manual_grade and manual_grade.get('grade') is not None else 0
             else:
-                student_id = user_repo.get_StudentNumber(user.Id)
-                studentattempts[user.Id] = [
-                    user.Lastname,
-                    user.Firstname,
-                    user_lectures_dict[user.Id],
-                    user_labs_dict[user.Id],
-                    "N/A",
-                    "N/A",
-                    "N/A",
-                    "N/A",
-                    -1,
-                    str(class_id),
-                    "0",
-                    student_id,
-                    user.IsLocked
-                ]
+                student_grade = project_repo.get_student_grade(projectid, user.Id)
+
+            student_id = user_repo.get_StudentNumber(user.Id)
+            studentattempts[user.Id] = [
+                user.Lastname,
+                user.Firstname,
+                user_lectures_dict.get(user.Id, ""),
+                user_labs_dict.get(user.Id, ""),
+                submission_counter_dict.get(user.Id, 0),
+                bucket[user.Id].Time.isoformat(),
+                bucket[user.Id].IsPassing,
+                bucket[user.Id].Id,
+                str(class_id),
+                student_grade,
+                student_id,
+                user.IsLocked,
+            ]
+        else:
+            student_id = user_repo.get_StudentNumber(user.Id)
+            studentattempts[user.Id] = [
+                user.Lastname,
+                user.Firstname,
+                user_lectures_dict.get(user.Id, ""),
+                user_labs_dict.get(user.Id, ""),
+                "N/A",
+                "N/A",
+                "N/A",
+                "N/A",
+                -1,
+                str(class_id),
+                "0",
+                student_id,
+                user.IsLocked,
+            ]
+
     return make_response(json.dumps(studentattempts), HTTPStatus.OK)
 
 @submission_api.route('/GetSubmissionDetails', methods=['GET'])
@@ -557,6 +973,9 @@ def recentsubproject(submission_repo: SubmissionRepository = Provide[Container.s
 @inject
 def get_submission_details(project_repo: ProjectRepository = Provide[Container.project_repo]):
     class_id = int(request.args.get("class_id"))
+    if not current_user_can_view_class_id(class_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
     proj = project_repo.get_current_project_by_class(class_id)
     if proj is None:
         return make_response(["None", "0", "None", "", "", "-1"], HTTPStatus.OK)
@@ -582,10 +1001,8 @@ def get_submission_details(project_repo: ProjectRepository = Provide[Container.p
 @jwt_required()
 @inject
 def submit_grades(project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if not is_staff_user():
-        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
     #spacing issue
-    data = request.get_json()
+    data = request.get_json() or {}
     project_id = data['projectID']
     if not user_can_access_project_id(int(project_id)):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
@@ -599,6 +1016,9 @@ def submit_grades(project_repo: ProjectRepository = Provide[Container.project_re
 @inject
 def getprojectscores(project_repo: ProjectRepository = Provide[Container.project_repo], submission_repo: SubmissionRepository = Provide[Container.submission_repo], user_repo: UserRepository = Provide[Container.user_repo]):
     project_id = str(request.args.get("projectID"))
+    if not user_can_access_project_id(int(project_id)):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
     data = []
     student_scores = submission_repo.get_project_scores(project_id)
     projectname = project_repo.get_selected_project(project_id).Name
@@ -631,7 +1051,7 @@ def log_ui_click():
     checkpoint_id = data.get('checkpoint_id', None)
 
     username = getattr(current_user, 'Username', None) or 'unknown'
-    role = getattr(current_user, 'Role', None) or 0
+    role = current_user_effective_role()
 
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -665,6 +1085,10 @@ def save_grading(submission_repo: SubmissionRepository = Provide[Container.submi
     # get the data from frontend
     input_json = request.get_json()
     submission_id = input_json.get('submissionId')
+    submission = submission_repo.get_submission_by_submission_id(int(submission_id))
+    if not user_can_access_submission(submission):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
     grade = input_json.get('grade')
     scoring_mode = input_json.get('scoringMode')
     error_points = input_json.get('errorPoints')
@@ -698,7 +1122,10 @@ def save_grading(submission_repo: SubmissionRepository = Provide[Container.submi
 @jwt_required()
 @inject
 def get_grading(submission_id, submission_repo: SubmissionRepository = Provide[Container.submission_repo]):
-    
+    submission = submission_repo.get_submission_by_submission_id(int(submission_id))
+    if not user_can_access_submission(submission):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
     # get errors from db
     error_list = submission_repo.get_manual_errors(submission_id)
     
@@ -716,9 +1143,6 @@ def get_grading(submission_id, submission_repo: SubmissionRepository = Provide[C
 @jwt_required()
 @inject
 def export_project_grades(submission_repo: SubmissionRepository = Provide[Container.submission_repo], project_repo: ProjectRepository = Provide[Container.project_repo]):
-    if not is_staff_user():
-        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
-
     project_id = int(request.args.get("project_id"))
     if not user_can_access_project_id(project_id):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)

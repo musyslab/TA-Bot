@@ -16,9 +16,9 @@ from math import ceil
 from dependency_injector.wiring import inject, Provide
 
 from container import Container
-from src.constants import ADMIN_ROLE, TEACHER_ROLE
+from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
 from src.repositories.class_repository import ClassRepository
-from src.repositories.models import Checkpoints, Classes, Projects, Submissions
+from src.repositories.models import Checkpoints, Classes, ClassAssignments, Projects, Submissions, Users
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.database import db
 from src.repositories.submission_repository import SubmissionRepository
@@ -56,31 +56,95 @@ def parse_bool(v) -> bool:
     return s in ("1", "true", "yes", "y", "on")
 
 
+def current_user_id() -> int:
+    return parse_int(getattr(current_user, "Id", 0), 0)
+
+
+def current_user_global_role() -> int:
+    user_id = current_user_id()
+
+    if user_id <= 0:
+        return STUDENT_ROLE
+
+    role_rows = db.session.query(ClassAssignments.Role).filter(
+        ClassAssignments.UserId == user_id
+    ).all()
+
+    roles = []
+    for role_row in role_rows:
+        if hasattr(role_row, "Role"):
+            role_value = role_row.Role
+        elif isinstance(role_row, (tuple, list)):
+            role_value = role_row[0]
+        else:
+            role_value = role_row
+
+        roles.append(parse_int(role_value, STUDENT_ROLE))
+
+    return max([STUDENT_ROLE] + roles)
+
+
 def is_admin_user() -> bool:
-    return int(getattr(current_user, "Role", -1) or -1) == ADMIN_ROLE
+    return current_user_global_role() >= ADMIN_ROLE
 
 
 def is_teacher_user() -> bool:
-    return int(getattr(current_user, "Role", -1) or -1) == TEACHER_ROLE
+    return current_user_global_role() == TEACHER_ROLE
+
+
+def class_assignment_for_user(class_id: int, user_id: int):
+    class_id = parse_int(class_id, 0)
+    user_id = parse_int(user_id, 0)
+
+    if class_id <= 0 or user_id <= 0:
+        return None
+
+    try:
+        return ClassAssignments.query.filter(
+            ClassAssignments.ClassId == class_id,
+            ClassAssignments.UserId == user_id,
+        ).first()
+    except Exception:
+        return None
+
+
+def current_user_assignment_role_for_class(class_id: int) -> int | None:
+    assignment = class_assignment_for_user(class_id, current_user_id())
+
+    if assignment is None:
+        return None
+
+    return parse_int(getattr(assignment, "Role", None), STUDENT_ROLE)
+
+
+def user_id_is_enrolled_in_class(user_id: int, class_id: int) -> bool:
+    return class_assignment_for_user(class_id, user_id) is not None
+
+
+def current_user_is_enrolled_in_class(class_id: int) -> bool:
+    return user_id_is_enrolled_in_class(current_user_id(), class_id)
+
+
+def current_user_has_staff_assignment() -> bool:
+    user_id = current_user_id()
+
+    if user_id <= 0:
+        return False
+
+    try:
+        return (
+            ClassAssignments.query.filter(
+                ClassAssignments.UserId == user_id,
+                ClassAssignments.Role >= TEACHER_ROLE,
+            ).first()
+            is not None
+        )
+    except Exception:
+        return False
 
 
 def is_staff_user() -> bool:
-    return is_admin_user() or is_teacher_user()
-
-
-def teacher_id_is_on_class(teacher_id: int, class_item: Classes) -> bool:
-    if class_item is None or class_item.Tid is None:
-        return False
-
-    teacher_ids = [
-        token
-        for token in "".join(
-            character if character.isdigit() else " "
-            for character in str(class_item.Tid)
-        ).split()
-    ]
-
-    return str(teacher_id) in teacher_ids
+    return current_user_global_role() >= TEACHER_ROLE or current_user_has_staff_assignment()
 
 
 def user_can_access_class_id(class_id: int) -> bool:
@@ -89,14 +153,16 @@ def user_can_access_class_id(class_id: int) -> bool:
     if class_id <= 0:
         return False
 
+    class_item = Classes.query.filter(Classes.Id == class_id).first()
+    if class_item is None:
+        return False
+
     if is_admin_user():
-        return Classes.query.filter(Classes.Id == class_id).first() is not None
+        return True
 
-    if is_teacher_user():
-        class_item = Classes.query.filter(Classes.Id == class_id).first()
-        return teacher_id_is_on_class(int(current_user.Id), class_item)
+    assignment_role = current_user_assignment_role_for_class(class_id)
 
-    return False
+    return assignment_role is not None and assignment_role >= TEACHER_ROLE
 
 
 def normalize_grader_language(language: str, solution_root: str = "") -> str:
@@ -401,22 +467,32 @@ def student_submission_cooldown_response(user_id: int, class_id: int):
 @jwt_required()
 @inject
 def total_students(user_repo: UserRepository = Provide[Container.user_repo]):
-    if not is_staff_user():
-        return make_response({"message": "Access Denied"}, HTTPStatus.UNAUTHORIZED)
-
     class_id = request.args.get("class_id")
+    class_id_int = parse_int(class_id, 0)
 
-    if not user_can_access_class_id(parse_int(class_id, 0)):
+    if class_id_int <= 0:
+        return make_response({"message": "Invalid class_id"}, HTTPStatus.BAD_REQUEST)
+
+    if not user_can_access_class_id(class_id_int):
         return make_response({"message": "Access Denied"}, HTTPStatus.FORBIDDEN)
 
-    users = user_repo.get_all_users_by_cid(class_id)
+    users = (
+        db.session.query(Users)
+        .join(ClassAssignments, ClassAssignments.UserId == Users.Id)
+        .filter(
+            ClassAssignments.ClassId == class_id_int,
+            ClassAssignments.Role == STUDENT_ROLE,
+        )
+        .order_by(Users.Lastname.asc(), Users.Firstname.asc(), Users.Id.asc())
+        .all()
+    )
 
     list_of_user_info = []
 
     for user in users:
         list_of_user_info.append(
             {
-                "name": user.Firstname + " " + user.Lastname,
+                "name": f"{user.Firstname} {user.Lastname}".strip(),
                 "mscsnet": user.Username,
                 "id": user.Id,
             }
@@ -444,12 +520,12 @@ def file_upload(
     if class_id_int <= 0:
         return make_response({"message": "Invalid class_id"}, HTTPStatus.BAD_REQUEST)
 
-    is_staff_upload = is_staff_user()
+    is_staff_upload = user_can_access_class_id(class_id_int)
 
     if "student_id" in request.form and not is_staff_upload:
         return make_response({"message": "Access Denied"}, HTTPStatus.FORBIDDEN)
 
-    if is_staff_upload and not user_can_access_class_id(class_id_int):
+    if not is_staff_upload and not current_user_is_enrolled_in_class(class_id_int):
         return make_response({"message": "Access Denied"}, HTTPStatus.FORBIDDEN)
 
     username = current_user.Username
@@ -482,6 +558,12 @@ def file_upload(
             )
 
         user_id = user_obj.Id
+
+        if not user_id_is_enrolled_in_class(user_id, class_id_int):
+            return make_response(
+                {"message": "Student is not enrolled in this class"},
+                HTTPStatus.FORBIDDEN,
+            )
 
     project = None
 

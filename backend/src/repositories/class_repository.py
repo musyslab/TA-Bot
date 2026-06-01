@@ -1,8 +1,10 @@
 from typing import Dict, List
-from src.repositories.database import db
-from .models import ClassAssignments, Classes, Labs, LectureSections, Users
+
 from sqlalchemy import desc
 
+from src.constants import STUDENT_ROLE
+from src.repositories.database import db
+from .models import ClassAssignments, Classes, Labs, LectureSections
 from ..models.LabJson import LabJson
 from ..models.LectureSectionsJson import LectureSectionsJson
 
@@ -38,16 +40,32 @@ class ClassRepository():
     def get_classes_for_school(self, school_id: int) -> List[Classes]:
         return Classes.query.filter(Classes.SchoolId == school_id).order_by(Classes.Name.asc()).all()
 
-    def create_assignments(self, class_id: int, lab_id: int, user_id: int, lecture_id: int):
+    def create_assignments(
+        self,
+        class_id: int,
+        lab_id: int,
+        user_id: int,
+        lecture_id: int,
+        role: int = STUDENT_ROLE,
+    ):
         """[Creates a new entry in the ClassAssignments table]"""
-        class_assignment = ClassAssignments(ClassId=class_id, LabId=lab_id, UserId=user_id, LectureId=lecture_id)
+        class_assignment = ClassAssignments(
+            ClassId=class_id,
+            LabId=lab_id,
+            UserId=user_id,
+            LectureId=lecture_id,
+            Role=role,
+        )
         db.session.add(class_assignment)
         db.session.commit()
 
     def get_assigned_student_classes(self, user_id: int) -> List[Classes]:
         class_ids = [
             assignment.ClassId
-            for assignment in ClassAssignments.query.filter(ClassAssignments.UserId == user_id).all()
+            for assignment in ClassAssignments.query.filter(
+                ClassAssignments.UserId == user_id,
+                ClassAssignments.Role == STUDENT_ROLE,
+            ).all()
         ]
 
         if not class_ids:
@@ -58,7 +76,7 @@ class ClassRepository():
     def user_is_assigned_to_class(self, user_id: int, class_id: int) -> bool:
         return ClassAssignments.query.filter(
             ClassAssignments.UserId == user_id,
-            ClassAssignments.ClassId == class_id
+            ClassAssignments.ClassId == class_id,
         ).first() is not None
 
     def get_labs(self) -> Dict[int, List[LabJson]]:
@@ -84,18 +102,35 @@ class ClassRepository():
         labs_dict = {}
         for lecture_section in lecture_sections:
             if lecture_section.ClassId in labs_dict:
-                labs_dict[lecture_section.ClassId].append(LectureSectionsJson(lecture_section.Id, lecture_section.Name))
+                labs_dict[lecture_section.ClassId].append(
+                    LectureSectionsJson(lecture_section.Id, lecture_section.Name)
+                )
             else:
-                labs_dict[lecture_section.ClassId] = [LectureSectionsJson(lecture_section.Id, lecture_section.Name)]
+                labs_dict[lecture_section.ClassId] = [
+                    LectureSectionsJson(lecture_section.Id, lecture_section.Name)
+                ]
 
         for lab_id in labs_dict:
             labs_dict[lab_id].sort(key=lambda x: x.Name)
 
         return labs_dict
 
-    def add_class_assignment(self, class_id: int, lab_id: int, lecture_id: int, user_id: int):
+    def add_class_assignment(
+        self,
+        class_id: int,
+        lab_id: int,
+        user_id: int,
+        lecture_id: int,
+        role: int = STUDENT_ROLE,
+    ):
         """[Creates a new entry in the ClassAssignments table]"""
-        class_assignment = ClassAssignments(ClassId=class_id, LabId=lab_id, LectureId=lecture_id, UserId=user_id)
+        class_assignment = ClassAssignments(
+            ClassId=class_id,
+            LabId=lab_id,
+            UserId=user_id,
+            LectureId=lecture_id,
+            Role=role,
+        )
         db.session.add(class_assignment)
         db.session.commit()
         return "ok"
