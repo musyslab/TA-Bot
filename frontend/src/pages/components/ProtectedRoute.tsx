@@ -9,6 +9,12 @@ interface RouteScope {
   classId: string | null
 }
 
+const ACCESS_CHECK_MESSAGE_DELAY_MS = 350
+const ACCESS_CACHE_TTL_MS = 5 * 60 * 1000
+
+const successfulAccessCache = new Map<string, number>()
+const pendingAccessChecks = new Map<string, Promise<void>>()
+
 const getValidStoredToken = (): string | null => {
   const token = localStorage.getItem("AUTOTA_AUTH_TOKEN")
 
@@ -62,14 +68,66 @@ const getAccessCacheKey = (pathname: string): string | null => {
   return `${scope.section}:${scope.schoolId}:${scope.classId || "school"}`
 }
 
+const getSessionAccessCacheKey = (token: string | null, accessCacheKey: string | null): string | null => {
+  if (!token || !accessCacheKey) {
+    return null
+  }
+
+  return `${token}:${accessCacheKey}`
+}
+
+const hasFreshCachedAccess = (sessionAccessCacheKey: string | null): boolean => {
+  if (!sessionAccessCacheKey) {
+    return false
+  }
+
+  const cachedAt = successfulAccessCache.get(sessionAccessCacheKey)
+
+  if (!cachedAt) {
+    return false
+  }
+
+  if (Date.now() - cachedAt > ACCESS_CACHE_TTL_MS) {
+    successfulAccessCache.delete(sessionAccessCacheKey)
+    return false
+  }
+
+  return true
+}
+
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation()
   const token = getValidStoredToken()
   const accessCacheKey = useMemo(() => getAccessCacheKey(location.pathname), [location.pathname])
-  const [isCheckingAccess, setIsCheckingAccess] = useState(Boolean(token && accessCacheKey))
-  const [checkedAccessKey, setCheckedAccessKey] = useState<string | null>(null)
-  const [hasAccess, setHasAccess] = useState(true)
+  const sessionAccessCacheKey = useMemo(
+    () => getSessionAccessCacheKey(token, accessCacheKey),
+    [token, accessCacheKey]
+  )
+
+  const startsWithCachedAccess = hasFreshCachedAccess(sessionAccessCacheKey)
+
+  const [isCheckingAccess, setIsCheckingAccess] = useState(Boolean(token && accessCacheKey && !startsWithCachedAccess))
+  const [showAccessMessage, setShowAccessMessage] = useState(false)
+  const [checkedAccessKey, setCheckedAccessKey] = useState<string | null>(startsWithCachedAccess ? accessCacheKey : null)
+  const [hasAccess, setHasAccess] = useState(!token ? false : startsWithCachedAccess || !accessCacheKey)
   const [kickoutPath, setKickoutPath] = useState("/login")
+
+  useEffect(() => {
+    if (!isCheckingAccess) {
+      setShowAccessMessage(false)
+      return
+    }
+
+    setShowAccessMessage(false)
+
+    const messageDelay = window.setTimeout(() => {
+      setShowAccessMessage(true)
+    }, ACCESS_CHECK_MESSAGE_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(messageDelay)
+    }
+  }, [isCheckingAccess, accessCacheKey])
 
   useEffect(() => {
     let isMounted = true
@@ -84,6 +142,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           setCheckedAccessKey(null)
           setIsCheckingAccess(false)
         }
+
         return
       }
 
@@ -95,10 +154,23 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           setCheckedAccessKey(accessCacheKey)
           setIsCheckingAccess(false)
         }
+
         return
       }
 
-      setIsCheckingAccess(true)
+      if (hasFreshCachedAccess(sessionAccessCacheKey)) {
+        if (isMounted) {
+          setHasAccess(true)
+          setCheckedAccessKey(accessCacheKey)
+          setIsCheckingAccess(false)
+        }
+
+        return
+      }
+
+      if (isMounted) {
+        setIsCheckingAccess(true)
+      }
 
       try {
         const headers = {
@@ -106,14 +178,42 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
         }
         const roleContext = encodeURIComponent(scope.section)
 
-        if (scope.classId) {
-          await axios.get(`${import.meta.env.VITE_API_URL}/class/id/${scope.classId}/access?school_id=${scope.schoolId}&role_context=${roleContext}`, {
-            headers
-          })
+        const accessRequest = async () => {
+          if (scope.classId) {
+            await axios.get(
+              `${import.meta.env.VITE_API_URL}/class/id/${scope.classId}/access?school_id=${scope.schoolId}&role_context=${roleContext}`,
+              { headers }
+            )
+          } else {
+            await axios.get(
+              `${import.meta.env.VITE_API_URL}/class/all?school_id=${scope.schoolId}&role_context=${roleContext}`,
+              { headers }
+            )
+          }
+
+          if (sessionAccessCacheKey) {
+            successfulAccessCache.set(sessionAccessCacheKey, Date.now())
+          }
+        }
+
+        const pendingCheck = sessionAccessCacheKey ? pendingAccessChecks.get(sessionAccessCacheKey) : null
+
+        if (pendingCheck) {
+          await pendingCheck
         } else {
-          await axios.get(`${import.meta.env.VITE_API_URL}/class/all?school_id=${scope.schoolId}&role_context=${roleContext}`, {
-            headers
-          })
+          const newPendingCheck = accessRequest()
+
+          if (sessionAccessCacheKey) {
+            pendingAccessChecks.set(sessionAccessCacheKey, newPendingCheck)
+
+            newPendingCheck.finally(() => {
+              if (pendingAccessChecks.get(sessionAccessCacheKey) === newPendingCheck) {
+                pendingAccessChecks.delete(sessionAccessCacheKey)
+              }
+            })
+          }
+
+          await newPendingCheck
         }
 
         if (isMounted) {
@@ -131,6 +231,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
             setCheckedAccessKey(accessCacheKey)
             setIsCheckingAccess(false)
           }
+
           return
         }
 
@@ -148,7 +249,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     return () => {
       isMounted = false
     }
-  }, [accessCacheKey, location.pathname, token])
+  }, [accessCacheKey, location.pathname, sessionAccessCacheKey, token])
 
   if (!token) {
     clearStoredAuth()
@@ -156,7 +257,15 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   if (isCheckingAccess || (accessCacheKey && checkedAccessKey !== accessCacheKey)) {
-    return <div className="pageMessage">Checking access...</div>
+    if (!showAccessMessage) {
+      return null
+    }
+
+    return (
+      <div className="pageMessage" role="status" aria-live="polite" aria-busy="true">
+        Preparing page...
+      </div>
+    )
   }
 
   if (!hasAccess) {
