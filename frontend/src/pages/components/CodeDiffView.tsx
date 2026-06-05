@@ -101,6 +101,7 @@ type SideBySideRow = {
 }
 
 const MAX_CHANGE_RATIO_FOR_INTRA = 0.7
+const SHARED_SIDE_SCROLLBAR_EPSILON_PX = 1
 
 function diffModeStateLabel(mode: DiffMode) {
     return mode === 'short' ? 'Short' : 'Long'
@@ -372,6 +373,29 @@ export default function DiffView(props: DiffViewProps) {
         })
     }
 
+    const getSideBySideContentWidth = (
+        pane: HTMLDivElement | null,
+        content: HTMLDivElement | null
+    ) => {
+        if (!pane) return 0
+
+        const cellWidths = content
+            ? Array.from(content.querySelectorAll<HTMLElement>('.sbs-cell')).map((el) =>
+                Math.max(el.scrollWidth, el.offsetWidth, el.getBoundingClientRect().width)
+            )
+            : []
+
+        return Math.max(
+            pane.scrollWidth,
+            pane.offsetWidth,
+            pane.getBoundingClientRect().width,
+            content?.scrollWidth ?? 0,
+            content?.offsetWidth ?? 0,
+            content?.getBoundingClientRect().width ?? 0,
+            ...cellWidths
+        )
+    }
+
     const updateSharedSideScrollMetrics = () => {
         const left = sideBySideLeftRef.current
         const right = sideBySideRightRef.current
@@ -379,12 +403,32 @@ export default function DiffView(props: DiffViewProps) {
 
         if (!left || !right || !bar) return
 
-        const maxPaneScrollWidth = Math.max(left.scrollWidth, right.scrollWidth)
-        const paneClientWidth = Math.max(left.clientWidth, right.clientWidth)
+        const maxPaneScrollWidth = Math.max(
+            getSideBySideContentWidth(left, sideBySideLeftContentRef.current),
+            getSideBySideContentWidth(right, sideBySideRightContentRef.current)
+        )
+
+        const paneClientWidth = Math.min(
+            left.clientWidth || Number.POSITIVE_INFINITY,
+            right.clientWidth || Number.POSITIVE_INFINITY
+        )
         const barClientWidth = bar.clientWidth
-        const nextWidth = Math.max(barClientWidth, maxPaneScrollWidth - paneClientWidth + barClientWidth)
+
+        if (!Number.isFinite(paneClientWidth) || paneClientWidth <= 0 || barClientWidth <= 0) return
+
+        const scrollableDistance = Math.max(0, maxPaneScrollWidth - paneClientWidth)
+        const nextWidth = Math.max(
+            barClientWidth + SHARED_SIDE_SCROLLBAR_EPSILON_PX,
+            barClientWidth + scrollableDistance
+        )
 
         bar.style.setProperty('--side-by-side-bar-inner-width', `${nextWidth}px`)
+
+        const inner = bar.firstElementChild as HTMLDivElement | null
+        if (inner) inner.style.width = `${nextWidth}px`
+
+        const maxBarScrollLeft = Math.max(0, nextWidth - barClientWidth)
+        if (bar.scrollLeft > maxBarScrollLeft) bar.scrollLeft = maxBarScrollLeft
     }
 
     useEffect(() => {
@@ -800,32 +844,52 @@ export default function DiffView(props: DiffViewProps) {
         let cancelled = false
         let frame1 = 0
         let frame2 = 0
+        const timeouts: number[] = []
 
         const refreshMetrics = () => {
             if (cancelled) return
             updateSharedSideScrollMetrics()
         }
 
-        // Measure immediately after commit, then again after layout/paint settles.
         refreshMetrics()
+
         frame1 = requestAnimationFrame(() => {
             refreshMetrics()
-            frame2 = requestAnimationFrame(refreshMetrics)
+
+            frame2 = requestAnimationFrame(() => {
+                refreshMetrics()
+            })
+        })
+
+        // The side-by-side layout can finish sizing after async data, fonts, and parent panels settle.
+        // Rechecking a few times prevents the shared bar from staying at its initial no-overflow width.
+        ;[0, 50, 150, 500].forEach((delay) => {
+            timeouts.push(window.setTimeout(refreshMetrics, delay))
         })
 
         const resizeObserver =
             typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refreshMetrics) : null
 
-        const observedEls = [
+        ;[
             sideBySideLeftRef.current,
             sideBySideRightRef.current,
             sideBySideBarRef.current,
             sideBySideLeftContentRef.current,
             sideBySideRightContentRef.current,
-        ]
-
-        observedEls.forEach((el) => {
+            sideBySideBarRef.current?.parentElement ?? null,
+            sideBySideLeftRef.current?.closest('.diff-code') ?? null,
+            sideBySideLeftRef.current?.closest('.diff-pane') ?? null,
+        ].forEach((el) => {
             if (el && resizeObserver) resizeObserver.observe(el)
+        })
+
+        const mutationObserver =
+            typeof MutationObserver !== 'undefined' ? new MutationObserver(refreshMetrics) : null
+
+        ;[sideBySideLeftContentRef.current, sideBySideRightContentRef.current].forEach((el) => {
+            if (el && mutationObserver) {
+                mutationObserver.observe(el, { childList: true, subtree: true, characterData: true })
+            }
         })
 
         window.addEventListener('resize', refreshMetrics)
@@ -834,7 +898,9 @@ export default function DiffView(props: DiffViewProps) {
             cancelled = true
             cancelAnimationFrame(frame1)
             cancelAnimationFrame(frame2)
+            timeouts.forEach((timeout) => window.clearTimeout(timeout))
             resizeObserver?.disconnect()
+            mutationObserver?.disconnect()
             window.removeEventListener('resize', refreshMetrics)
         }
     }, [diffLayout, selectedDiffId, selectedDiffText, intraEnabled, sideBySideRows.length])
