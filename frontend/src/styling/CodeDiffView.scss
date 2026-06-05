@@ -747,8 +747,10 @@
             }
 
             .sbs-pane-scroll {
-                overflow-x: auto;
+                overflow-x: scroll;
                 overflow-y: hidden;
+                min-width: 0;
+                scrollbar-gutter: stable;
             }
 
             .sbs-pane-content {
@@ -760,9 +762,10 @@
             .diff-side-by-side-bar {
                 --side-by-side-bar-inner-width: 100%;
                 width: 100%;
-                overflow-x: auto;
+                overflow-x: scroll;
                 overflow-y: hidden;
                 margin-top: 0.35rem;
+                scrollbar-gutter: stable;
             }
 
             .diff-side-by-side-bar-inner {

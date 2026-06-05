@@ -1,5 +1,5 @@
 // frontend/src/pages/components/CodeDiffView.tsx
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { diffChars } from 'diff'
 import '../../styling/CodeDiffView.scss'
@@ -284,6 +284,8 @@ export default function DiffView(props: DiffViewProps) {
     const sideBySideLeftRef = useRef<HTMLDivElement | null>(null)
     const sideBySideRightRef = useRef<HTMLDivElement | null>(null)
     const sideBySideBarRef = useRef<HTMLDivElement | null>(null)
+    const sideBySideLeftContentRef = useRef<HTMLDivElement | null>(null)
+    const sideBySideRightContentRef = useRef<HTMLDivElement | null>(null)
     const syncingSideScrollRef = useRef(false)
 
     const copyBlockHandlers = disableCopy
@@ -791,21 +793,51 @@ export default function DiffView(props: DiffViewProps) {
         return rows
     }, [selectedDiffText, intraEnabled])
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (diffLayout !== 'side-by-side') return
+        if (sideBySideRows.length === 0) return
 
-        const frame = requestAnimationFrame(() => {
+        let cancelled = false
+        let frame1 = 0
+        let frame2 = 0
+
+        const refreshMetrics = () => {
+            if (cancelled) return
             updateSharedSideScrollMetrics()
+        }
+
+        // Measure immediately after commit, then again after layout/paint settles.
+        refreshMetrics()
+        frame1 = requestAnimationFrame(() => {
+            refreshMetrics()
+            frame2 = requestAnimationFrame(refreshMetrics)
         })
 
-        const handleResize = () => updateSharedSideScrollMetrics()
-        window.addEventListener('resize', handleResize)
+        const resizeObserver =
+            typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refreshMetrics) : null
+
+        const observedEls = [
+            sideBySideLeftRef.current,
+            sideBySideRightRef.current,
+            sideBySideBarRef.current,
+            sideBySideLeftContentRef.current,
+            sideBySideRightContentRef.current,
+        ]
+
+        observedEls.forEach((el) => {
+            if (el && resizeObserver) resizeObserver.observe(el)
+        })
+
+        window.addEventListener('resize', refreshMetrics)
 
         return () => {
-            cancelAnimationFrame(frame)
-            window.removeEventListener('resize', handleResize)
+            cancelled = true
+            cancelAnimationFrame(frame1)
+            cancelAnimationFrame(frame2)
+            resizeObserver?.disconnect()
+            window.removeEventListener('resize', refreshMetrics)
         }
-    }, [diffLayout, sideBySideRows])
+    }, [diffLayout, selectedDiffId, selectedDiffText, intraEnabled, sideBySideRows.length])
 
     const selectedCode = useMemo(() => {
         if (codeFiles.length === 0) return null
@@ -940,7 +972,7 @@ export default function DiffView(props: DiffViewProps) {
                             ref={sideBySideLeftRef}
                             onScroll={() => syncSideBySideScroll('left')}
                         >
-                            <div className="sbs-pane-content">
+                            <div className="sbs-pane-content" ref={sideBySideLeftContentRef}>
                                 {sideBySideRows.map((row) => (
                                     <div key={`left-${row.key}`} className={`diff-line sbs-cell ${row.leftKind}`}>
                                         {renderSideBySideCell(row.leftText, row.leftKind, row.leftSegs)}
@@ -956,7 +988,7 @@ export default function DiffView(props: DiffViewProps) {
                             ref={sideBySideRightRef}
                             onScroll={() => syncSideBySideScroll('right')}
                         >
-                            <div className="sbs-pane-content">
+                            <div className="sbs-pane-content" ref={sideBySideRightContentRef}>
                                 {sideBySideRows.map((row) => (
                                     <div key={`right-${row.key}`} className={`diff-line sbs-cell ${row.rightKind}`}>
                                         {renderSideBySideCell(row.rightText, row.rightKind, row.rightSegs)}
