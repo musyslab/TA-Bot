@@ -1,9 +1,9 @@
 import json
 import os
 import re
-import sys
 from datetime import datetime
-from typing import Any, Dict, List, Set
+from typing import List, Set
+
 import requests
 from flask import Blueprint, current_app, jsonify, make_response, request
 from flask_jwt_extended import current_user, jwt_required
@@ -13,92 +13,127 @@ from src.repositories.submission_repository import SubmissionRepository
 
 ai_api = Blueprint("ai_api", __name__)
 
-LLM_URL = os.getenv("LLM_URL", "http://bim.cs.mu.edu:8000/v1/chat/completions")
-LLM_MODEL = os.getenv("LLM_MODEL", "google/gemma-3-4b-it")
+LLM_URL = os.getenv("LLM_URL", "").strip()
+LLM_MODEL = os.getenv("LLM_MODEL", "").strip()
 
 AI_CLICKS_LOG = "/tabot-files/project-files/ai_clicks.log"
 
-# Keep this in sync with AdminGrading.tsx
-ERROR_DEFS = [
+GRADING_ERROR_DEFS = [
     {
         "id": "MISSPELL",
-        "label": "Spelling or word substitution error",
-        "description": "A word or short phrase is wrong compared to expected output (including valid English words used incorrectly, missing/extra letters, or wrong small words) when the rest of the line is otherwise correct.",
-    },
-    {
-        "id": "FORMAT",
-        "label": "Formatting mismatch",
-        "description": "Correct content but incorrect formatting (spacing/newlines/case/spelling/precision).",
+        "label": "Wrong output text: spelling or wording",
+        "description": "Use when the output is mostly correct but a word, phrase, spelling, or wording choice is wrong.",
+        "points": 10,
     },
     {
         "id": "CONTENT",
-        "label": "Missing or extra required content",
-        "description": "Required value/line is missing, or additional unexpected value/line is produced.",
+        "label": "Wrong output content: missing/extra/incorrect",
+        "description": "Use when required output is missing, extra output is printed, or the produced value/text is substantively wrong.",
+        "points": 20,
+    },
+    {
+        "id": "INPUT",
+        "label": "Wrong input handling or prompt",
+        "description": "Use when the program reads the wrong number of inputs, reads them in the wrong place, parses the wrong source, or prints an incorrect prompt.",
+        "points": 15,
     },
     {
         "id": "ORDER",
-        "label": "Order mismatch",
-        "description": "Reads inputs or prints outputs in the wrong order relative to the required sequence.",
+        "label": "Wrong order of input, processing, or output",
+        "description": "Use when the right pieces are present but are read, processed, or printed in the wrong sequence.",
+        "points": 15,
     },
     {
         "id": "INIT_STATE",
-        "label": "Incorrect initialization",
-        "description": "Uses uninitialized values or starts with the wrong initial state.",
+        "label": "Wrong initial value or missing initialization",
+        "description": "Use when a variable, accumulator, flag, list, or object starts with the wrong initial value or is not initialized before use.",
+        "points": 20,
     },
     {
         "id": "STATE_MISUSE",
-        "label": "Incorrect variable or state use",
-        "description": "Wrong variable used, wrong type behavior (truncation), overwritten state, or flag not managed correctly.",
+        "label": "Wrong variable updated or value overwritten",
+        "description": "Use when the code updates the wrong variable, overwrites a needed value, fails to update state, or reuses stale state.",
+        "points": 15,
+    },
+    {
+        "id": "TYPE_CONVERSION",
+        "label": "Wrong data type, parsing, or conversion",
+        "description": "Use when strings, numbers, booleans, characters, or casts/conversions are handled incorrectly.",
+        "points": 15,
     },
     {
         "id": "COMPUTE",
-        "label": "Incorrect computation",
-        "description": "Wrong formula, precedence, numeric operation, or derived value.",
+        "label": "Wrong calculation: formula, math, or rounding",
+        "description": "Use when the formula, arithmetic, operator, precedence, rounding method, or derived numeric value is wrong.",
+        "points": 20,
     },
     {
         "id": "CONDITION",
-        "label": "Incorrect condition logic",
-        "description": "Incorrect comparison, boundary, compound logic, or missing edge case handling.",
+        "label": "Wrong condition, comparison, or boundary",
+        "description": "Use when a comparison, boolean expression, boundary case, inclusive/exclusive check, or compound condition is wrong.",
+        "points": 15,
     },
     {
         "id": "BRANCHING",
-        "label": "Incorrect branching structure",
-        "description": "Wrong if/elif/else structure (misbound else), missing default case, or missing break in selection-like logic.",
+        "label": "Wrong if/else path or case selected",
+        "description": "Use when the if/elif/else, switch/case, or default-case structure sends execution down the wrong path.",
+        "points": 15,
     },
     {
         "id": "LOOP",
-        "label": "Incorrect loop logic",
-        "description": "Wrong bounds/termination, update/control error, off-by-one, wrong nesting, or accumulation error.",
+        "label": "Wrong loop range, count, or update",
+        "description": "Use when a loop starts/stops at the wrong time, skips/repeats items, has an off-by-one error, or updates the loop variable incorrectly.",
+        "points": 20,
     },
     {
         "id": "INDEXING",
-        "label": "Incorrect indexing or collection setup",
-        "description": "Out-of-bounds, wrong base/range, or incorrect array/string/list setup (size or contents).",
+        "label": "Wrong list/string index or collection access",
+        "description": "Use when list/string/array indexes, keys, append/access operations, ranges, or collection setup are wrong.",
+        "points": 20,
     },
     {
         "id": "FUNCTIONS",
-        "label": "Incorrect function behavior or use",
-        "description": "Wrong return behavior (missing/ignored/wrong type) or incorrect function use (scope/order/unnecessary re-calls).",
+        "label": "Wrong function parameters, return, or call",
+        "description": "Use when a function has the wrong parameters, return value, call order, scope, side effect, or missing return.",
+        "points": 15,
+    },
+    {
+        "id": "EDGE_CASE",
+        "label": "Missing edge case or special-case handling",
+        "description": "Use when the general approach works but fails for empty input, zero, one item, negatives, ties, limits, or other edge cases.",
+        "points": 15,
     },
     {
         "id": "COMPILE",
-        "label": "Program did not compile",
-        "description": "Code fails to compile or run due to syntax errors, missing imports/includes, or build/runtime errors that prevent execution.",
+        "label": "Syntax error, crash, or infinite loop",
+        "description": "Use when syntax, import, build, uncaught exception, infinite crash loop, or runtime error prevents normal completion.",
+        "points": 60,
     },
 ]
 
-ALLOWED_IDS: Set[str] = {e["id"] for e in ERROR_DEFS}
+ERROR_DEFS = GRADING_ERROR_DEFS
+
+GRADING_DEFAULT_DEFS_MAP = {
+    e["id"]: {
+        "label": e.get("label", e["id"]),
+        "description": e.get("description", ""),
+        "points": int(e.get("points", 0) or 0),
+    }
+    for e in GRADING_ERROR_DEFS
+}
+
+ALLOWED_IDS: Set[str] = {e["id"] for e in GRADING_ERROR_DEFS}
+ID_PATTERN = re.compile(r"\b(" + "|".join(re.escape(e["id"]) for e in GRADING_ERROR_DEFS) + r")\b")
 
 
 def truncate_text(s: str, limit: int) -> str:
-    s = s or ""
+    s = (s or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if len(s) <= limit:
         return s
     return s[:limit] + "\n...[truncated]..."
 
 
 def one_line(s: str) -> str:
-    # Preserve as a single log line.
     return (s or "").replace("\r", "\\r").replace("\n", "\\n")
 
 
@@ -110,8 +145,8 @@ def log_ai_click(submission_id: int, prompt: str, output: str) -> None:
 
         os.makedirs(os.path.dirname(AI_CLICKS_LOG), exist_ok=True)
 
-        prompt_safe = one_line(truncate_text(prompt, 4000))
-        output_safe = one_line(truncate_text(output, 2000))
+        prompt_safe = one_line(truncate_text(prompt, 2500))
+        output_safe = one_line(truncate_text(output, 1000))
 
         line = (
             f"{ts} | user:{username} | role:{role} | submission:{int(submission_id)}"
@@ -121,110 +156,225 @@ def log_ai_click(submission_id: int, prompt: str, output: str) -> None:
         with open(AI_CLICKS_LOG, "a", encoding="utf-8") as f:
             f.write(line)
     except Exception:
-        # Logging should never break grading suggestions.
         pass
 
 
+def public_error_defs() -> List[dict]:
+    return [
+        {
+            "id": str(e.get("id", "")),
+            "label": str(e.get("label", e.get("id", ""))),
+            "description": str(e.get("description", "")),
+            "points": int(e.get("points", 0) or 0),
+        }
+        for e in GRADING_ERROR_DEFS
+    ]
+
+
+@ai_api.route("/grading-error-defs", methods=["GET"])
+@jwt_required()
+def grading_error_defs():
+    return jsonify({"success": True, "errorDefs": public_error_defs()})
+
+
 def build_allowed_list_text() -> str:
-    # Compact and stable formatting helps the model stay constrained.
-    lines: List[str] = []
-    for e in ERROR_DEFS:
-        lines.append(f'{e["id"]}: {e["label"]} - {e["description"]}')
-    return "\n".join(lines)
+    # Keep the model context small for 4B models.
+    # The model only needs IDs and self-contained titles; full descriptions are still
+    # returned by /grading-error-defs for the human-facing grading UI.
+    return "; ".join(
+        f'{e["id"]}={e["label"]}'
+        for e in GRADING_ERROR_DEFS
+    )
 
 
 def build_prompt(selected_code: str, diff_long: str) -> str:
-    allowed = build_allowed_list_text()
-    selected_code = truncate_text(selected_code, 2000)
-    diff_long = truncate_text(diff_long, 4000)
+    selected_code = truncate_text(selected_code, 900)
+    diff_long = truncate_text(diff_long, 1500)
 
-    return f"""You are helping a human TA label likely grading mistakes.
+    return f"""Task: choose the clearest grading categories for the selected code.
+Return only JSON, example: [\"FORMAT\",\"MISSPELL\",\"CONTENT\"]
+Use 3 IDs from this list and do not invent IDs: {build_allowed_list_text()}
 
-Return ONLY a JSON array of 3 strings, each string must be one valid errorId from the Allowed list.
-No extra keys, no explanations, no markdown, no surrounding text.
-
-Choose the 3 most likely errorIds based on:
-1) Selected source lines
-2) Output diffs from failing tests (unified diff where '-' is student output and '+' is expected output)
-
-Prefer MISSPELL when the difference is a small typo (few characters or a tiny word change like 'of' vs 'on').
-Prefer FORMAT when the difference is mostly spacing, newlines, capitalization, or punctuation.
-
-Allowed errorIds (id: label - description):
-{allowed}
-
-Selected source lines:
-<<<CODE
+CODE:
 {selected_code}
-CODE
 
-Failing output diffs (may be truncated):
-<<<DIFF
+DIFF (- student, + expected):
 {diff_long}
-DIFF
 """
 
 
-def extract_json_array(text: str) -> List[str]:
-    """
-    Try very hard to get a JSON array of strings out of the model output.
-    Accepts exact JSON or "JSON inside text" fallback.
-    """
+def extract_candidate_ids(text: str) -> List[str]:
     if not text:
         return []
 
     text = text.strip()
+    candidates: List[str] = []
 
-    # 1) Direct JSON parse
     try:
         obj = json.loads(text)
         if isinstance(obj, list):
-            return [str(x) for x in obj]
+            candidates.extend(str(x).strip() for x in obj)
     except Exception:
         pass
 
-    # 2) Find first [...] block
-    m = re.search(r"\[[\s\S]*?\]", text)
-    if not m:
-        return []
-    block = m.group(0)
+    if not candidates:
+        match = re.search(r"\[[\s\S]*?\]", text)
+        if match:
+            block = match.group(0)
+            try:
+                obj = json.loads(block)
+                if isinstance(obj, list):
+                    candidates.extend(str(x).strip() for x in obj)
+            except Exception:
+                candidates.extend(p.strip().strip("\"'") for p in block[1:-1].split(","))
 
-    # 2a) Try strict JSON inside the brackets
-    try:
-        obj = json.loads(block)
-        if isinstance(obj, list):
-            return [str(x) for x in obj]
-    except Exception:
-        pass
+    if not candidates:
+        candidates.extend(ID_PATTERN.findall(text.upper()))
 
-    # 2b) Tolerant parse: allow [MISSPELL, FORMAT, CONTENT] (no quotes)
-    inner = block[1:-1].strip()
-    if not inner:
-        return []
-    parts = [p.strip() for p in inner.split(",")]
-    # Strip optional quotes if the model mixed formats
-    parts = [p.strip("\"'") for p in parts if p.strip("\"'").strip()]
-    return parts
+    return candidates
 
 
 def sanitize_suggestions(raw_ids: List[str]) -> List[str]:
     clean: List[str] = []
     seen = set()
     for rid in raw_ids:
-        rid = (rid or "").strip()
+        rid = (rid or "").strip().upper()
         if rid in ALLOWED_IDS and rid not in seen:
             clean.append(rid)
             seen.add(rid)
         if len(clean) >= 3:
             break
-    return clean[:3]
+    return clean
 
 
-def call_llm(prompt: str, temperature: float, max_tokens: int = 120) -> str:
+def parse_diff_pairs(diff_long: str) -> List[tuple[str, str]]:
+    minus_lines: List[str] = []
+    plus_lines: List[str] = []
+
+    for raw in (diff_long or "").splitlines():
+        if raw.startswith("---") or raw.startswith("+++") or raw.startswith("@@"):
+            continue
+        if raw.startswith("-"):
+            minus_lines.append(raw[1:].strip())
+        elif raw.startswith("+"):
+            plus_lines.append(raw[1:].strip())
+
+    return list(zip(minus_lines, plus_lines))
+
+
+def compact_alnum(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def compact_space(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def looks_like_small_word_change(a: str, b: str) -> bool:
+    aw = re.findall(r"[A-Za-z]+", a or "")
+    bw = re.findall(r"[A-Za-z]+", b or "")
+    if not aw or not bw or abs(len(aw) - len(bw)) > 2:
+        return False
+
+    changed = 0
+    for left, right in zip(aw, bw):
+        if left.lower() != right.lower():
+            changed += 1
+            if abs(len(left) - len(right)) > 4:
+                return False
+    changed += abs(len(aw) - len(bw))
+    return 0 < changed <= 3
+
+
+def heuristic_suggestions(selected_code: str, diff_long: str) -> List[str]:
+    text = f"{selected_code}\n{diff_long}".lower()
+    pairs = parse_diff_pairs(diff_long)
+    guesses: List[str] = []
+
+    def add(error_id: str) -> None:
+        if error_id in ALLOWED_IDS and error_id not in guesses:
+            guesses.append(error_id)
+
+    if re.search(r"traceback|syntaxerror|nameerror|indexerror|exception|compile|runtime error|crash", text):
+        add("COMPILE")
+    if re.search(r"eoferror|no input|stdin|scanner|readline|nextint|nextline|input\(|prompt", text):
+        add("INPUT")
+    if re.search(r"valueerror|typeerror|numberformatexception|invalid literal|parseint|parsefloat|int\(|float\(|str\(", text):
+        add("TYPE_CONVERSION")
+
+    minus_norm: List[str] = []
+    plus_norm: List[str] = []
+    for raw in (diff_long or "").splitlines():
+        if raw.startswith("---") or raw.startswith("+++") or raw.startswith("@@"):
+            continue
+        if raw.startswith("-"):
+            minus_norm.append(compact_space(raw[1:]))
+        elif raw.startswith("+"):
+            plus_norm.append(compact_space(raw[1:]))
+
+    if (
+        len(minus_norm) > 1
+        and len(minus_norm) == len(plus_norm)
+        and minus_norm != plus_norm
+        and sorted(minus_norm) == sorted(plus_norm)
+    ):
+        add("ORDER")
+
+    for student, expected in pairs:
+        if not student and expected:
+            add("CONTENT")
+        elif student and not expected:
+            add("CONTENT")
+        elif compact_alnum(student) == compact_alnum(expected) and student != expected:
+            add("FORMAT")
+        elif compact_space(student) != compact_space(expected) and looks_like_small_word_change(student, expected):
+            add("MISSPELL")
+
+    if re.search(r"precent|precentage|mispell|speeling|recieve|occured|typo|spelling", text):
+        add("MISSPELL")
+    if re.search(r"spacing|newline|line break|format|capital|case|punctuation|precision|decimal|rounding", text):
+        add("FORMAT")
+    if re.search(r"\d+(?:\.\d+)?", diff_long) and pairs:
+        add("COMPUTE")
+    if re.search(r"edge|boundary|empty|zero|negative|tie|minimum|maximum|first|last|one item|single item", text):
+        add("EDGE_CASE")
+    if re.search(r"\b(init|initial|initialize|default|start value|starting value)\b", text):
+        add("INIT_STATE")
+    if re.search(r"\b(for|while)\b", selected_code):
+        add("LOOP")
+    if re.search(r"\b(if|elif|else|switch|case)\b", selected_code):
+        add("CONDITION")
+    if re.search(r"\b(elif|else|switch|case|default)\b", selected_code):
+        add("BRANCHING")
+    if re.search(r"\bdef\b|\breturn\b|\bfunction\b|\bvoid\b|\bpublic\s+static\b", selected_code):
+        add("FUNCTIONS")
+    if re.search(r"\[[^\]]*\]|\.append\(|\.get\(|\.add\(|\.length\b|len\(", selected_code):
+        add("INDEXING")
+    if re.search(r"=\s*[^=]", selected_code) and any(token in selected_code for token in ["total", "sum", "count", "flag", "result", "answer"]):
+        add("STATE_MISUSE")
+
+    if not guesses:
+        add("CONTENT")
+
+    return guesses[:3]
+
+
+def merge_suggestions(primary: List[str], fallback: List[str]) -> List[str]:
+    merged: List[str] = []
+    for error_id in [*primary, *fallback]:
+        error_id = (error_id or "").strip().upper()
+        if error_id in ALLOWED_IDS and error_id not in merged:
+            merged.append(error_id)
+        if len(merged) >= 3:
+            break
+    return merged
+
+
+def call_llm(prompt: str, temperature: float, max_tokens: int = 60) -> str:
     payload = {
         "model": LLM_MODEL,
         "messages": [
-            {"role": "system", "content": "You must follow the user's response format exactly."},
+            {"role": "system", "content": "Return only the requested JSON array. No explanations."},
             {"role": "user", "content": prompt},
         ],
         "temperature": float(temperature),
@@ -235,12 +385,11 @@ def call_llm(prompt: str, temperature: float, max_tokens: int = 120) -> str:
         LLM_URL,
         headers={"Content-Type": "application/json"},
         data=json.dumps(payload),
-        timeout=15,
+        timeout=20,
     )
     r.raise_for_status()
     data = r.json()
 
-    # OpenAI-style response shape
     try:
         return (data.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
     except Exception:
@@ -250,10 +399,6 @@ def call_llm(prompt: str, temperature: float, max_tokens: int = 120) -> str:
 def build_diff_long_for_testcase(
     submission_id: int, testcase_name: str, submission_repo: SubmissionRepository
 ) -> str:
-    """
-    Pull the failing longDiff block ONLY for the requested testcase name.
-    Returns "" if not found or unavailable.
-    """
     submission = submission_repo.get_submission_by_submission_id(int(submission_id))
     path = getattr(submission, "OutputFilepath", "") if submission else ""
     if not path or not os.path.exists(path):
@@ -277,8 +422,7 @@ def build_diff_long_for_testcase(
                 continue
             if bool(r.get("passed", False)):
                 return ""
-            long_diff = str(r.get("longDiff", "") or "")
-            return long_diff
+            return str(r.get("longDiff", "") or "")
         except Exception:
             continue
 
@@ -291,10 +435,6 @@ def build_diff_long_for_testcase(
 def grading_suggestions(
     submission_repo: SubmissionRepository = Provide[Container.submission_repo],
 ):
-    # Debug toggles
-    DEBUG_PRINT_PROMPT = False
-    DEBUG_PRINT_LLM_OUTPUT = False
-
     data = request.get_json(silent=True) or {}
     submission_id = int(data.get("submissionId", -1) or -1)
     selected_code = str(data.get("selectedCode", "") or "").strip()
@@ -304,67 +444,24 @@ def grading_suggestions(
     if submission_id < 0 or not selected_code:
         return jsonify({"suggestions": []})
 
-    # Prefer the diff from the UI-selected testcase. If UI did not send it, fetch by testcaseName.
     diff_long = testcase_long_diff
     if not diff_long and testcase_name:
         diff_long = build_diff_long_for_testcase(submission_id, testcase_name, submission_repo)
 
-    # 1) First attempt (low temperature)
     prompt = build_prompt(selected_code, diff_long)
-
-    # Debug: print the exact prompt being sent to the LLM
-    if DEBUG_PRINT_PROMPT:
-        try:
-            print("\n===== AI GRADING PROMPT (about to send) =====\n", file=sys.stderr)
-            print(prompt, file=sys.stderr)
-            print("\n===== END AI GRADING PROMPT =====\n", file=sys.stderr)
-        except Exception:
-            pass
+    llm_ids: List[str] = []
+    llm_output = ""
 
     try:
-        out = call_llm(prompt, temperature=0.2, max_tokens=120)
-        log_ai_click(submission_id, prompt, out)
-
-        # Debug: log raw model output and parsing pipeline
-        if DEBUG_PRINT_LLM_OUTPUT:
-            try:
-                current_app.logger.info(
-                    "[ai_suggestions] raw LLM output (submissionId=%s testcase=%r): %r",
-                    submission_id,
-                    testcase_name,
-                    out,
-                )
-            except Exception:
-                pass
-
-        raw_ids = extract_json_array(out)
-
-        if DEBUG_PRINT_LLM_OUTPUT:
-            try:
-                current_app.logger.info(
-                    "[ai_suggestions] extracted array: %r",
-                    raw_ids,
-                )
-            except Exception:
-                pass
-
-        ids = sanitize_suggestions(raw_ids)
-
-        if DEBUG_PRINT_LLM_OUTPUT:
-            try:
-                current_app.logger.info(
-                    "[ai_suggestions] sanitized suggestions: %r",
-                    ids,
-                )
-            except Exception:
-                pass
-
+        llm_output = call_llm(prompt, temperature=0.1, max_tokens=60)
+        llm_ids = sanitize_suggestions(extract_candidate_ids(llm_output))
     except Exception as e:
         current_app.logger.warning(f"[ai_suggestions] LLM call failed: {e}")
-        log_ai_click(submission_id, prompt, f"ERROR: {e}")
-        ids = []
+        llm_output = f"ERROR: {e}"
 
-    if len(ids) < 3:
-        ids = []
+    fallback_ids = heuristic_suggestions(selected_code, diff_long)
+    ids = merge_suggestions(llm_ids, fallback_ids)
+
+    log_ai_click(submission_id, prompt, llm_output or json.dumps({"fallback": fallback_ids}))
 
     return make_response(json.dumps({"suggestions": ids}), 200, {"Content-Type": "application/json"})
