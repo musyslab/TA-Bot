@@ -15,6 +15,7 @@ from src.ai_suggestions import ai_api
 from src.classes import class_api
 from src.error import error_api
 from src.schools import school_api
+from src.classic_view import classic_view_api
 from src.jwt_manager import jwt
 from src import classes, auth, projects, submission, upload, ai_suggestions, schools
 from src.services import timeout_service
@@ -113,6 +114,7 @@ def create_app():
     app.register_blueprint(class_api, url_prefix="/api/class")
     app.register_blueprint(error_api, url_prefix="/api/error")
     app.register_blueprint(school_api, url_prefix="/api/schools")
+    app.register_blueprint(classic_view_api, url_prefix="/api/classic-view")
 
     jwt.init_app(app)
     db.init_app(app)
