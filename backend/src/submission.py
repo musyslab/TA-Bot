@@ -25,12 +25,32 @@ from urllib.parse import unquote
 import csv
 from io import StringIO
 from src.ai_suggestions import GRADING_DEFAULT_DEFS_MAP
-from src.repositories.models import Checkpoints, ClassAssignments, Classes, Projects, StudentUploadState, Submissions, Testcases
+from src.repositories.models import (
+    Checkpoints,
+    ClassAssignments,
+    Classes,
+    Modules,
+    Projects,
+    StudentCooldownSkips,
+    StudentStarAwards,
+    StudentStarBalance,
+    StudentStarSpending,
+    StudentUploadState,
+    Submissions,
+    Testcases,
+)
 from src.repositories.database import db
 
 ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
 submission_api = Blueprint('submission_api', __name__)
+
+SUBMISSION_COOLDOWN_SECONDS = 300
+SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
+CHECKPOINT_COMPLETION_STARS = 1
+MAIN_PROJECT_COMPLETION_STARS = 3
+EARLY_START_MULTIPLIER = 2
+
 
 def parse_int(v, default: int = -1) -> int:
     try:
@@ -265,6 +285,292 @@ def seconds_until(value: datetime | None) -> int:
     return max(0, int((value - current_utc_datetime()).total_seconds() + 0.999))
 
 
+def ensure_incentive_tables():
+    for model in (StudentStarBalance, StudentStarAwards, StudentStarSpending, StudentCooldownSkips):
+        try:
+            model.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            pass
+
+
+def get_star_balance(user_id: int, class_id: int) -> int:
+    ensure_incentive_tables()
+    row = StudentStarBalance.query.filter(
+        StudentStarBalance.UserId == int(user_id),
+        StudentStarBalance.ClassId == int(class_id),
+    ).first()
+
+    return max(0, parse_int(getattr(row, "Stars", 0) if row else 0, 0))
+
+
+def set_star_balance(user_id: int, class_id: int, stars: int) -> int:
+    ensure_incentive_tables()
+    row = StudentStarBalance.query.filter(
+        StudentStarBalance.UserId == int(user_id),
+        StudentStarBalance.ClassId == int(class_id),
+    ).first()
+
+    if row is None:
+        row = StudentStarBalance(
+            UserId=int(user_id),
+            ClassId=int(class_id),
+            Stars=0,
+            UpdatedAt=current_utc_datetime(),
+        )
+        db.session.add(row)
+
+    row.Stars = max(0, parse_int(stars, 0))
+    row.UpdatedAt = current_utc_datetime()
+    db.session.commit()
+
+    return int(row.Stars or 0)
+
+
+def spend_stars(user_id: int, class_id: int, project_id: int | None, checkpoint_id: int | None, spend_type: str, cost: int) -> tuple[bool, int]:
+    ensure_incentive_tables()
+    cost = max(0, parse_int(cost, 0))
+    balance = get_star_balance(user_id, class_id)
+
+    if balance < cost:
+        return False, balance
+
+    new_balance = set_star_balance(user_id, class_id, balance - cost)
+    db.session.add(StudentStarSpending(
+        UserId=int(user_id),
+        ClassId=int(class_id),
+        ProjectId=(int(project_id) if project_id else None),
+        CheckpointId=int(checkpoint_id or 0),
+        SpendType=str(spend_type),
+        Stars=int(cost),
+        CreatedAt=current_utc_datetime(),
+    ))
+    db.session.commit()
+
+    return True, int(new_balance)
+
+
+def project_window(project) -> tuple[datetime | None, datetime | None]:
+    module = getattr(project, "Module", None)
+
+    if module is None:
+        module_id = parse_int(getattr(project, "ModuleId", 0), 0)
+        if module_id > 0:
+            try:
+                module = Modules.query.filter(Modules.Id == module_id).first()
+            except Exception:
+                module = None
+
+    if module is None:
+        return None, None
+
+    start = parse_cooldown_lifted_at(getattr(module, "Start", None))
+    end = parse_cooldown_lifted_at(getattr(module, "End", None))
+
+    return start, end
+
+
+def early_start_deadline_for_project(project) -> datetime | None:
+    start, end = project_window(project)
+
+    if start is None or end is None or end <= start:
+        return None
+
+    return start + ((end - start) / 2)
+
+
+def assignment_started_early(
+    user_id: int,
+    project,
+    checkpoint: bool,
+    checkpoint_id: int,
+    early_deadline: datetime | None,
+) -> bool:
+    if project is None or early_deadline is None:
+        return False
+
+    query = Submissions.query.filter(
+        Submissions.User == int(user_id),
+        Submissions.Project == int(project.Id),
+        Submissions.IsCheckpoint == bool(checkpoint),
+    )
+
+    if checkpoint:
+        query = query.filter(Submissions.CheckpointId == int(checkpoint_id or 0))
+    else:
+        query = query.filter(Submissions.CheckpointId.is_(None))
+
+    rows = query.order_by(Submissions.Time.asc()).all()
+    first_started_at = None
+
+    for row in rows:
+        parsed = parse_submission_datetime_for_cooldown(getattr(row, "Time", None))
+        if parsed is None:
+            continue
+        if first_started_at is None or parsed < first_started_at:
+            first_started_at = parsed
+
+    return first_started_at is not None and first_started_at <= early_deadline
+
+
+def existing_star_award_for_scope(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint: bool,
+    checkpoint_id: int,
+):
+    if project_id <= 0:
+        return None
+
+    ensure_incentive_tables()
+    award_type = "checkpoint_completion" if checkpoint else "main_completion"
+    checkpoint_key = int(checkpoint_id or 0) if checkpoint else 0
+
+    return StudentStarAwards.query.filter(
+        StudentStarAwards.UserId == int(user_id),
+        StudentStarAwards.ClassId == int(class_id),
+        StudentStarAwards.ProjectId == int(project_id),
+        StudentStarAwards.CheckpointId == checkpoint_key,
+        StudentStarAwards.AwardType == award_type,
+    ).first()
+
+
+def scoped_reward_payload(
+    user_id: int,
+    class_id: int,
+    project_id: int = 0,
+    checkpoint: bool = False,
+    checkpoint_id: int = 0,
+) -> dict:
+    base_stars = CHECKPOINT_COMPLETION_STARS if checkpoint else MAIN_PROJECT_COMPLETION_STARS
+    project = Projects.query.filter(Projects.Id == int(project_id)).first() if project_id > 0 else None
+    early_deadline = early_start_deadline_for_project(project) if project is not None else None
+    early_remaining_seconds = seconds_until(early_deadline)
+    early_window_open = early_deadline is not None and early_remaining_seconds > 0
+    started_early = early_window_open or assignment_started_early(
+        user_id,
+        project,
+        checkpoint,
+        checkpoint_id,
+        early_deadline,
+    )
+    existing_award = existing_star_award_for_scope(
+        user_id,
+        class_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
+
+    if existing_award is not None:
+        awarded_stars = max(0, parse_int(getattr(existing_award, "Stars", 0), 0))
+        awarded_base = max(0, parse_int(getattr(existing_award, "BaseStars", base_stars), base_stars))
+        awarded_multiplier = max(1, parse_int(getattr(existing_award, "Multiplier", 1), 1))
+
+        return {
+            "checkpoint_completion_stars": CHECKPOINT_COMPLETION_STARS,
+            "main_project_completion_stars": MAIN_PROJECT_COMPLETION_STARS,
+            "early_start_multiplier": EARLY_START_MULTIPLIER,
+            "early_start_deadline": serialize_cooldown_lifted_at(early_deadline),
+            "early_start_remaining_seconds": early_remaining_seconds,
+            "early_start_window_open": early_window_open,
+            "reward_base_stars": awarded_base,
+            "reward_multiplier": awarded_multiplier,
+            "reward_total_stars": awarded_stars,
+            "reward_already_awarded": True,
+            "reward_started_early": bool(getattr(existing_award, "StartedEarly", False)),
+        }
+
+    multiplier = EARLY_START_MULTIPLIER if started_early else 1
+
+    return {
+        "checkpoint_completion_stars": CHECKPOINT_COMPLETION_STARS,
+        "main_project_completion_stars": MAIN_PROJECT_COMPLETION_STARS,
+        "early_start_multiplier": EARLY_START_MULTIPLIER,
+        "early_start_deadline": serialize_cooldown_lifted_at(early_deadline),
+        "early_start_remaining_seconds": early_remaining_seconds,
+        "early_start_window_open": early_window_open,
+        "reward_base_stars": base_stars,
+        "reward_multiplier": multiplier,
+        "reward_total_stars": base_stars * multiplier,
+        "reward_already_awarded": False,
+        "reward_started_early": started_early,
+    }
+
+
+def incentive_payload(
+    user_id: int,
+    class_id: int,
+    project_id: int = 0,
+    checkpoint: bool = False,
+    checkpoint_id: int = 0,
+) -> dict:
+    balance = get_star_balance(user_id, class_id)
+    payload = {
+        "stars": balance,
+        "star_balance": balance,
+        "cooldown_skip_cost": SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "submission_cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+    }
+    payload.update(scoped_reward_payload(user_id, class_id, project_id, checkpoint, checkpoint_id))
+    return payload
+
+
+def parse_submission_datetime_for_cooldown(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(raw)
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
+    except Exception:
+        pass
+
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%m/%d/%y %H:%M:%S"):
+        try:
+            return datetime.strptime(raw[:19], fmt)
+        except Exception:
+            pass
+
+    return None
+
+
+def latest_submission_in_class(user_id: int, class_id: int):
+    try:
+        return (
+            db.session.query(Submissions)
+            .join(Projects, Submissions.Project == Projects.Id)
+            .filter(
+                Submissions.User == int(user_id),
+                Projects.ClassId == int(class_id),
+            )
+            .order_by(Submissions.Time.desc())
+            .first()
+        )
+    except Exception:
+        return None
+
+
+def cooldown_remaining_for_class(user_id: int, class_id: int) -> int:
+    latest = latest_submission_in_class(user_id, class_id)
+    if latest is None:
+        return 0
+
+    submitted_at = parse_submission_datetime_for_cooldown(getattr(latest, "Time", None))
+    if submitted_at is None:
+        return 0
+
+    elapsed_seconds = (current_utc_datetime() - submitted_at).total_seconds()
+    return max(0, int(SUBMISSION_COOLDOWN_SECONDS - elapsed_seconds + 0.999))
+
+
 def cooldown_lifted_at_from_mapping(mapping) -> datetime | None:
     if "cooldown_seconds" in mapping:
         seconds = parse_int(mapping.get("cooldown_seconds", 0), 0)
@@ -398,6 +704,7 @@ def serialize_student_upload_state(
         "previous_submission_id": latest_submission_id,
         "cooldown_lifted_at": serialize_cooldown_lifted_at(cooldown_lifted_at),
         "cooldown_remaining_seconds": seconds_until(cooldown_lifted_at),
+        "submission_cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
     }
 
 
@@ -757,6 +1064,87 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
     resp.headers["Cache-Control"] = "no-store"
     resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
     return resp
+
+
+@submission_api.route('/incentive-state', methods=['GET'])
+@jwt_required()
+def incentive_state():
+    class_id = parse_int(request.args.get("class_id", 0), 0)
+    project_id = parse_int(request.args.get("project_id", 0), 0)
+    checkpoint = parse_bool(request.args.get("checkpoint", False))
+    checkpoint_id = parse_int(request.args.get("checkpoint_id", 0), 0) if checkpoint else 0
+
+    if class_id <= 0:
+        return make_response({"message": "class_id is required."}, HTTPStatus.BAD_REQUEST)
+
+    if project_id > 0 and not current_user_can_use_upload_state(class_id, project_id, checkpoint_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    payload = incentive_payload(int(current_user.Id), class_id, project_id, checkpoint, checkpoint_id)
+    payload["cooldown_remaining_seconds"] = cooldown_remaining_for_class(int(current_user.Id), class_id)
+    return jsonify(payload)
+
+
+@submission_api.route('/skip-submission-cooldown', methods=['POST'])
+@jwt_required()
+def skip_submission_cooldown():
+    data = request.get_json(silent=True) or {}
+    class_id, project_id, checkpoint, checkpoint_id = upload_state_scope_from_mapping(data)
+
+    if class_id <= 0 or project_id <= 0:
+        return make_response({"message": "class_id and project_id are required."}, HTTPStatus.BAD_REQUEST)
+
+    if not current_user_can_use_upload_state(class_id, project_id, checkpoint_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    remaining_seconds = cooldown_remaining_for_class(int(current_user.Id), class_id)
+    if remaining_seconds <= 0:
+        row = get_student_upload_state_row(class_id, project_id, checkpoint_id)
+        if row is not None:
+            db.session.delete(row)
+            db.session.commit()
+        payload = incentive_payload(int(current_user.Id), class_id, project_id, checkpoint, checkpoint_id)
+        payload["cooldown_remaining_seconds"] = 0
+        return jsonify(payload)
+
+    spent, balance = spend_stars(
+        user_id=int(current_user.Id),
+        class_id=class_id,
+        project_id=project_id,
+        checkpoint_id=checkpoint_id,
+        spend_type="cooldown_skip",
+        cost=SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+    )
+
+    if not spent:
+        return make_response({
+            "message": f"You need {SUBMISSION_COOLDOWN_SKIP_COST_STARS} stars to skip the submission timer.",
+            "stars": balance,
+            "required_stars": SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+            "cooldown_remaining_seconds": remaining_seconds,
+        }, HTTPStatus.BAD_REQUEST)
+
+    ensure_incentive_tables()
+    db.session.add(StudentCooldownSkips(
+        UserId=int(current_user.Id),
+        ClassId=int(class_id),
+        ProjectId=int(project_id),
+        CheckpointId=int(checkpoint_id or 0),
+        SpentStars=SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        CreatedAt=current_utc_datetime(),
+        UsedAt=None,
+    ))
+
+    row = get_student_upload_state_row(class_id, project_id, checkpoint_id)
+    if row is not None:
+        db.session.delete(row)
+
+    db.session.commit()
+
+    payload = incentive_payload(int(current_user.Id), class_id, project_id, checkpoint, checkpoint_id)
+    payload["cooldown_remaining_seconds"] = 0
+    payload["skipped_cooldown"] = True
+    return jsonify(payload)
 
 @submission_api.route('/student-upload-state', methods=['GET', 'POST', 'DELETE'])
 @jwt_required()

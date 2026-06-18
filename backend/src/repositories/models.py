@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import Column, Integer, String, Boolean, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql.schema import ForeignKey
@@ -167,6 +169,63 @@ class StudentUploadState(db.Model):
     ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
     CheckpointId = Column(Integer, primary_key=True, nullable=False, default=0)
     CooldownLiftedAt = Column(DateTime, nullable=True)
+
+
+class StudentStarBalance(db.Model):
+    __tablename__ = "StudentStarBalance"
+    UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
+    ClassId = Column(Integer, ForeignKey('Classes.Id'), primary_key=True)
+    Stars = Column(Integer, nullable=False, default=0)
+    UpdatedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class StudentStarAwards(db.Model):
+    __tablename__ = "StudentStarAwards"
+    UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
+    ClassId = Column(Integer, ForeignKey('Classes.Id'), primary_key=True)
+    ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
+    CheckpointId = Column(Integer, primary_key=True, nullable=False, default=0)
+    AwardType = Column(String(40), primary_key=True)
+    Stars = Column(Integer, nullable=False, default=0)
+    BaseStars = Column(Integer, nullable=False, default=0)
+    Multiplier = Column(Integer, nullable=False, default=1)
+    StartedEarly = Column(Boolean, nullable=False, default=False)
+    SubmissionId = Column(Integer, ForeignKey('Submissions.Id'), nullable=True)
+    AwardedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class StudentStarSpending(db.Model):
+    __tablename__ = "StudentStarSpending"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    UserId = Column(Integer, ForeignKey('Users.Id'), nullable=False)
+    ClassId = Column(Integer, ForeignKey('Classes.Id'), nullable=False)
+    ProjectId = Column(Integer, ForeignKey('Projects.Id'), nullable=True)
+    CheckpointId = Column(Integer, nullable=False, default=0)
+    SpendType = Column(String(40), nullable=False)
+    Stars = Column(Integer, nullable=False, default=0)
+    CreatedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class StudentCheckpointSkips(db.Model):
+    __tablename__ = "StudentCheckpointSkips"
+    UserId = Column(Integer, ForeignKey('Users.Id'), primary_key=True)
+    ClassId = Column(Integer, ForeignKey('Classes.Id'), primary_key=True)
+    ProjectId = Column(Integer, ForeignKey('Projects.Id'), primary_key=True)
+    CheckpointId = Column(Integer, ForeignKey('Checkpoints.Id'), primary_key=True)
+    SpentStars = Column(Integer, nullable=False, default=0)
+    CreatedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class StudentCooldownSkips(db.Model):
+    __tablename__ = "StudentCooldownSkips"
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    UserId = Column(Integer, ForeignKey('Users.Id'), nullable=False)
+    ClassId = Column(Integer, ForeignKey('Classes.Id'), nullable=False)
+    ProjectId = Column(Integer, ForeignKey('Projects.Id'), nullable=True)
+    CheckpointId = Column(Integer, nullable=False, default=0)
+    SpentStars = Column(Integer, nullable=False, default=0)
+    CreatedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+    UsedAt = Column(DateTime, nullable=True)
 
 
 class StudentSuggestions(db.Model):

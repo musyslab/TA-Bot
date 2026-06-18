@@ -31,7 +31,11 @@ from src.repositories.models import (
     Modules,
     Checkpoints,
     Projects,
+    StudentCheckpointSkips,
     StudentHiddenModules,
+    StudentStarAwards,
+    StudentStarBalance,
+    StudentStarSpending,
     Submissions,
     Users,
 )
@@ -43,6 +47,12 @@ projects_api = Blueprint('projects_api', __name__)
 
 ALLOWED_SOURCE_EXTS = {'.py', '.c', '.java', '.rkt'}
 TS_DIR_RE = re.compile(r"^\d{8}_\d{6}$")
+CHECKPOINT_COMPLETION_STARS = 1
+MAIN_PROJECT_COMPLETION_STARS = 3
+EARLY_START_MULTIPLIER = 2
+CHECKPOINT_SKIP_COST_STARS = 6
+SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
+
 
 
 def normalize_grader_language(language: str, solution_root: str = "") -> str:
@@ -91,6 +101,133 @@ def parse_int(v, default: int = 0) -> int:
         return int(str(v).strip())
     except Exception:
         return default
+
+
+def ensure_incentive_tables():
+    for model in (
+        StudentStarBalance,
+        StudentStarAwards,
+        StudentStarSpending,
+        StudentCheckpointSkips,
+    ):
+        try:
+            model.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            pass
+
+
+def get_star_balance(user_id: int, class_id: int) -> int:
+    ensure_incentive_tables()
+    row = StudentStarBalance.query.filter(
+        StudentStarBalance.UserId == int(user_id),
+        StudentStarBalance.ClassId == int(class_id),
+    ).first()
+    return max(0, parse_int(getattr(row, "Stars", 0) if row else 0, 0))
+
+
+def set_star_balance(user_id: int, class_id: int, stars: int) -> int:
+    ensure_incentive_tables()
+    row = StudentStarBalance.query.filter(
+        StudentStarBalance.UserId == int(user_id),
+        StudentStarBalance.ClassId == int(class_id),
+    ).first()
+
+    if row is None:
+        row = StudentStarBalance(
+            UserId=int(user_id),
+            ClassId=int(class_id),
+            Stars=0,
+            UpdatedAt=datetime.now(),
+        )
+        db.session.add(row)
+
+    row.Stars = max(0, parse_int(stars, 0))
+    row.UpdatedAt = datetime.now()
+    db.session.commit()
+
+    return int(row.Stars or 0)
+
+
+def spend_stars(user_id: int, class_id: int, project_id: int | None, checkpoint_id: int | None, spend_type: str, cost: int) -> tuple[bool, int]:
+    ensure_incentive_tables()
+    cost = max(0, parse_int(cost, 0))
+    balance = get_star_balance(user_id, class_id)
+
+    if balance < cost:
+        return False, balance
+
+    new_balance = set_star_balance(user_id, class_id, balance - cost)
+    db.session.add(StudentStarSpending(
+        UserId=int(user_id),
+        ClassId=int(class_id),
+        ProjectId=(int(project_id) if project_id else None),
+        CheckpointId=int(checkpoint_id or 0),
+        SpendType=str(spend_type),
+        Stars=int(cost),
+        CreatedAt=datetime.now(),
+    ))
+    db.session.commit()
+    return True, int(new_balance)
+
+
+def incentive_summary(user_id: int, class_id: int) -> dict:
+    return {
+        "stars": get_star_balance(user_id, class_id),
+        "star_balance": get_star_balance(user_id, class_id),
+        "checkpoint_completion_stars": CHECKPOINT_COMPLETION_STARS,
+        "main_project_completion_stars": MAIN_PROJECT_COMPLETION_STARS,
+        "early_start_multiplier": EARLY_START_MULTIPLIER,
+        "checkpoint_skip_cost": CHECKPOINT_SKIP_COST_STARS,
+        "cooldown_skip_cost": SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+    }
+
+
+def skipped_checkpoint_ids_for_project(user_id: int, project_id: int) -> set[int]:
+    ensure_incentive_tables()
+    rows = StudentCheckpointSkips.query.filter(
+        StudentCheckpointSkips.UserId == int(user_id),
+        StudentCheckpointSkips.ProjectId == int(project_id),
+    ).all()
+    return {parse_int(getattr(row, "CheckpointId", 0), 0) for row in rows}
+
+
+def checkpoint_awards_for_project(user_id: int, project_id: int) -> dict[int, dict]:
+    ensure_incentive_tables()
+    rows = StudentStarAwards.query.filter(
+        StudentStarAwards.UserId == int(user_id),
+        StudentStarAwards.ProjectId == int(project_id),
+        StudentStarAwards.AwardType == "checkpoint_completion",
+    ).all()
+
+    return {
+        parse_int(getattr(row, "CheckpointId", 0), 0): {
+            "stars": parse_int(getattr(row, "Stars", 0), 0),
+            "base_stars": parse_int(getattr(row, "BaseStars", 0), 0),
+            "multiplier": parse_int(getattr(row, "Multiplier", 1), 1),
+            "started_early": bool(getattr(row, "StartedEarly", False)),
+        }
+        for row in rows
+    }
+
+
+def main_award_for_project(user_id: int, project_id: int) -> dict | None:
+    ensure_incentive_tables()
+    row = StudentStarAwards.query.filter(
+        StudentStarAwards.UserId == int(user_id),
+        StudentStarAwards.ProjectId == int(project_id),
+        StudentStarAwards.CheckpointId == 0,
+        StudentStarAwards.AwardType == "main_completion",
+    ).first()
+
+    if row is None:
+        return None
+
+    return {
+        "stars": parse_int(getattr(row, "Stars", 0), 0),
+        "base_stars": parse_int(getattr(row, "BaseStars", 0), 0),
+        "multiplier": parse_int(getattr(row, "Multiplier", 1), 1),
+        "started_early": bool(getattr(row, "StartedEarly", False)),
+    }
 
 DEFAULT_CHECKPOINT_NAME_RE = re.compile(r"^(checkpoint)\s+\d+$", re.IGNORECASE)
 
@@ -346,6 +483,9 @@ def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) ->
         print(f"[student_checkpoint_rows] failed to list checkpoints for project {project_id}: {exc}", flush=True)
         return []
 
+    user_id = int(getattr(current_user, "Id", 0) or 0)
+    skipped_checkpoint_ids = skipped_checkpoint_ids_for_project(user_id, project_id)
+    checkpoint_awards = checkpoint_awards_for_project(user_id, project_id)
     passed_checkpoint_ids: set[int] = set()
     try:
         if hasattr(Submissions, "IsCheckpoint") and hasattr(Submissions, "CheckpointId"):
@@ -353,7 +493,7 @@ def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) ->
                 db.session.query(Submissions.CheckpointId)
                 .filter(
                     Submissions.Project == int(project_id),
-                    Submissions.User == int(current_user.Id),
+                    Submissions.User == user_id,
                     Submissions.IsCheckpoint == True,
                     Submissions.IsPassing == True,
                     Submissions.CheckpointId.isnot(None),
@@ -389,7 +529,10 @@ def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) ->
             checkpoint_id=checkpoint_id,
         )
         name = str(getattr(row, "Name", "") or default_checkpoint_name(index + 1))
-        solved = checkpoint_id in passed_checkpoint_ids
+        passed = checkpoint_id in passed_checkpoint_ids
+        skipped = checkpoint_id in skipped_checkpoint_ids
+        solved = passed or skipped
+        award = checkpoint_awards.get(checkpoint_id, {})
 
         out.append({
             "id": checkpoint_id,
@@ -404,10 +547,18 @@ def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) ->
             "Enabled": enabled,
             "solved": solved,
             "Solved": solved,
-            "passed": solved,
-            "Passed": solved,
-            "rewarded": solved,
-            "Rewarded": solved,
+            "passed": passed,
+            "Passed": passed,
+            "skipped": skipped,
+            "Skipped": skipped,
+            "rewarded": bool(award),
+            "Rewarded": bool(award),
+            "rewardStars": int(award.get("stars", 0) or 0),
+            "RewardStars": int(award.get("stars", 0) or 0),
+            "rewardMultiplier": int(award.get("multiplier", 1) or 1),
+            "RewardMultiplier": int(award.get("multiplier", 1) or 1),
+            "startedEarly": bool(award.get("started_early", False)),
+            "StartedEarly": bool(award.get("started_early", False)),
             "hasSolutionProgram": bool(status.get("HasSolutionProgram", False)),
             "HasSolutionProgram": bool(status.get("HasSolutionProgram", False)),
             "hasTestcases": bool(status.get("HasTestcases", False)),
@@ -863,6 +1014,7 @@ def module_payload(
     total_submissions = 0
     checkpoint_total = 0
     main_completed = False
+    main_award = None
 
     if project:
         project_id = int(project.Id)
@@ -881,6 +1033,11 @@ def module_payload(
                 checkpoint_total = int(checkpoint_total_counts.get(project_id, 0) or 0)
         except Exception:
             checkpoint_total = 0
+
+        try:
+            main_award = main_award_for_project(int(current_user.Id), project_id)
+        except Exception:
+            main_award = None
 
         try:
             if main_completed_project_ids is not None:
@@ -909,6 +1066,10 @@ def module_payload(
         "CheckpointTotalSubmissions": int(checkpoint_total),
         "CheckpointsEnabled": True,
         "MainCompleted": main_completed,
+        "MainRewarded": bool(main_award),
+        "MainRewardStars": int((main_award or {}).get("stars", 0) or 0),
+        "MainRewardMultiplier": int((main_award or {}).get("multiplier", 1) or 1),
+        "MainStartedEarly": bool((main_award or {}).get("started_early", False)),
     }
 
 
@@ -2733,6 +2894,104 @@ def get_module_overview_student(project_repo: ProjectRepository = Provide[Contai
         "module": module_payload(module, project_repo, submission_repo),
         "checkpoints": checkpoint_rows,
         "practiceProblems": checkpoint_rows,
+        "incentives": incentive_summary(int(current_user.Id), int(module.ClassId)),
+    })
+
+
+@projects_api.route('/skip_checkpoint', methods=['POST'])
+@jwt_required()
+def skip_checkpoint():
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get("class_id", 0), 0)
+    project_id = parse_int(data.get("project_id", 0), 0)
+    checkpoint_id = parse_int(data.get("checkpoint_id", 0), 0)
+    user_id = int(getattr(current_user, "Id", 0) or 0)
+
+    if class_id <= 0 or project_id <= 0 or checkpoint_id <= 0:
+        return make_response({"message": "class_id, project_id, and checkpoint_id are required."}, HTTPStatus.BAD_REQUEST)
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None or parse_int(getattr(project, "ClassId", 0), 0) != class_id:
+        return make_response({"message": "Project not found."}, HTTPStatus.NOT_FOUND)
+
+    if not current_user_can_access_visible_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    checkpoint = Checkpoints.query.filter(
+        Checkpoints.Id == checkpoint_id,
+        Checkpoints.ProjectId == project_id,
+        Checkpoints.Enabled == True,
+    ).first()
+    if checkpoint is None:
+        return make_response({"message": "Checkpoint not found."}, HTTPStatus.NOT_FOUND)
+
+    checkpoint_rows = student_checkpoint_rows(ProjectRepository(), project_id)
+    target_index = next((i for i, row in enumerate(checkpoint_rows) if parse_int(row.get("id"), 0) == checkpoint_id), -1)
+
+    if target_index < 0:
+        return make_response({"message": "Checkpoint is not available."}, HTTPStatus.NOT_FOUND)
+
+    target_row = checkpoint_rows[target_index]
+    if bool(target_row.get("solved")):
+        return jsonify({
+            "message": "Checkpoint is already completed.",
+            "checkpoints": checkpoint_rows,
+            "incentives": incentive_summary(user_id, class_id),
+        })
+
+    earlier_incomplete = [
+        row for row in checkpoint_rows[:target_index]
+        if not bool(row.get("solved"))
+    ]
+    if earlier_incomplete:
+        return make_response({"message": "Complete or skip earlier checkpoints first."}, HTTPStatus.BAD_REQUEST)
+
+    existing_skip = StudentCheckpointSkips.query.filter(
+        StudentCheckpointSkips.UserId == user_id,
+        StudentCheckpointSkips.ClassId == class_id,
+        StudentCheckpointSkips.ProjectId == project_id,
+        StudentCheckpointSkips.CheckpointId == checkpoint_id,
+    ).first()
+    if existing_skip is not None:
+        return jsonify({
+            "message": "Checkpoint already skipped.",
+            "checkpoints": student_checkpoint_rows(ProjectRepository(), project_id),
+            "incentives": incentive_summary(user_id, class_id),
+        })
+
+    spent, balance = spend_stars(
+        user_id=user_id,
+        class_id=class_id,
+        project_id=project_id,
+        checkpoint_id=checkpoint_id,
+        spend_type="checkpoint_skip",
+        cost=CHECKPOINT_SKIP_COST_STARS,
+    )
+
+    if not spent:
+        return make_response({
+            "message": f"You need {CHECKPOINT_SKIP_COST_STARS} stars to skip a checkpoint.",
+            "stars": balance,
+            "required_stars": CHECKPOINT_SKIP_COST_STARS,
+        }, HTTPStatus.BAD_REQUEST)
+
+    db.session.add(StudentCheckpointSkips(
+        UserId=user_id,
+        ClassId=class_id,
+        ProjectId=project_id,
+        CheckpointId=checkpoint_id,
+        SpentStars=CHECKPOINT_SKIP_COST_STARS,
+        CreatedAt=datetime.now(),
+    ))
+    db.session.commit()
+
+    updated_rows = student_checkpoint_rows(ProjectRepository(), project_id)
+
+    return jsonify({
+        "message": "Checkpoint skipped.",
+        "checkpoints": updated_rows,
+        "practiceProblems": updated_rows,
+        "incentives": incentive_summary(user_id, class_id),
     })
 
 @projects_api.route('/update_module', methods=['POST'])

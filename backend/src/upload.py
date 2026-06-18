@@ -18,7 +18,17 @@ from dependency_injector.wiring import inject, Provide
 from container import Container
 from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
 from src.repositories.class_repository import ClassRepository
-from src.repositories.models import Checkpoints, Classes, ClassAssignments, Projects, Submissions, Users
+from src.repositories.models import (
+    Checkpoints,
+    Classes,
+    ClassAssignments,
+    Projects,
+    StudentCooldownSkips,
+    StudentStarAwards,
+    StudentStarBalance,
+    Submissions,
+    Users,
+)
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.database import db
 from src.repositories.submission_repository import SubmissionRepository
@@ -38,7 +48,190 @@ ALLOWED_EXTENSIONS_BY_LANGUAGE = {
 }
 
 ALLOWED_SOURCE_EXTENSIONS = {".py", ".java", ".c", ".rkt"}
-SUBMISSION_COOLDOWN_SECONDS = 120
+SUBMISSION_COOLDOWN_SECONDS = 300
+CHECKPOINT_COMPLETION_STARS = 1
+MAIN_PROJECT_COMPLETION_STARS = 3
+EARLY_START_MULTIPLIER = 2
+
+
+def ensure_incentive_tables():
+    for model in (StudentStarBalance, StudentStarAwards, StudentCooldownSkips):
+        try:
+            model.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            pass
+
+
+def current_star_balance(user_id: int, class_id: int) -> int:
+    ensure_incentive_tables()
+    row = StudentStarBalance.query.filter(
+        StudentStarBalance.UserId == int(user_id),
+        StudentStarBalance.ClassId == int(class_id),
+    ).first()
+
+    return max(0, parse_int(getattr(row, "Stars", 0) if row else 0, 0))
+
+
+def add_stars_to_balance(user_id: int, class_id: int, stars: int) -> int:
+    ensure_incentive_tables()
+    stars = max(0, parse_int(stars, 0))
+    row = StudentStarBalance.query.filter(
+        StudentStarBalance.UserId == int(user_id),
+        StudentStarBalance.ClassId == int(class_id),
+    ).first()
+
+    if row is None:
+        row = StudentStarBalance(
+            UserId=int(user_id),
+            ClassId=int(class_id),
+            Stars=0,
+            UpdatedAt=datetime.now(),
+        )
+        db.session.add(row)
+
+    row.Stars = max(0, parse_int(getattr(row, "Stars", 0), 0)) + stars
+    row.UpdatedAt = datetime.now()
+    db.session.commit()
+
+    return int(row.Stars or 0)
+
+
+def project_window(project):
+    module = getattr(project, "Module", None)
+    if module is None:
+        module_id = parse_int(getattr(project, "ModuleId", 0), 0)
+        if module_id > 0:
+            try:
+                from src.repositories.models import Modules
+
+                module = Modules.query.filter(Modules.Id == module_id).first()
+            except Exception:
+                module = None
+
+    start = getattr(module, "Start", None) if module else None
+    end = getattr(module, "End", None) if module else None
+
+    return start, end
+
+
+def assignment_started_early(user_id: int, project, is_checkpoint: bool, checkpoint_id: int | None) -> bool:
+    start, end = project_window(project)
+    if not isinstance(start, datetime) or not isinstance(end, datetime) or end <= start:
+        return False
+
+    query = Submissions.query.filter(
+        Submissions.User == int(user_id),
+        Submissions.Project == int(project.Id),
+        Submissions.IsCheckpoint == bool(is_checkpoint),
+    )
+
+    if is_checkpoint:
+        query = query.filter(Submissions.CheckpointId == int(checkpoint_id or 0))
+    else:
+        query = query.filter(Submissions.CheckpointId.is_(None))
+
+    rows = query.order_by(Submissions.Time.asc()).all()
+    first_started_at = None
+
+    for row in rows:
+        parsed = parse_submission_datetime(getattr(row, "Time", None))
+        if parsed is None:
+            continue
+        if first_started_at is None or parsed < first_started_at:
+            first_started_at = parsed
+
+    if first_started_at is None:
+        return False
+
+    midpoint = start + ((end - start) / 2)
+    return first_started_at <= midpoint
+
+
+def award_completion_stars(
+    user_id: int,
+    class_id: int,
+    project,
+    is_checkpoint: bool,
+    checkpoint_id: int | None,
+    submission_id: int,
+) -> dict | None:
+    ensure_incentive_tables()
+
+    if project is None or submission_id is None:
+        return None
+
+    checkpoint_key = int(checkpoint_id or 0) if is_checkpoint else 0
+    award_type = "checkpoint_completion" if is_checkpoint else "main_completion"
+
+    existing = StudentStarAwards.query.filter(
+        StudentStarAwards.UserId == int(user_id),
+        StudentStarAwards.ClassId == int(class_id),
+        StudentStarAwards.ProjectId == int(project.Id),
+        StudentStarAwards.CheckpointId == checkpoint_key,
+        StudentStarAwards.AwardType == award_type,
+    ).first()
+
+    if existing is not None:
+        return {
+            "awarded": False,
+            "stars": 0,
+            "balance": current_star_balance(user_id, class_id),
+            "reason": "already_awarded",
+        }
+
+    base_stars = CHECKPOINT_COMPLETION_STARS if is_checkpoint else MAIN_PROJECT_COMPLETION_STARS
+    started_early = assignment_started_early(user_id, project, is_checkpoint, checkpoint_id)
+    multiplier = EARLY_START_MULTIPLIER if started_early else 1
+    stars = base_stars * multiplier
+
+    row = StudentStarAwards(
+        UserId=int(user_id),
+        ClassId=int(class_id),
+        ProjectId=int(project.Id),
+        CheckpointId=checkpoint_key,
+        AwardType=award_type,
+        Stars=int(stars),
+        BaseStars=int(base_stars),
+        Multiplier=int(multiplier),
+        StartedEarly=bool(started_early),
+        SubmissionId=int(submission_id),
+        AwardedAt=datetime.now(),
+    )
+    db.session.add(row)
+    db.session.commit()
+
+    balance = add_stars_to_balance(user_id, class_id, stars)
+
+    return {
+        "awarded": True,
+        "stars": int(stars),
+        "base_stars": int(base_stars),
+        "multiplier": int(multiplier),
+        "started_early": bool(started_early),
+        "balance": int(balance),
+        "award_type": award_type,
+    }
+
+
+def consume_pending_cooldown_skip(user_id: int, class_id: int, latest_submission_time: datetime | None) -> bool:
+    ensure_incentive_tables()
+
+    query = StudentCooldownSkips.query.filter(
+        StudentCooldownSkips.UserId == int(user_id),
+        StudentCooldownSkips.ClassId == int(class_id),
+        StudentCooldownSkips.UsedAt.is_(None),
+    )
+
+    if latest_submission_time is not None:
+        query = query.filter(StudentCooldownSkips.CreatedAt >= latest_submission_time)
+
+    row = query.order_by(StudentCooldownSkips.CreatedAt.asc()).first()
+    if row is None:
+        return False
+
+    row.UsedAt = datetime.now()
+    db.session.commit()
+    return True
 
 
 def parse_int(v, default: int = 0) -> int:
@@ -451,6 +644,9 @@ def student_submission_cooldown_response(user_id: int, class_id: int):
     if remaining_seconds <= 0:
         return None
 
+    if consume_pending_cooldown_skip(user_id, class_id, submitted_at):
+        return None
+
     response = make_response(
         {
             "message": f"Please wait {remaining_seconds} seconds before submitting again.",
@@ -820,14 +1016,28 @@ def file_upload(
         checkpoint_id=(checkpoint_id if is_checkpoint else None),
     )
 
+    star_award = None
+
+    if not is_staff_upload and status:
+        star_award = award_completion_stars(
+            user_id=user_id,
+            class_id=class_id_int,
+            project=project,
+            is_checkpoint=is_checkpoint,
+            checkpoint_id=(checkpoint_id if is_checkpoint else None),
+            submission_id=submission_id,
+        )
+
     if not is_staff_upload and not is_checkpoint:
         submission_repo.consume_charge(user_id, class_id, project.Id, submission_id)
 
     message = {
         "message": "Success",
-        "remainder": 10,
+        "remainder": 5,
         "sid": submission_id,
         "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+        "star_award": star_award,
+        "stars": current_star_balance(user_id, class_id_int),
     }
 
     return make_response(message, HTTPStatus.OK)

@@ -12,6 +12,7 @@ import "../../styling/FileUploadCommon.scss";
 import {
   FaAlignJustify,
   FaBan,
+  FaBolt,
   FaCloudUploadAlt,
   FaCode,
   FaClock,
@@ -23,7 +24,9 @@ import {
   FaCheckCircle,
   FaEye,
   FaFilePowerpoint,
+  FaForward,
   FaInfoCircle,
+  FaStar,
 } from "react-icons/fa";
 
 type CheckpointLite = {
@@ -90,7 +93,26 @@ type UploadStatePatch = {
   cooldown_lifted_at?: string | null;
 };
 
-const SUBMISSION_COOLDOWN_SECONDS = 120;
+type IncentiveState = {
+  stars?: number;
+  star_balance?: number;
+  cooldown_skip_cost?: number;
+  submission_cooldown_seconds?: number;
+  cooldown_remaining_seconds?: number;
+  checkpoint_completion_stars?: number;
+  main_project_completion_stars?: number;
+  early_start_multiplier?: number;
+  early_start_deadline?: string | null;
+  early_start_remaining_seconds?: number;
+  early_start_window_open?: boolean;
+  reward_base_stars?: number;
+  reward_multiplier?: number;
+  reward_total_stars?: number;
+  reward_already_awarded?: boolean;
+  reward_started_early?: boolean;
+};
+
+const SUBMISSION_COOLDOWN_SECONDS = 600;
 
 const authHeader = () => ({
   Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
@@ -251,6 +273,8 @@ const StudentUpload = () => {
   const [previousSubmissionId, setPreviousSubmissionId] = useState<number | string | null>(null);
   const [cooldownLiftedAtMs, setCooldownLiftedAtMs] = useState<number>(0);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [incentives, setIncentives] = useState<IncentiveState | null>(null);
+  const [isSkippingCooldown, setIsSkippingCooldown] = useState<boolean>(false);
 
   const [moduleName, setModuleName] = useState<string>("");
   const [checkpointLabel, setCheckpointLabel] = useState<string>("");
@@ -275,6 +299,9 @@ const StudentUpload = () => {
   }, [cooldownLiftedAtMs, nowMs]);
 
   const isCoolingDown = cooldownRemainingSeconds > 0;
+  const starBalance = Number(incentives?.star_balance ?? incentives?.stars ?? 0);
+  const cooldownSkipCost = Math.max(0, Number(incentives?.cooldown_skip_cost ?? 2));
+  const canSkipCooldown = isCoolingDown && cooldownSkipCost > 0 && starBalance >= cooldownSkipCost;
   const canSubmit = !passedAllTests && !isCoolingDown;
 
   const formatCooldown = (seconds: number) => {
@@ -282,6 +309,77 @@ const StudentUpload = () => {
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
+
+  const formatDuration = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.ceil(seconds));
+    const days = Math.floor(safeSeconds / 86400);
+    const hours = Math.floor((safeSeconds % 86400) / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const secs = safeSeconds % 60;
+
+    if (days > 0) {
+      return `${days}d ${hours}h ${minutes}m ${secs}s`;
+    }
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${secs}s`;
+    }
+
+    return `${minutes}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const formatStarValue = (value: number): string => {
+    if (!Number.isFinite(value)) return "0";
+    return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+  };
+
+  const earlyStartDeadlineMs = useMemo(() => {
+    const rawDeadline = incentives?.early_start_deadline;
+    if (!rawDeadline) return 0;
+
+    const parsed = Date.parse(rawDeadline);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, [incentives?.early_start_deadline]);
+
+  const earlyBonusRemainingSeconds = earlyStartDeadlineMs
+    ? Math.max(0, Math.ceil((earlyStartDeadlineMs - nowMs) / 1000))
+    : Math.max(0, Number(incentives?.early_start_remaining_seconds ?? 0));
+  const earlyStartMultiplier = Math.max(1, Number(incentives?.early_start_multiplier ?? 2));
+  const earlyBonusWindowOpen = earlyStartDeadlineMs
+    ? nowMs <= earlyStartDeadlineMs
+    : Boolean(incentives?.early_start_window_open && earlyBonusRemainingSeconds > 0);
+  const rewardBaseStars = Math.max(
+    0,
+    Number(
+      incentives?.reward_base_stars ??
+      (isCheckpoint
+        ? incentives?.checkpoint_completion_stars ?? 1
+        : incentives?.main_project_completion_stars ?? 3),
+    ),
+  );
+  const rewardAlreadyAwarded = Boolean(incentives?.reward_already_awarded || passedAllTests);
+  const rewardStartedEarly = Boolean(incentives?.reward_started_early);
+  const rewardMultiplier = rewardAlreadyAwarded
+    ? Math.max(1, Number(incentives?.reward_multiplier ?? 1))
+    : earlyBonusWindowOpen || rewardStartedEarly
+      ? earlyStartMultiplier
+      : 1;
+  const rewardTotalStars = rewardAlreadyAwarded
+    ? 0
+    : rewardBaseStars * rewardMultiplier;
+  const rewardIsDoubled = !rewardAlreadyAwarded && rewardMultiplier > 1;
+  const rewardSummaryText = rewardAlreadyAwarded
+    ? "Reward already earned for this assignment."
+    : rewardIsDoubled
+      ? `Earn ${formatStarValue(rewardTotalStars)} stars when all tests pass.`
+      : `Earn ${formatStarValue(rewardTotalStars)} stars when all tests pass.`;
+  const earlyBonusTimerText = earlyStartDeadlineMs
+    ? earlyBonusWindowOpen
+      ? `${formatDuration(earlyBonusRemainingSeconds)} until early bonus ends.`
+      : rewardStartedEarly
+        ? `${earlyStartMultiplier}x early bonus is locked in for this assignment.`
+        : "Early bonus window closed."
+    : "Early bonus timer unavailable.";
 
   const cooldownLiftedAtToMs = (
     cooldownLiftedAt: unknown,
@@ -368,11 +466,73 @@ const StudentUpload = () => {
 
         setPreviousSubmissionId(latestSubmission);
         setCooldownLiftedAtMs(cooldownUntil);
+        if (res?.data?.stars !== undefined || res?.data?.star_balance !== undefined) {
+          setIncentives(res.data);
+        }
       })
       .catch(() => {
         setCooldownLiftedAtMs(0);
       });
   }, [buildUploadStateScope]);
+
+
+  const loadIncentiveState = useCallback(() => {
+    const scope = buildUploadStateScope();
+    const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+    if (!scope || !token) {
+      setIncentives(null);
+      return;
+    }
+
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/submissions/incentive-state`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: scope,
+      })
+      .then((res) => {
+        setIncentives(res.data || null);
+      })
+      .catch(() => {
+        setIncentives(null);
+      });
+  }, [buildUploadStateScope]);
+
+  const skipSubmissionCooldown = () => {
+    const scope = buildUploadStateScope();
+    const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+    if (!scope || !token || !isCoolingDown || isSkippingCooldown) {
+      return;
+    }
+
+    setIsSkippingCooldown(true);
+    setIsErrorMessageHidden(true);
+    setError_Message("");
+
+    axios
+      .post(
+        `${import.meta.env.VITE_API_URL}/submissions/skip-submission-cooldown`,
+        scope,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      .then((res) => {
+        setCooldownLiftedAtMs(0);
+        setNowMs(Date.now());
+        setIncentives(res.data || null);
+        saveStudentUploadState({ cooldown_seconds: 0, cooldown_lifted_at: null });
+      })
+      .catch((err) => {
+        setError_Message(
+          err.response?.data?.message ||
+          "Could not skip the submission timer. Please try again.",
+        );
+        setIsErrorMessageHidden(false);
+      })
+      .finally(() => {
+        setIsSkippingCooldown(false);
+      });
+  };
 
   const startSubmissionCooldown = (seconds = SUBMISSION_COOLDOWN_SECONDS) => {
     const safeSeconds = Math.max(1, Math.ceil(seconds));
@@ -546,14 +706,18 @@ const StudentUpload = () => {
   }, [loadStudentUploadState]);
 
   useEffect(() => {
-    if (!isCoolingDown) return;
+    loadIncentiveState();
+  }, [loadIncentiveState]);
+
+  useEffect(() => {
+    if (!isCoolingDown && !earlyBonusWindowOpen) return;
 
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [isCoolingDown]);
+  }, [isCoolingDown, earlyBonusWindowOpen]);
 
   useEffect(() => {
     const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
@@ -889,7 +1053,9 @@ const StudentUpload = () => {
 
     if (isCoolingDown) {
       setError_Message(
-        `Please wait ${formatCooldown(cooldownRemainingSeconds)} before submitting again.`,
+        canSkipCooldown
+          ? `Please wait ${formatCooldown(cooldownRemainingSeconds)} or skip the timer for ${cooldownSkipCost} stars.`
+          : `Please wait ${formatCooldown(cooldownRemainingSeconds)} before submitting again.`,
       );
       setIsErrorMessageHidden(false);
       return;
@@ -958,6 +1124,13 @@ const StudentUpload = () => {
       })
       .then((res) => {
         startSubmissionCooldown(Number(res?.data?.cooldown_seconds) || SUBMISSION_COOLDOWN_SECONDS);
+        if (res?.data?.stars !== undefined || res?.data?.star_award) {
+          setIncentives((previous) => ({
+            ...(previous || {}),
+            stars: Number(res?.data?.stars ?? previous?.stars ?? 0),
+            star_balance: Number(res?.data?.stars ?? previous?.star_balance ?? 0),
+          }));
+        }
 
         const sid = getPayloadSubmissionId(res?.data);
 
@@ -1150,6 +1323,27 @@ const StudentUpload = () => {
                   {checkedPassedAll
                     ? `${testcaseProgress.passed} / ${testcaseProgress.total} testcases passed`
                     : "Checking testcases..."}
+                </div>
+              </div>
+
+              <div className="student-stars-card" aria-label="Student stars and possible reward">
+                <FaStar aria-hidden="true" />
+                <div className="student-stars-card__body">
+                  <div className="student-stars-card__topline">
+                    <div>
+                      <div className="student-stars-card__count">
+                        {formatStarValue(starBalance)}
+                      </div>
+                      <div className="student-stars-card__label">Stars available</div>
+                    </div>
+                  </div>
+
+                  <div className="student-stars-card__reward">
+                    {rewardSummaryText}
+                  </div>
+                  <div className="student-stars-card__timer">
+                    {earlyBonusTimerText}
+                  </div>
                 </div>
               </div>
 
@@ -1369,11 +1563,30 @@ const StudentUpload = () => {
 
                   <div className="tbs-submission-status__text">
                     {isCoolingDown
-                      ? "A 2 minute cooldown applies after every submission"
-                      : "After each submission, you must wait 2 minutes before submitting again"}
+                      ? `A 5 minute cooldown applies after every submission. You can skip it for ${cooldownSkipCost} stars.`
+                      : `After each submission, you must wait 5 minutes before submitting again. Skipping costs ${cooldownSkipCost} stars.`}
                   </div>
                 </div>
               </div>
+
+              {isCoolingDown ? (
+                <button
+                  type="button"
+                  className={`skip-cooldown-button ${!canSkipCooldown || isSkippingCooldown ? "disabled" : ""}`}
+                  disabled={!canSkipCooldown || isSkippingCooldown}
+                  onClick={skipSubmissionCooldown}
+                  title={
+                    canSkipCooldown
+                      ? `Spend ${cooldownSkipCost} stars to skip the timer`
+                      : `You need ${cooldownSkipCost} stars to skip the timer`
+                  }
+                >
+                  <FaForward aria-hidden="true" />
+                  {isSkippingCooldown
+                    ? "Skipping..."
+                    : `Skip Timer (${cooldownSkipCost} stars)`}
+                </button>
+              ) : null}
 
               <button
                 type="submit"

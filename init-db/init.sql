@@ -264,6 +264,126 @@ CREATE TABLE `StudentUploadState` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 --
+-- Table structure for table `StudentStarBalance`
+--
+
+DROP TABLE IF EXISTS `StudentStarBalance`;
+CREATE TABLE `StudentStarBalance` (
+  `UserId` int NOT NULL,
+  `ClassId` int NOT NULL,
+  `Stars` int NOT NULL DEFAULT 0,
+  `UpdatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`UserId`,`ClassId`),
+  KEY `idx_StudentStarBalance_ClassId` (`ClassId`),
+  CONSTRAINT `fk_StudentStarBalance_User` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentStarBalance_Class` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Table structure for table `StudentStarAwards`
+--
+
+DROP TABLE IF EXISTS `StudentStarAwards`;
+CREATE TABLE `StudentStarAwards` (
+  `UserId` int NOT NULL,
+  `ClassId` int NOT NULL,
+  `ProjectId` int NOT NULL,
+  `CheckpointId` int NOT NULL DEFAULT 0,
+  `AwardType` varchar(40) NOT NULL,
+  `Stars` int NOT NULL DEFAULT 0,
+  `BaseStars` int NOT NULL DEFAULT 0,
+  `Multiplier` int NOT NULL DEFAULT 1,
+  `StartedEarly` tinyint(1) NOT NULL DEFAULT 0,
+  `SubmissionId` int DEFAULT NULL,
+  `AwardedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`UserId`,`ClassId`,`ProjectId`,`CheckpointId`,`AwardType`),
+  KEY `idx_StudentStarAwards_ClassId` (`ClassId`),
+  KEY `idx_StudentStarAwards_ProjectId` (`ProjectId`),
+  KEY `idx_StudentStarAwards_CheckpointId` (`CheckpointId`),
+  KEY `idx_StudentStarAwards_SubmissionId` (`SubmissionId`),
+  KEY `idx_StudentStarAwards_AwardedAt` (`AwardedAt`),
+  CONSTRAINT `fk_StudentStarAwards_User` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentStarAwards_Class` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentStarAwards_Project` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentStarAwards_Submission` FOREIGN KEY (`SubmissionId`) REFERENCES `Submissions` (`Id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Table structure for table `StudentStarSpending`
+--
+
+DROP TABLE IF EXISTS `StudentStarSpending`;
+CREATE TABLE `StudentStarSpending` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UserId` int NOT NULL,
+  `ClassId` int NOT NULL,
+  `ProjectId` int DEFAULT NULL,
+  `CheckpointId` int NOT NULL DEFAULT 0,
+  `SpendType` varchar(40) NOT NULL,
+  `Stars` int NOT NULL DEFAULT 0,
+  `CreatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`Id`),
+  KEY `idx_StudentStarSpending_User_Class` (`UserId`,`ClassId`),
+  KEY `idx_StudentStarSpending_ClassId` (`ClassId`),
+  KEY `idx_StudentStarSpending_ProjectId` (`ProjectId`),
+  KEY `idx_StudentStarSpending_CheckpointId` (`CheckpointId`),
+  KEY `idx_StudentStarSpending_SpendType` (`SpendType`),
+  KEY `idx_StudentStarSpending_CreatedAt` (`CreatedAt`),
+  CONSTRAINT `fk_StudentStarSpending_User` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentStarSpending_Class` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentStarSpending_Project` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Table structure for table `StudentCheckpointSkips`
+--
+
+DROP TABLE IF EXISTS `StudentCheckpointSkips`;
+CREATE TABLE `StudentCheckpointSkips` (
+  `UserId` int NOT NULL,
+  `ClassId` int NOT NULL,
+  `ProjectId` int NOT NULL,
+  `CheckpointId` int NOT NULL,
+  `SpentStars` int NOT NULL DEFAULT 0,
+  `CreatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`UserId`,`ClassId`,`ProjectId`,`CheckpointId`),
+  KEY `idx_StudentCheckpointSkips_ClassId` (`ClassId`),
+  KEY `idx_StudentCheckpointSkips_ProjectId` (`ProjectId`),
+  KEY `idx_StudentCheckpointSkips_CheckpointId` (`CheckpointId`),
+  KEY `idx_StudentCheckpointSkips_CreatedAt` (`CreatedAt`),
+  CONSTRAINT `fk_StudentCheckpointSkips_User` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentCheckpointSkips_Class` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentCheckpointSkips_Project` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentCheckpointSkips_Checkpoint` FOREIGN KEY (`CheckpointId`) REFERENCES `Checkpoints` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Table structure for table `StudentCooldownSkips`
+--
+
+DROP TABLE IF EXISTS `StudentCooldownSkips`;
+CREATE TABLE `StudentCooldownSkips` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UserId` int NOT NULL,
+  `ClassId` int NOT NULL,
+  `ProjectId` int DEFAULT NULL,
+  `CheckpointId` int NOT NULL DEFAULT 0,
+  `SpentStars` int NOT NULL DEFAULT 0,
+  `CreatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `UsedAt` datetime DEFAULT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `idx_StudentCooldownSkips_User_Class` (`UserId`,`ClassId`),
+  KEY `idx_StudentCooldownSkips_ClassId` (`ClassId`),
+  KEY `idx_StudentCooldownSkips_ProjectId` (`ProjectId`),
+  KEY `idx_StudentCooldownSkips_CheckpointId` (`CheckpointId`),
+  KEY `idx_StudentCooldownSkips_CreatedAt` (`CreatedAt`),
+  KEY `idx_StudentCooldownSkips_UsedAt` (`UsedAt`),
+  CONSTRAINT `fk_StudentCooldownSkips_User` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentCooldownSkips_Class` FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_StudentCooldownSkips_Project` FOREIGN KEY (`ProjectId`) REFERENCES `Projects` (`Id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
 -- Table structure for table `Testcases`
 --
 
