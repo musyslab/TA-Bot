@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import axios from 'axios'
 import { Helmet } from 'react-helmet'
 import "../../styling/ClassicResultView.scss"
+import logo from "../../images/MAAT.png"
 
 
 type TestResult = {
@@ -163,14 +164,13 @@ export function ClassicResultView() {
     return (
         <>
             <Helmet>
-                <title>Test Results – TABOT</title>
+                <title>Test Results – MAAT</title>
             </Helmet>
 
             <div className="cvr-page">
                 <header className="cvr-header">
                     <div className="cvr-header__logo">
-                        <span className="cvr-header__logo-mark">TA</span>
-                        <span className="cvr-header__logo-bot">BOT</span>
+                        <img src={logo} alt="MAAT" className="cvr-header__logo" />
                     </div>
                     <div className="cvr-header__titles">
                         {payload?.assignmentLabel && (
@@ -237,7 +237,7 @@ export function ClassicResultView() {
                             )}
                         </>
                     )}
-                </main>
+                </main>a
             </div>
         </>
     )

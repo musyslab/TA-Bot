@@ -1,22 +1,3 @@
-"""
-classic_view.py  -  Flask Blueprint  (shallow-connection approach)
-
-Place in:  backend/src/routes/classic_view.py
-Register in app factory:
-    from src.routes.classic_view import classic_view_api
-    app.register_blueprint(classic_view_api, url_prefix='/classic-view')
-
-This blueprint is the ONLY contract between classic TABOT and new TABOT.
-It does not create Submission/User/Project rows or touch the new-TABOT
-data model in any way. It only stores a parsed-results blob against a
-token and serves it back.
-
-Two endpoints:
-  POST /classic-view/create   - mailbot calls this with raw TAP text.
-                                 Protected by a shared secret (or localhost).
-  GET  /classic-view/<token>  - public, no auth; returns the stored payload.
-"""
-
 import json
 import os
 import secrets
@@ -26,10 +7,7 @@ from http import HTTPStatus
 
 from flask import Blueprint, jsonify, make_response, request
 
-# Reuse the EXISTING TAP -> JSON converter from the new-TABOT submission code.
-# This is the same function the new pipeline uses, so classic results render
-# identically to native submissions. No custom parser is maintained here.
-from src.routes.submission import convert_tap_to_json
+from src.submission import convert_tap_to_json
 
 classic_view_api = Blueprint("classic_view_api", __name__)
 
@@ -118,7 +96,13 @@ def create_classic_view():
         return make_response({"error": "Forbidden"}, HTTPStatus.FORBIDDEN)
 
     body = request.get_json(silent=True) or {}
-    tap_text = str(body.get("tap_text", ""))
+    tap_raw = body.get("tap_text", "")
+    
+    if isinstance(tap_raw, list):
+        tap_text = "\n".join(tap_raw)
+    else:
+        tap_text = str(tap_raw)
+        
     student_name = str(body.get("student_name", ""))
     assignment_label = str(body.get("assignment_label", ""))
     expires_hours = int(body.get("expires_hours", 168))
