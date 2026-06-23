@@ -301,12 +301,6 @@ export function AdminGrading() {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
 
-    const truncateForAi = (text: string, limit: number): string => {
-        const normalized = (text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
-        if (normalized.length <= limit) return normalized
-        return `${normalized.slice(0, limit)}\n...[truncated]...`
-    }
-
     const getSelectedCodeFromDom = (range: LineRange): string => {
         const lines: string[] = []
         for (let ln = range.start; ln <= range.end; ln++) {
@@ -347,9 +341,9 @@ export function AdminGrading() {
                     submissionId: submissionId,
                     startLine: range.start,
                     endLine: range.end,
-                    selectedCode: truncateForAi(selectedCode, 1500),
+                    selectedCode: selectedCode,
                     testcaseName: activeTestcaseName,
-                    testcaseLongDiff: truncateForAi(activeTestcaseLongDiff, 2500),
+                    testcaseLongDiff: activeTestcaseLongDiff,
                 },
                 {
                     headers: {
