@@ -1,20 +1,29 @@
+// frontend/src/pages/public/ClassicResultView.tsx
+//
+// Public page – no login required.
+// Reached via the one-time link emailed by the classic TABOT system.
+// URL: /classic/:token
+
 import React from 'react'
 import { useParams } from 'react-router-dom'
 import axios from 'axios'
 import { Helmet } from 'react-helmet'
-import "../../styling/ClassicResultView.scss"
-import logo from "../../images/MAAT.png"
+import '../../styling/ClassicResultView.scss'
 
+// ── types ────────────────────────────────────────────────────────────────────
 
 type TestResult = {
     passed: boolean | ''
     skipped: string
     test: {
-        name: string
-        description: string
+        name?: string
+        description?: string
+        category?: string
         suite?: number
         input?: string
         output?: string
+        expected?: string
+        actual?: string
         diff?: string
         locked?: boolean
         hidden?: boolean
@@ -29,6 +38,7 @@ type ClassicViewPayload = {
     results: { results: TestResult[] }
 }
 
+// ── status badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ passed }: { passed: boolean | '' }) {
     if (passed === true)
@@ -38,6 +48,7 @@ function StatusBadge({ passed }: { passed: boolean | '' }) {
     return <span className="cvr-badge cvr-badge--unknown">NO OUTPUT</span>
 }
 
+// ── diff block ────────────────────────────────────────────────────────────────
 
 function DiffBlock({ diff }: { diff: string }) {
     if (!diff.trim()) return null
@@ -59,11 +70,35 @@ function DiffBlock({ diff }: { diff: string }) {
     )
 }
 
+// ── expected / actual output blocks ──────────────────────────────────────────
+
+function OutputGrid({ expected, actual }: { expected?: string; actual?: string }) {
+    if (!expected && !actual) return null
+    return (
+        <div className="cvr-output-grid">
+            {expected !== undefined && (
+                <div className="cvr-output-block cvr-output-block--expected">
+                    <div className="cvr-output-block__label">Expected output</div>
+                    <pre className="cvr-output-block__content">{expected}</pre>
+                </div>
+            )}
+            {actual !== undefined && (
+                <div className="cvr-output-block cvr-output-block--actual">
+                    <div className="cvr-output-block__label">Your output</div>
+                    <pre className="cvr-output-block__content">{actual}</pre>
+                </div>
+            )}
+        </div>
+    )
+}
+
+// ── individual test row ───────────────────────────────────────────────────────
 
 function TestRow({ result, index }: { result: TestResult; index: number }) {
     const [open, setOpen] = React.useState(false)
     const hasDiff = Boolean(result.test.diff?.trim())
-    const canExpand = result.passed === false && hasDiff
+    const hasOutput = Boolean(result.test.expected || result.test.actual)
+    const canExpand = result.passed === false && (hasDiff || hasOutput)
 
     return (
         <div className={`cvr-row ${result.passed === true ? 'cvr-row--pass' : result.passed === false ? 'cvr-row--fail' : 'cvr-row--unknown'}`}>
@@ -74,7 +109,7 @@ function TestRow({ result, index }: { result: TestResult; index: number }) {
                 aria-expanded={canExpand ? open : undefined}
             >
                 <span className="cvr-row__num">{String(index + 1).padStart(2, '0')}</span>
-                <span className="cvr-row__name">{result.test.name}</span>
+                <span className="cvr-row__name">{result.test.name ?? `Test ${index + 1}`}</span>
                 {result.test.description && (
                     <span className="cvr-row__group">{result.test.description}</span>
                 )}
@@ -88,19 +123,72 @@ function TestRow({ result, index }: { result: TestResult; index: number }) {
                 )}
             </div>
 
-            {open && hasDiff && (
+            {open && (
                 <div className="cvr-row__body">
-                    <p className="cvr-diff__legend">
-                        <span className="cvr-diff__swatch cvr-diff__swatch--expected" /> expected &nbsp;
-                        <span className="cvr-diff__swatch cvr-diff__swatch--actual" /> your output
-                    </p>
-                    <DiffBlock diff={result.test.diff!} />
+                    {hasOutput && (
+                        <OutputGrid
+                            expected={result.test.expected}
+                            actual={result.test.actual}
+                        />
+                    )}
+                    {hasDiff && (
+                        <>
+                            <p className="cvr-diff__legend">
+                                <span className="cvr-diff__swatch cvr-diff__swatch--expected" /> expected &nbsp;
+                                <span className="cvr-diff__swatch cvr-diff__swatch--actual" /> your output
+                            </p>
+                            <DiffBlock diff={result.test.diff!} />
+                        </>
+                    )}
                 </div>
             )}
         </div>
     )
 }
 
+// ── category group ────────────────────────────────────────────────────────────
+
+type CategoryGroup = {
+    category: string
+    results: TestResult[]
+}
+
+function groupByCategory(results: TestResult[]): CategoryGroup[] {
+    const order: string[] = []
+    const map = new Map<string, TestResult[]>()
+
+    for (const r of results) {
+        const cat = r.test.category?.trim() || 'Other'
+        if (!map.has(cat)) {
+            order.push(cat)
+            map.set(cat, [])
+        }
+        map.get(cat)!.push(r)
+    }
+
+    return order.map(category => ({ category, results: map.get(category)! }))
+}
+
+function CategorySection({ group, startIndex }: { group: CategoryGroup; startIndex: number }) {
+    const passed = group.results.filter(r => r.passed === true).length
+    const total = group.results.length
+
+    return (
+        <section className="cvr-category">
+            <div className="cvr-category__header">
+                <h2 className="cvr-category__title">{group.category}</h2>
+                <span className="cvr-category__count">{passed} / {total}</span>
+            </div>
+            <div className="cvr-list">
+                {group.results.map((r, i) => (
+                    <TestRow key={i} result={r} index={startIndex + i} />
+                ))}
+            </div>
+        </section>
+    )
+}
+
+// ── summary bar ───────────────────────────────────────────────────────────────
 
 function SummaryBar({ results }: { results: TestResult[] }) {
     const passed = results.filter(r => r.passed === true).length
@@ -126,6 +214,7 @@ function SummaryBar({ results }: { results: TestResult[] }) {
     )
 }
 
+// ── main page ─────────────────────────────────────────────────────────────────
 
 export function ClassicResultView() {
     const { token } = useParams<{ token: string }>()
@@ -160,17 +249,19 @@ export function ClassicResultView() {
     }, [token])
 
     const results: TestResult[] = payload?.results?.results ?? []
+    const groups = React.useMemo(() => groupByCategory(results), [results])
 
     return (
         <>
             <Helmet>
-                <title>Test Results – MAAT</title>
+                <title>Test Results – TABOT</title>
             </Helmet>
 
             <div className="cvr-page">
                 <header className="cvr-header">
                     <div className="cvr-header__logo">
-                        <img src={logo} alt="MAAT" className="cvr-header__logo" />
+                        <span className="cvr-header__logo-mark">TA</span>
+                        <span className="cvr-header__logo-bot">BOT</span>
                     </div>
                     <div className="cvr-header__titles">
                         {payload?.assignmentLabel && (
@@ -217,17 +308,26 @@ export function ClassicResultView() {
                         <>
                             <SummaryBar results={results} />
 
-                            <section className="cvr-list" aria-label="Test case results">
-                                {results.length === 0 ? (
-                                    <p className="cvr-empty">
-                                        No test case results were recorded for this submission.
-                                    </p>
-                                ) : (
-                                    results.map((r, i) => (
-                                        <TestRow key={i} result={r} index={i} />
-                                    ))
-                                )}
-                            </section>
+                            {results.length === 0 ? (
+                                <p className="cvr-empty">
+                                    No test case results were recorded for this submission.
+                                </p>
+                            ) : (
+                                (() => {
+                                    let runningIndex = 0
+                                    return groups.map((group, gi) => {
+                                        const startIndex = runningIndex
+                                        runningIndex += group.results.length
+                                        return (
+                                            <CategorySection
+                                                key={gi}
+                                                group={group}
+                                                startIndex={startIndex}
+                                            />
+                                        )
+                                    })
+                                })()
+                            )}
 
                             {payload?.expiresAt && (
                                 <p className="cvr-expiry">
@@ -237,7 +337,7 @@ export function ClassicResultView() {
                             )}
                         </>
                     )}
-                </main>a
+                </main>
             </div>
         </>
     )
