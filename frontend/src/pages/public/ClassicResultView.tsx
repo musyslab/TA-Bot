@@ -19,6 +19,7 @@ type TestResult = {
         name?: string
         description?: string
         category?: string
+        comment?: string
         suite?: number
         input?: string
         output?: string
@@ -37,6 +38,8 @@ type ClassicViewPayload = {
     expiresAt: string | null
     results: { results: TestResult[] }
 }
+
+
 
 // ── status badge ─────────────────────────────────────────────────────────────
 
@@ -150,34 +153,50 @@ function TestRow({ result, index }: { result: TestResult; index: number }) {
 
 type CategoryGroup = {
     category: string
+    comment: string
     results: TestResult[]
 }
 
 function groupByCategory(results: TestResult[]): CategoryGroup[] {
     const order: string[] = []
-    const map = new Map<string, TestResult[]>()
+    const map = new Map<string, CategoryGroup>()
 
     for (const r of results) {
         const cat = r.test.category?.trim() || 'Other'
+        // Use comment from the first result in the group that has one
+        const comment = r.test.comment?.trim() || ''
         if (!map.has(cat)) {
             order.push(cat)
-            map.set(cat, [])
+            map.set(cat, { category: cat, comment, results: [] })
         }
-        map.get(cat)!.push(r)
+        const group = map.get(cat)!
+        if (!group.comment && comment) group.comment = comment
+        group.results.push(r)
     }
 
-    return order.map(category => ({ category, results: map.get(category)! }))
+    return order.map(category => map.get(category)!)
 }
 
 function CategorySection({ group, startIndex }: { group: CategoryGroup; startIndex: number }) {
     const passed = group.results.filter(r => r.passed === true).length
     const total = group.results.length
+    const allPass = passed === total
+    const anyFail = passed < total
 
     return (
-        <section className="cvr-category">
+        <section className={`cvr-category ${allPass ? 'cvr-category--pass' : anyFail ? 'cvr-category--fail' : ''}`}>
             <div className="cvr-category__header">
-                <h2 className="cvr-category__title">{group.category}</h2>
-                <span className="cvr-category__count">{passed} / {total}</span>
+                <div className="cvr-category__header-left">
+                    <h2 className="cvr-category__title">
+                        {group.category}
+                    </h2>
+                    {group.comment && (
+                        <span className="cvr-category__comment">{group.comment}</span>
+                    )}
+                </div>
+                <span className={`cvr-category__count ${allPass ? 'cvr-category__count--pass' : 'cvr-category__count--fail'}`}>
+                    {passed} / {total}
+                </span>
             </div>
             <div className="cvr-list">
                 {group.results.map((r, i) => (
