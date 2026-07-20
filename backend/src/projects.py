@@ -32,10 +32,9 @@ from src.repositories.models import (
     Checkpoints,
     Projects,
     StudentCheckpointSkips,
+    StudentCooldownSkips,
     StudentHiddenModules,
     StudentStarAwards,
-    StudentStarBalance,
-    StudentStarSpending,
     Submissions,
     Users,
 )
@@ -103,71 +102,38 @@ def parse_int(v, default: int = 0) -> int:
         return default
 
 
-def ensure_incentive_tables():
-    for model in (
-        StudentStarBalance,
-        StudentStarAwards,
-        StudentStarSpending,
-        StudentCheckpointSkips,
-    ):
-        try:
-            model.__table__.create(db.engine, checkfirst=True)
-        except Exception:
-            pass
-
-
 def get_star_balance(user_id: int, class_id: int) -> int:
-    ensure_incentive_tables()
-    row = StudentStarBalance.query.filter(
-        StudentStarBalance.UserId == int(user_id),
-        StudentStarBalance.ClassId == int(class_id),
-    ).first()
-    return max(0, parse_int(getattr(row, "Stars", 0) if row else 0, 0))
+    """Return awards minus checkpoint and cooldown skip purchases."""
+    user_id = int(user_id)
+    class_id = int(class_id)
 
+    awarded = db.session.query(
+        func.coalesce(func.sum(StudentStarAwards.AwardedStars), 0)
+    ).filter(
+        StudentStarAwards.UserId == user_id,
+        StudentStarAwards.ClassId == class_id,
+    ).scalar()
 
-def set_star_balance(user_id: int, class_id: int, stars: int) -> int:
-    ensure_incentive_tables()
-    row = StudentStarBalance.query.filter(
-        StudentStarBalance.UserId == int(user_id),
-        StudentStarBalance.ClassId == int(class_id),
-    ).first()
+    checkpoint_spent = db.session.query(
+        func.coalesce(func.sum(StudentCheckpointSkips.SpentStars), 0)
+    ).filter(
+        StudentCheckpointSkips.UserId == user_id,
+        StudentCheckpointSkips.ClassId == class_id,
+    ).scalar()
 
-    if row is None:
-        row = StudentStarBalance(
-            UserId=int(user_id),
-            ClassId=int(class_id),
-            Stars=0,
-            UpdatedAt=datetime.now(),
-        )
-        db.session.add(row)
+    cooldown_spent = db.session.query(
+        func.coalesce(func.sum(StudentCooldownSkips.SpentStars), 0)
+    ).filter(
+        StudentCooldownSkips.UserId == user_id,
+        StudentCooldownSkips.ClassId == class_id,
+    ).scalar()
 
-    row.Stars = max(0, parse_int(stars, 0))
-    row.UpdatedAt = datetime.now()
-    db.session.commit()
-
-    return int(row.Stars or 0)
-
-
-def spend_stars(user_id: int, class_id: int, project_id: int | None, checkpoint_id: int | None, spend_type: str, cost: int) -> tuple[bool, int]:
-    ensure_incentive_tables()
-    cost = max(0, parse_int(cost, 0))
-    balance = get_star_balance(user_id, class_id)
-
-    if balance < cost:
-        return False, balance
-
-    new_balance = set_star_balance(user_id, class_id, balance - cost)
-    db.session.add(StudentStarSpending(
-        UserId=int(user_id),
-        ClassId=int(class_id),
-        ProjectId=(int(project_id) if project_id else None),
-        CheckpointId=int(checkpoint_id or 0),
-        SpendType=str(spend_type),
-        Stars=int(cost),
-        CreatedAt=datetime.now(),
-    ))
-    db.session.commit()
-    return True, int(new_balance)
+    return max(
+        0,
+        parse_int(awarded, 0)
+        - parse_int(checkpoint_spent, 0)
+        - parse_int(cooldown_spent, 0),
+    )
 
 
 def incentive_summary(user_id: int, class_id: int) -> dict:
@@ -183,7 +149,6 @@ def incentive_summary(user_id: int, class_id: int) -> dict:
 
 
 def skipped_checkpoint_ids_for_project(user_id: int, project_id: int) -> set[int]:
-    ensure_incentive_tables()
     rows = StudentCheckpointSkips.query.filter(
         StudentCheckpointSkips.UserId == int(user_id),
         StudentCheckpointSkips.ProjectId == int(project_id),
@@ -192,7 +157,6 @@ def skipped_checkpoint_ids_for_project(user_id: int, project_id: int) -> set[int
 
 
 def checkpoint_awards_for_project(user_id: int, project_id: int) -> dict[int, dict]:
-    ensure_incentive_tables()
     rows = StudentStarAwards.query.filter(
         StudentStarAwards.UserId == int(user_id),
         StudentStarAwards.ProjectId == int(project_id),
@@ -211,7 +175,6 @@ def checkpoint_awards_for_project(user_id: int, project_id: int) -> dict[int, di
 
 
 def main_award_for_project(user_id: int, project_id: int) -> dict | None:
-    ensure_incentive_tables()
     row = StudentStarAwards.query.filter(
         StudentStarAwards.UserId == int(user_id),
         StudentStarAwards.ProjectId == int(project_id),
@@ -1181,7 +1144,12 @@ def analytics_submission_is_newer(candidate, current) -> bool:
 
 def analytics_dashboard_students(class_id: int):
     rows = (
-        db.session.query(Users, LectureSections.Name, Labs.Name, ClassAssignments.Role)
+        db.session.query(
+            Users,
+            LectureSections.Name,
+            Labs.Name,
+            ClassAssignments.Role,
+        )
         .join(ClassAssignments, ClassAssignments.UserId == Users.Id)
         .outerjoin(
             LectureSections,
@@ -1306,10 +1274,10 @@ def analytics_dashboard_progress(class_id: int, project_ids: list[int], checkpoi
                 latest_main[key] = submission
 
     main_grades = {
-        (int(row.Pid), int(row.Sid)): row.Grade
+        (int(row.ProjectId), int(row.UserId)): row.Grade
         for row in MainAssignmentGrades.query.filter(
-            MainAssignmentGrades.Pid.in_(project_ids),
-            MainAssignmentGrades.Sid.in_(student_ids),
+            MainAssignmentGrades.ProjectId.in_(project_ids),
+            MainAssignmentGrades.UserId.in_(student_ids),
         ).all()
     }
 
@@ -2946,6 +2914,13 @@ def skip_checkpoint():
     if earlier_incomplete:
         return make_response({"message": "Complete or skip earlier checkpoints first."}, HTTPStatus.BAD_REQUEST)
 
+
+    # Lock the user row so simultaneous purchases cannot overspend a derived balance.
+    locked_user = Users.query.filter(Users.Id == user_id).with_for_update().first()
+    if locked_user is None:
+        db.session.rollback()
+        return make_response({"message": "User not found."}, HTTPStatus.NOT_FOUND)
+
     existing_skip = StudentCheckpointSkips.query.filter(
         StudentCheckpointSkips.UserId == user_id,
         StudentCheckpointSkips.ClassId == class_id,
@@ -2953,22 +2928,16 @@ def skip_checkpoint():
         StudentCheckpointSkips.CheckpointId == checkpoint_id,
     ).first()
     if existing_skip is not None:
+        db.session.rollback()
         return jsonify({
             "message": "Checkpoint already skipped.",
             "checkpoints": student_checkpoint_rows(ProjectRepository(), project_id),
             "incentives": incentive_summary(user_id, class_id),
         })
 
-    spent, balance = spend_stars(
-        user_id=user_id,
-        class_id=class_id,
-        project_id=project_id,
-        checkpoint_id=checkpoint_id,
-        spend_type="checkpoint_skip",
-        cost=CHECKPOINT_SKIP_COST_STARS,
-    )
-
-    if not spent:
+    balance = get_star_balance(user_id, class_id)
+    if balance < CHECKPOINT_SKIP_COST_STARS:
+        db.session.rollback()
         return make_response({
             "message": f"You need {CHECKPOINT_SKIP_COST_STARS} stars to skip a checkpoint.",
             "stars": balance,

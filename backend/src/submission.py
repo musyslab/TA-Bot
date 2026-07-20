@@ -20,6 +20,7 @@ from io import BytesIO
 from tap.parser import Parser
 from flask import jsonify
 from dependency_injector.wiring import inject, Provide
+from sqlalchemy import func
 from container import Container
 from urllib.parse import unquote
 import csv
@@ -31,12 +32,12 @@ from src.repositories.models import (
     Classes,
     Modules,
     Projects,
+    StudentCheckpointSkips,
     StudentCooldownSkips,
     StudentStarAwards,
-    StudentStarBalance,
-    StudentStarSpending,
     StudentUploadState,
     Submissions,
+    Users,
     Testcases,
 )
 from src.repositories.database import db
@@ -286,7 +287,11 @@ def seconds_until(value: datetime | None) -> int:
 
 
 def ensure_incentive_tables():
-    for model in (StudentStarBalance, StudentStarAwards, StudentStarSpending, StudentCooldownSkips):
+    for model in (
+        StudentStarAwards,
+        StudentCheckpointSkips,
+        StudentCooldownSkips,
+    ):
         try:
             model.__table__.create(db.engine, checkfirst=True)
         except Exception:
@@ -294,59 +299,38 @@ def ensure_incentive_tables():
 
 
 def get_star_balance(user_id: int, class_id: int) -> int:
+    """Return awards minus checkpoint and cooldown skip purchases."""
     ensure_incentive_tables()
-    row = StudentStarBalance.query.filter(
-        StudentStarBalance.UserId == int(user_id),
-        StudentStarBalance.ClassId == int(class_id),
-    ).first()
+    user_id = int(user_id)
+    class_id = int(class_id)
 
-    return max(0, parse_int(getattr(row, "Stars", 0) if row else 0, 0))
+    awarded = db.session.query(
+        func.coalesce(func.sum(StudentStarAwards.AwardedStars), 0)
+    ).filter(
+        StudentStarAwards.UserId == user_id,
+        StudentStarAwards.ClassId == class_id,
+    ).scalar()
 
+    checkpoint_spent = db.session.query(
+        func.coalesce(func.sum(StudentCheckpointSkips.SpentStars), 0)
+    ).filter(
+        StudentCheckpointSkips.UserId == user_id,
+        StudentCheckpointSkips.ClassId == class_id,
+    ).scalar()
 
-def set_star_balance(user_id: int, class_id: int, stars: int) -> int:
-    ensure_incentive_tables()
-    row = StudentStarBalance.query.filter(
-        StudentStarBalance.UserId == int(user_id),
-        StudentStarBalance.ClassId == int(class_id),
-    ).first()
+    cooldown_spent = db.session.query(
+        func.coalesce(func.sum(StudentCooldownSkips.SpentStars), 0)
+    ).filter(
+        StudentCooldownSkips.UserId == user_id,
+        StudentCooldownSkips.ClassId == class_id,
+    ).scalar()
 
-    if row is None:
-        row = StudentStarBalance(
-            UserId=int(user_id),
-            ClassId=int(class_id),
-            Stars=0,
-            UpdatedAt=current_utc_datetime(),
-        )
-        db.session.add(row)
-
-    row.Stars = max(0, parse_int(stars, 0))
-    row.UpdatedAt = current_utc_datetime()
-    db.session.commit()
-
-    return int(row.Stars or 0)
-
-
-def spend_stars(user_id: int, class_id: int, project_id: int | None, checkpoint_id: int | None, spend_type: str, cost: int) -> tuple[bool, int]:
-    ensure_incentive_tables()
-    cost = max(0, parse_int(cost, 0))
-    balance = get_star_balance(user_id, class_id)
-
-    if balance < cost:
-        return False, balance
-
-    new_balance = set_star_balance(user_id, class_id, balance - cost)
-    db.session.add(StudentStarSpending(
-        UserId=int(user_id),
-        ClassId=int(class_id),
-        ProjectId=(int(project_id) if project_id else None),
-        CheckpointId=int(checkpoint_id or 0),
-        SpendType=str(spend_type),
-        Stars=int(cost),
-        CreatedAt=current_utc_datetime(),
-    ))
-    db.session.commit()
-
-    return True, int(new_balance)
+    return max(
+        0,
+        parse_int(awarded, 0)
+        - parse_int(checkpoint_spent, 0)
+        - parse_int(cooldown_spent, 0),
+    )
 
 
 def project_window(project) -> tuple[datetime | None, datetime | None]:
@@ -1107,16 +1091,17 @@ def skip_submission_cooldown():
         payload["cooldown_remaining_seconds"] = 0
         return jsonify(payload)
 
-    spent, balance = spend_stars(
-        user_id=int(current_user.Id),
-        class_id=class_id,
-        project_id=project_id,
-        checkpoint_id=checkpoint_id,
-        spend_type="cooldown_skip",
-        cost=SUBMISSION_COOLDOWN_SKIP_COST_STARS,
-    )
+    ensure_incentive_tables()
 
-    if not spent:
+    # Serialize purchases for this student while the balance is calculated.
+    locked_user = Users.query.filter(Users.Id == int(current_user.Id)).with_for_update().first()
+    if locked_user is None:
+        db.session.rollback()
+        return make_response({"message": "User not found."}, HTTPStatus.NOT_FOUND)
+
+    balance = get_star_balance(int(current_user.Id), class_id)
+    if balance < SUBMISSION_COOLDOWN_SKIP_COST_STARS:
+        db.session.rollback()
         return make_response({
             "message": f"You need {SUBMISSION_COOLDOWN_SKIP_COST_STARS} stars to skip the submission timer.",
             "stars": balance,
@@ -1124,7 +1109,6 @@ def skip_submission_cooldown():
             "cooldown_remaining_seconds": remaining_seconds,
         }, HTTPStatus.BAD_REQUEST)
 
-    ensure_incentive_tables()
     db.session.add(StudentCooldownSkips(
         UserId=int(current_user.Id),
         ClassId=int(class_id),

@@ -1,11 +1,6 @@
-from abc import ABC, abstractmethod
 import os
-import random
-import shutil
 import subprocess
 from typing import Optional, Dict
-from flask import send_file
-from sqlalchemy.sql.expression import asc
 from .models import (
     Projects,
     Checkpoints,
@@ -18,10 +13,8 @@ from .models import (
     StudentHiddenModules,
 )
 from src.repositories.database import db
-from sqlalchemy import desc, and_, func
+from sqlalchemy import and_, func
 from datetime import datetime
-from pyston import PystonClient, File
-import asyncio
 import json
 
 
@@ -854,8 +847,8 @@ class ProjectRepository():
     def get_student_grade(self, project_id, user_id):
         student_progress = MainAssignmentGrades.query.filter(
             and_(
-                MainAssignmentGrades.Sid == user_id,
-                MainAssignmentGrades.Pid == project_id,
+                MainAssignmentGrades.UserId == user_id,
+                MainAssignmentGrades.ProjectId == project_id,
             )
         ).first()
 
@@ -865,23 +858,46 @@ class ProjectRepository():
         return student_progress.Grade
 
     def set_student_grade(self, project_id, user_id, grade):
+        project_id = int(project_id)
+        user_id = int(user_id)
+
+        latest_submission = (
+            Submissions.query
+            .filter(
+                Submissions.Project == project_id,
+                Submissions.User == user_id,
+                Submissions.IsCheckpoint == False,
+            )
+            .order_by(Submissions.Time.desc(), Submissions.Id.desc())
+            .first()
+        )
+
+        # Grades are keyed by the submission they describe. A grade without a
+        # submission cannot be displayed or edited reliably, so leave the
+        # database unchanged when the student has not submitted this project.
+        if latest_submission is None:
+            return False
+
         student_grade = MainAssignmentGrades.query.filter(
             and_(
-                MainAssignmentGrades.Sid == user_id,
-                MainAssignmentGrades.Pid == project_id,
+                MainAssignmentGrades.UserId == user_id,
+                MainAssignmentGrades.ProjectId == project_id,
             )
         ).first()
 
-        if student_grade is not None:
-            student_grade.Grade = grade
-            db.session.commit()
-            return
+        if student_grade is None:
+            student_grade = MainAssignmentGrades(
+                SubmissionId=int(latest_submission.Id),
+                UserId=user_id,
+                ProjectId=project_id,
+                Grade=int(grade),
+                UpdatedAt=datetime.utcnow(),
+            )
+            db.session.add(student_grade)
+        else:
+            student_grade.SubmissionId = int(latest_submission.Id)
+            student_grade.Grade = int(grade)
+            student_grade.UpdatedAt = datetime.utcnow()
 
-        studentGrade = MainAssignmentGrades(
-            Sid=user_id,
-            Pid=project_id,
-            Grade=grade,
-        )
-        db.session.add(studentGrade)
         db.session.commit()
-        return
+        return True

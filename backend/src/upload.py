@@ -9,11 +9,11 @@ from flask_jwt_extended import current_user
 from flask import Blueprint
 from flask import request
 from flask import make_response
-from flask import current_app
 from http import HTTPStatus
 from datetime import datetime
 from math import ceil
 from dependency_injector.wiring import inject, Provide
+from sqlalchemy import func
 
 from container import Container
 from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
@@ -23,9 +23,9 @@ from src.repositories.models import (
     Classes,
     ClassAssignments,
     Projects,
+    StudentCheckpointSkips,
     StudentCooldownSkips,
     StudentStarAwards,
-    StudentStarBalance,
     Submissions,
     Users,
 )
@@ -54,46 +54,38 @@ MAIN_PROJECT_COMPLETION_STARS = 3
 EARLY_START_MULTIPLIER = 2
 
 
-def ensure_incentive_tables():
-    for model in (StudentStarBalance, StudentStarAwards, StudentCooldownSkips):
-        try:
-            model.__table__.create(db.engine, checkfirst=True)
-        except Exception:
-            pass
-
-
 def current_star_balance(user_id: int, class_id: int) -> int:
-    ensure_incentive_tables()
-    row = StudentStarBalance.query.filter(
-        StudentStarBalance.UserId == int(user_id),
-        StudentStarBalance.ClassId == int(class_id),
-    ).first()
+    """Return awards minus checkpoint and cooldown skip purchases."""
+    user_id = int(user_id)
+    class_id = int(class_id)
 
-    return max(0, parse_int(getattr(row, "Stars", 0) if row else 0, 0))
+    awarded = db.session.query(
+        func.coalesce(func.sum(StudentStarAwards.AwardedStars), 0)
+    ).filter(
+        StudentStarAwards.UserId == user_id,
+        StudentStarAwards.ClassId == class_id,
+    ).scalar()
 
+    checkpoint_spent = db.session.query(
+        func.coalesce(func.sum(StudentCheckpointSkips.SpentStars), 0)
+    ).filter(
+        StudentCheckpointSkips.UserId == user_id,
+        StudentCheckpointSkips.ClassId == class_id,
+    ).scalar()
 
-def add_stars_to_balance(user_id: int, class_id: int, stars: int) -> int:
-    ensure_incentive_tables()
-    stars = max(0, parse_int(stars, 0))
-    row = StudentStarBalance.query.filter(
-        StudentStarBalance.UserId == int(user_id),
-        StudentStarBalance.ClassId == int(class_id),
-    ).first()
+    cooldown_spent = db.session.query(
+        func.coalesce(func.sum(StudentCooldownSkips.SpentStars), 0)
+    ).filter(
+        StudentCooldownSkips.UserId == user_id,
+        StudentCooldownSkips.ClassId == class_id,
+    ).scalar()
 
-    if row is None:
-        row = StudentStarBalance(
-            UserId=int(user_id),
-            ClassId=int(class_id),
-            Stars=0,
-            UpdatedAt=datetime.now(),
-        )
-        db.session.add(row)
-
-    row.Stars = max(0, parse_int(getattr(row, "Stars", 0), 0)) + stars
-    row.UpdatedAt = datetime.now()
-    db.session.commit()
-
-    return int(row.Stars or 0)
+    return max(
+        0,
+        parse_int(awarded, 0)
+        - parse_int(checkpoint_spent, 0)
+        - parse_int(cooldown_spent, 0),
+    )
 
 
 def project_window(project):
@@ -155,7 +147,6 @@ def award_completion_stars(
     checkpoint_id: int | None,
     submission_id: int,
 ) -> dict | None:
-    ensure_incentive_tables()
 
     if project is None or submission_id is None:
         return None
@@ -190,8 +181,8 @@ def award_completion_stars(
         ProjectId=int(project.Id),
         CheckpointId=checkpoint_key,
         AwardType=award_type,
-        Stars=int(stars),
-        BaseStars=int(base_stars),
+        AwardedStars=int(stars),
+        BaseAwardStars=int(base_stars),
         Multiplier=int(multiplier),
         StartedEarly=bool(started_early),
         SubmissionId=int(submission_id),
@@ -200,7 +191,7 @@ def award_completion_stars(
     db.session.add(row)
     db.session.commit()
 
-    balance = add_stars_to_balance(user_id, class_id, stars)
+    balance = current_star_balance(user_id, class_id)
 
     return {
         "awarded": True,
@@ -214,7 +205,6 @@ def award_completion_stars(
 
 
 def consume_pending_cooldown_skip(user_id: int, class_id: int, latest_submission_time: datetime | None) -> bool:
-    ensure_incentive_tables()
 
     query = StudentCooldownSkips.query.filter(
         StudentCooldownSkips.UserId == int(user_id),
@@ -736,7 +726,7 @@ def file_upload(
                 HTTPStatus.BAD_REQUEST,
             )
 
-        user_lookup = user_repository.get_user_by_id(student_id)
+        user_lookup = user_repository.get_user(student_id)
         username = getattr(user_lookup, "Username", user_lookup)
 
         if not username:
@@ -933,8 +923,6 @@ def file_upload(
                 HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
             )
 
-    class_repo.get_class_name_withId(class_id)
-
     ts_now = datetime.now()
     ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
     dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
@@ -1010,7 +998,6 @@ def file_upload(
         time=dt_string,
         project_id=project.Id,
         status=status,
-        errorcount=0,
         testcase_results=testcase_results,
         is_checkpoint=is_checkpoint,
         checkpoint_id=(checkpoint_id if is_checkpoint else None),
@@ -1027,9 +1014,6 @@ def file_upload(
             checkpoint_id=(checkpoint_id if is_checkpoint else None),
             submission_id=submission_id,
         )
-
-    if not is_staff_upload and not is_checkpoint:
-        submission_repo.consume_charge(user_id, class_id, project.Id, submission_id)
 
     message = {
         "message": "Success",
