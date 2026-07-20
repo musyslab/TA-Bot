@@ -18,9 +18,9 @@ SUGGESTION_LIMIT = 3
 GRADING_ERROR_DEFS = [
     {
         "id": "IO_FORMAT",
-        "label": "Wrong input, output, prompt, or formatting",
+        "label": "Wrong input, output, spelling, or formatting",
         "description": (
-            "Use for incorrect prompts, input order, output text, spacing, "
+            "Use for incorrect spelling, input order, output text, spacing, "
             "capitalization, punctuation, decimal display, or output order."
         ),
         "points": 10,
