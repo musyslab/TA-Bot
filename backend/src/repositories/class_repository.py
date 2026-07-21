@@ -2,8 +2,7 @@ from typing import List
 
 from sqlalchemy import desc
 
-from .models import Classes
-
+from .models import ClassAssignments, Classes
 
 class ClassRepository:
 
@@ -15,3 +14,30 @@ class ClassRepository:
 
     def get_classes_for_school(self, school_id: int) -> List[Classes]:
         return Classes.query.filter(Classes.SchoolId == school_id).order_by(Classes.Name.asc()).all()
+
+    def add_class_assignment(
+        self,
+        class_id: int,
+        lab_id: int,
+        user_id: int,
+        lecture_id: int,
+    ) -> ClassAssignments:
+        assignment = ClassAssignments.query.filter(
+            ClassAssignments.UserId == user_id,
+            ClassAssignments.ClassId == class_id,
+        ).first()
+
+        if assignment is None:
+            assignment = ClassAssignments(
+                UserId=user_id,
+                ClassId=class_id,
+                LabId=lab_id,
+                LectureId=lecture_id,
+            )
+            ClassAssignments.query.session.add(assignment)
+        else:
+            assignment.LabId = lab_id
+            assignment.LectureId = lecture_id
+
+        ClassAssignments.query.session.commit()
+        return assignment

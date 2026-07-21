@@ -470,7 +470,7 @@ def create_user(
 
     user_repo.create_user(username, first_name, last_name, email, student_number)
     user = user_repo.getUserByName(username)
-    class_repo.create_assignments(class_id, lab_id, int(user.Id), lecture_id)
+    class_repo.add_class_assignment(class_id, lab_id, int(user.Id), lecture_id)
     set_class_assignment_role(int(user.Id), class_id, STUDENT_ROLE)
 
     access_token = create_access_token(identity=user)
@@ -553,7 +553,7 @@ def create_oauth_user(
         user_repo.create_user(username, first_name, last_name, email, student_number)
         user = user_repo.getUserByName(username)
 
-    class_repo.create_assignments(class_id, lab_id, int(user.Id), lecture_id)
+    class_repo.add_class_assignment(class_id, lab_id, int(user.Id), lecture_id)
     set_class_assignment_role(int(user.Id), class_id, STUDENT_ROLE)
 
     access_token = create_access_token(identity=user)
