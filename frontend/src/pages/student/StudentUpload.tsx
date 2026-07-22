@@ -111,11 +111,36 @@ type IncentiveState = {
 };
 
 const SUBMISSION_COOLDOWN_SCHEDULE = [
-  { attempt: 1, label: "After 1st attempt", cooldown: "Free" },
-  { attempt: 2, label: "After 2nd attempt", cooldown: "2 minutes" },
-  { attempt: 3, label: "After 3rd attempt", cooldown: "5 minutes" },
-  { attempt: 4, label: "After 4th attempt", cooldown: "10 minutes" },
-  { attempt: 5, label: "After 5th+ attempt", cooldown: "20 minutes" },
+  {
+    attempt: 1,
+    label: "After 1st attempt",
+    practiceCooldown: "Free",
+    finalCooldown: "Free",
+  },
+  {
+    attempt: 2,
+    label: "After 2nd attempt",
+    practiceCooldown: "1 minute",
+    finalCooldown: "2 minutes",
+  },
+  {
+    attempt: 3,
+    label: "After 3rd attempt",
+    practiceCooldown: "2 minutes",
+    finalCooldown: "5 minutes",
+  },
+  {
+    attempt: 4,
+    label: "After 4th attempt",
+    practiceCooldown: "5 minutes",
+    finalCooldown: "10 minutes",
+  },
+  {
+    attempt: 5,
+    label: "After 5th+ attempt",
+    practiceCooldown: "10 minutes",
+    finalCooldown: "20 minutes",
+  },
 ];
 
 const authHeader = () => ({
@@ -318,6 +343,10 @@ const StudentUpload = () => {
     0,
     Number(incentives?.submission_cooldown_seconds ?? 0),
   );
+  const submissionTypeLabel = isCheckpoint
+    ? "Practice submission"
+    : "Final submission";
+  const submissionTypeShortLabel = isCheckpoint ? "Practice" : "Final";
   const highlightedCooldownAttempt = isCoolingDown
     ? Math.max(1, submissionAttemptCount)
     : nextAttemptNumber;
@@ -1430,18 +1459,26 @@ const StudentUpload = () => {
                     <FaClock />
                   </span>
                   <div>
-                    <h2 id="submission-cooldown-title">Submission Cooldown</h2>
-                    <p>Each cooldown starts after the listed attempt. The second attempt is available immediately after the first.</p>
+                    <h2 id="submission-cooldown-title">Submission Cooldowns</h2>
+                    <p>
+                      Practice submissions use shorter timers than final submissions.
+                      Each cooldown starts after the listed attempt, so attempt 2 is
+                      available immediately after attempt 1.
+                    </p>
                   </div>
                 </div>
                 <div className="submission-cooldown-policy__current">
-                  {isCoolingDown
-                    ? `Cooldown after attempt ${submissionAttemptCount}`
-                    : `Next: attempt ${nextAttemptNumber}`}
+                  {submissionTypeShortLabel}: {isCoolingDown
+                    ? `cooldown after attempt ${submissionAttemptCount}`
+                    : `next is attempt ${nextAttemptNumber}`}
                 </div>
               </div>
 
-              <div className="submission-cooldown-policy__grid" role="table" aria-label="Submission cooldown schedule">
+              <div
+                className="submission-cooldown-policy__grid"
+                role="table"
+                aria-label="Practice and final submission cooldown schedules"
+              >
                 {SUBMISSION_COOLDOWN_SCHEDULE.map((item) => {
                   const isCurrent =
                     highlightedCooldownAttempt === item.attempt ||
@@ -1453,8 +1490,30 @@ const StudentUpload = () => {
                       key={item.attempt}
                       role="row"
                     >
-                      <span role="cell">{item.label}</span>
-                      <strong role="cell">{item.cooldown}</strong>
+                      <span
+                        className="submission-cooldown-policy__attempt"
+                        role="rowheader"
+                      >
+                        {item.label}
+                      </span>
+                      <div
+                        className={`submission-cooldown-policy__value ${
+                          isCheckpoint ? "is-active-type" : ""
+                        }`}
+                        role="cell"
+                      >
+                        <small>Practice</small>
+                        <strong>{item.practiceCooldown}</strong>
+                      </div>
+                      <div
+                        className={`submission-cooldown-policy__value ${
+                          !isCheckpoint ? "is-active-type" : ""
+                        }`}
+                        role="cell"
+                      >
+                        <small>Final</small>
+                        <strong>{item.finalCooldown}</strong>
+                      </div>
                     </div>
                   );
                 })}
@@ -1626,9 +1685,10 @@ const StudentUpload = () => {
                 >
                   <div className="submission-cooldown-lock__content">
                     <FaLock aria-hidden="true" />
-                    <h2>Submission cooldown active</h2>
+                    <h2>{submissionTypeLabel} cooldown active</h2>
                     <p className="submission-cooldown-lock__timer">
-                      Attempt {nextAttemptNumber} unlocks in {formatCooldown(cooldownRemainingSeconds)}
+                      Attempt {nextAttemptNumber} unlocks in{" "}
+                      {formatCooldown(cooldownRemainingSeconds)}
                     </p>
                     <p>
                       Test your code in your local deployment before submitting it again.
@@ -1685,10 +1745,10 @@ const StudentUpload = () => {
                     {isCooldownStateLoading
                       ? "The upload screen stays locked until this project's cooldown state is verified."
                       : isCoolingDown
-                        ? `The upload screen is locked during the ${formatDuration(submissionCooldownSeconds)} cooldown applied after attempt ${submissionAttemptCount}. Test in your local deployment before submitting again.`
+                        ? `The upload screen is locked during the ${formatDuration(submissionCooldownSeconds)} ${submissionTypeShortLabel.toLowerCase()} cooldown applied after attempt ${submissionAttemptCount}. Test in your local deployment before submitting again.`
                         : nextAttemptNumber === 1
-                          ? `No cooldown applies after the first attempt, so attempt 2 can be submitted immediately. Later attempts follow the schedule above; skipping costs ${cooldownSkipCost} stars.`
-                          : `This project is ready. The cooldown shown for attempt ${nextAttemptNumber} begins only after that attempt is submitted.`}
+                          ? `No cooldown applies after the first attempt, so attempt 2 can be submitted immediately. Practice and final submissions then follow their separate schedules above; skipping costs ${cooldownSkipCost} stars.`
+                          : `This ${submissionTypeLabel.toLowerCase()} is ready. Its cooldown for attempt ${nextAttemptNumber} begins only after that attempt is submitted.`}
                   </div>
                 </div>
               </div>

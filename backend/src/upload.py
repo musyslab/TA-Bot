@@ -48,8 +48,10 @@ ALLOWED_EXTENSIONS_BY_LANGUAGE = {
 }
 
 ALLOWED_SOURCE_EXTENSIONS = {".py", ".java", ".c", ".rkt"}
-SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
-SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
+PRACTICE_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 60, 3: 120, 4: 300}
+PRACTICE_SUBMISSION_COOLDOWN_MAX_SECONDS = 600
+FINAL_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
+FINAL_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
 EARLY_START_MULTIPLIER = 2
@@ -609,16 +611,27 @@ def parse_submission_datetime(value) -> datetime | None:
     return None
 
 
-def submission_cooldown_seconds_for_attempt_count(completed_attempts: int) -> int:
+def submission_cooldown_seconds_for_attempt_count(
+    completed_attempts: int,
+    is_practice: bool,
+) -> int:
     completed_attempts = max(0, int(completed_attempts or 0))
 
     if completed_attempts <= 0:
         return 0
 
-    return SUBMISSION_COOLDOWN_AFTER_ATTEMPT.get(
-        completed_attempts,
-        SUBMISSION_COOLDOWN_MAX_SECONDS,
+    schedule = (
+        PRACTICE_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+        if is_practice
+        else FINAL_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
     )
+    max_seconds = (
+        PRACTICE_SUBMISSION_COOLDOWN_MAX_SECONDS
+        if is_practice
+        else FINAL_SUBMISSION_COOLDOWN_MAX_SECONDS
+    )
+
+    return schedule.get(completed_attempts, max_seconds)
 
 
 def student_submission_scope_query(
@@ -663,7 +676,10 @@ def student_submission_cooldown_response(
     if submitted_at is None:
         return None
 
-    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(completed_attempts)
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(
+        completed_attempts,
+        is_checkpoint,
+    )
     elapsed_seconds = (datetime.now() - submitted_at).total_seconds()
     remaining_seconds = int(ceil(cooldown_seconds - elapsed_seconds))
 
@@ -1076,7 +1092,10 @@ def file_upload(
         is_checkpoint,
         checkpoint_id,
     ).count()
-    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(completed_attempts)
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(
+        completed_attempts,
+        is_checkpoint,
+    )
 
     message = {
         "message": "Success",

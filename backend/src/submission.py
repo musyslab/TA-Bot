@@ -46,8 +46,10 @@ ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
 submission_api = Blueprint('submission_api', __name__)
 
-SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
-SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
+PRACTICE_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 60, 3: 120, 4: 300}
+PRACTICE_SUBMISSION_COOLDOWN_MAX_SECONDS = 600
+FINAL_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
+FINAL_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
 SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
@@ -534,16 +536,27 @@ def parse_submission_datetime_for_cooldown(value) -> datetime | None:
     return None
 
 
-def submission_cooldown_seconds_for_attempt_count(completed_attempts: int) -> int:
+def submission_cooldown_seconds_for_attempt_count(
+    completed_attempts: int,
+    is_practice: bool,
+) -> int:
     completed_attempts = max(0, int(completed_attempts or 0))
 
     if completed_attempts <= 0:
         return 0
 
-    return SUBMISSION_COOLDOWN_AFTER_ATTEMPT.get(
-        completed_attempts,
-        SUBMISSION_COOLDOWN_MAX_SECONDS,
+    schedule = (
+        PRACTICE_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+        if is_practice
+        else FINAL_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
     )
+    max_seconds = (
+        PRACTICE_SUBMISSION_COOLDOWN_MAX_SECONDS
+        if is_practice
+        else FINAL_SUBMISSION_COOLDOWN_MAX_SECONDS
+    )
+
+    return schedule.get(completed_attempts, max_seconds)
 
 
 def submission_scope_query(
@@ -609,7 +622,10 @@ def submission_cooldown_state(
     )
     completed_attempts = scope_query.count()
     next_attempt = completed_attempts + 1
-    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(completed_attempts)
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(
+        completed_attempts,
+        checkpoint,
+    )
     latest = scope_query.order_by(Submissions.Time.desc(), Submissions.Id.desc()).first()
     submitted_at = parse_submission_datetime_for_cooldown(
         getattr(latest, "Time", None) if latest is not None else None

@@ -1169,11 +1169,9 @@
 
 .submission-cooldown-policy__step {
     min-width: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
+    display: grid;
+    grid-template-rows: auto 1fr 1fr;
+    gap: 7px;
     padding: 10px 8px;
     border: 1px solid #dbeafe;
     border-radius: 14px;
@@ -1182,15 +1180,45 @@
     text-align: center;
 }
 
-.submission-cooldown-policy__step span {
+.submission-cooldown-policy__attempt {
     font-size: 0.76rem;
-    font-weight: 850;
+    font-weight: 900;
 }
 
-.submission-cooldown-policy__step strong {
+.submission-cooldown-policy__value {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.submission-cooldown-policy__value small {
+    color: #64748b;
+    font-size: 0.69rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.submission-cooldown-policy__value strong {
     color: #0f172a;
-    font-size: 0.9rem;
+    font-size: 0.82rem;
     font-weight: 950;
+}
+
+.submission-cooldown-policy__value.is-active-type {
+    border-color: #60a5fa;
+    background: #eff6ff;
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.submission-cooldown-policy__value.is-active-type small,
+.submission-cooldown-policy__value.is-active-type strong {
+    color: #1d4ed8;
 }
 
 .submission-cooldown-policy__step.is-current {
@@ -1200,7 +1228,17 @@
     box-shadow: 0 8px 18px rgba(180, 83, 9, 0.12);
 }
 
-.submission-cooldown-policy__step.is-current strong {
+.submission-cooldown-policy__step.is-current .submission-cooldown-policy__attempt {
+    color: #92400e;
+}
+
+.submission-cooldown-policy__step.is-current .submission-cooldown-policy__value.is-active-type {
+    border-color: #f59e0b;
+    background: #fef3c7;
+}
+
+.submission-cooldown-policy__step.is-current .submission-cooldown-policy__value.is-active-type small,
+.submission-cooldown-policy__step.is-current .submission-cooldown-policy__value.is-active-type strong {
     color: #92400e;
 }
 
