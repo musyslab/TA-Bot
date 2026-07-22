@@ -814,6 +814,17 @@
     border-color: rgba(96, 165, 250, 0.48);
 }
 
+.tbs-submission-status.is-checking {
+    border-color: rgba(148, 163, 184, 0.58);
+    background: linear-gradient(135deg, #f8fafc, #eef2ff);
+}
+
+.tbs-submission-status.is-checking .tbs-submission-status__iconWrap {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+    color: #475569;
+}
+
 /* Backward compatibility for any old countdown markup still in use elsewhere */
 .tbs-countdown {
     width: 100%;
@@ -1082,4 +1093,223 @@
 .skip-cooldown-button:disabled {
     cursor: not-allowed;
     opacity: 0.54;
+}
+/* Per-project submission cooldown schedule */
+.submission-cooldown-policy {
+    margin-bottom: 14px;
+    padding: 16px;
+    border: 1px solid #bfdbfe;
+    border-radius: 20px;
+    background: linear-gradient(135deg, #eff6ff, #f8fafc);
+    box-shadow:
+        0 12px 30px rgba(29, 78, 216, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.submission-cooldown-policy__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.submission-cooldown-policy__heading {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    text-align: left;
+}
+
+.submission-cooldown-policy__icon {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 1px solid #93c5fd;
+    border-radius: 15px;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 20px;
+}
+
+.submission-cooldown-policy h2 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 1.08rem;
+    font-weight: 950;
+}
+
+.submission-cooldown-policy p {
+    margin: 3px 0 0;
+    color: #475569;
+    font-size: 0.86rem;
+    font-weight: 750;
+}
+
+.submission-cooldown-policy__current {
+    flex: 0 0 auto;
+    padding: 7px 11px;
+    border: 1px solid #93c5fd;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #1d4ed8;
+    font-size: 0.8rem;
+    font-weight: 950;
+    white-space: nowrap;
+}
+
+.submission-cooldown-policy__grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.submission-cooldown-policy__step {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 8px;
+    border: 1px solid #dbeafe;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.86);
+    color: #475569;
+    text-align: center;
+}
+
+.submission-cooldown-policy__step span {
+    font-size: 0.76rem;
+    font-weight: 850;
+}
+
+.submission-cooldown-policy__step strong {
+    color: #0f172a;
+    font-size: 0.9rem;
+    font-weight: 950;
+}
+
+.submission-cooldown-policy__step.is-current {
+    border-color: #f59e0b;
+    background: #fffbeb;
+    color: #92400e;
+    box-shadow: 0 8px 18px rgba(180, 83, 9, 0.12);
+}
+
+.submission-cooldown-policy__step.is-current strong {
+    color: #92400e;
+}
+
+.file-drop-area.is-cooldown-locked {
+    min-height: 230px;
+    border-color: #fbbf24;
+    background: #fffbeb;
+}
+
+.submission-cooldown-lock {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 16px;
+    background: rgba(255, 251, 235, 0.9);
+    backdrop-filter: blur(3px);
+}
+
+.submission-cooldown-lock__content {
+    width: min(560px, 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 9px;
+    padding: 20px;
+    border: 1px solid #fbbf24;
+    border-radius: 18px;
+    background: #ffffff;
+    color: #78350f;
+    box-shadow: 0 18px 38px rgba(146, 64, 14, 0.18);
+    text-align: center;
+}
+
+.submission-cooldown-lock__content > svg {
+    font-size: 42px;
+    color: #b45309;
+}
+
+.submission-cooldown-lock__content h2 {
+    margin: 0;
+    color: #92400e;
+    font-size: 1.25rem;
+    font-weight: 950;
+}
+
+.submission-cooldown-lock__content p {
+    max-width: 480px;
+    margin: 0;
+    color: #78350f;
+    font-size: 0.92rem;
+    font-weight: 750;
+    line-height: 1.45;
+}
+
+.submission-cooldown-lock__content .submission-cooldown-lock__timer {
+    color: #b45309;
+    font-size: 1.05rem;
+    font-weight: 950;
+}
+
+.submission-cooldown-lock.is-checking {
+    background: rgba(248, 250, 252, 0.92);
+}
+
+.submission-cooldown-lock.is-checking .submission-cooldown-lock__content {
+    border-color: #cbd5e1;
+    color: #334155;
+    box-shadow: 0 18px 38px rgba(51, 65, 85, 0.14);
+}
+
+.submission-cooldown-lock.is-checking .submission-cooldown-lock__content > svg,
+.submission-cooldown-lock.is-checking .submission-cooldown-lock__content h2 {
+    color: #475569;
+}
+
+.exchange-icon:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+@media (max-width: 860px) {
+    .submission-cooldown-policy__grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .submission-cooldown-policy__step:last-child {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 560px) {
+    .submission-cooldown-policy__header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .submission-cooldown-policy__current {
+        align-self: stretch;
+        text-align: center;
+    }
+
+    .submission-cooldown-policy__grid {
+        grid-template-columns: 1fr;
+    }
+
+    .submission-cooldown-policy__step:last-child {
+        grid-column: auto;
+    }
 }

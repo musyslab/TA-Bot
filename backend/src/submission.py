@@ -46,7 +46,8 @@ ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
 submission_api = Blueprint('submission_api', __name__)
 
-SUBMISSION_COOLDOWN_SECONDS = 300
+SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
+SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
 SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
@@ -490,11 +491,18 @@ def incentive_payload(
     checkpoint_id: int = 0,
 ) -> dict:
     balance = get_star_balance(user_id, class_id)
+    cooldown_state = submission_cooldown_state(
+        user_id,
+        class_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
     payload = {
         "stars": balance,
         "star_balance": balance,
         "cooldown_skip_cost": SUBMISSION_COOLDOWN_SKIP_COST_STARS,
-        "submission_cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+        **cooldown_state,
     }
     payload.update(scoped_reward_payload(user_id, class_id, project_id, checkpoint, checkpoint_id))
     return payload
@@ -526,46 +534,111 @@ def parse_submission_datetime_for_cooldown(value) -> datetime | None:
     return None
 
 
-def latest_submission_in_class(user_id: int, class_id: int):
-    try:
-        return (
-            db.session.query(Submissions)
-            .join(Projects, Submissions.Project == Projects.Id)
-            .filter(
-                Submissions.User == int(user_id),
-                Projects.ClassId == int(class_id),
-            )
-            .order_by(Submissions.Time.desc())
-            .first()
-        )
-    except Exception:
-        return None
+def submission_cooldown_seconds_for_attempt_count(completed_attempts: int) -> int:
+    completed_attempts = max(0, int(completed_attempts or 0))
 
-
-def cooldown_remaining_for_class(user_id: int, class_id: int) -> int:
-    latest = latest_submission_in_class(user_id, class_id)
-    if latest is None:
+    if completed_attempts <= 0:
         return 0
 
-    submitted_at = parse_submission_datetime_for_cooldown(getattr(latest, "Time", None))
-    if submitted_at is None:
-        return 0
-
-    elapsed_seconds = (current_utc_datetime() - submitted_at).total_seconds()
-    return max(0, int(SUBMISSION_COOLDOWN_SECONDS - elapsed_seconds + 0.999))
+    return SUBMISSION_COOLDOWN_AFTER_ATTEMPT.get(
+        completed_attempts,
+        SUBMISSION_COOLDOWN_MAX_SECONDS,
+    )
 
 
-def cooldown_lifted_at_from_mapping(mapping) -> datetime | None:
-    if "cooldown_seconds" in mapping:
-        seconds = parse_int(mapping.get("cooldown_seconds", 0), 0)
-        if seconds <= 0:
-            return None
-        return current_utc_datetime() + timedelta(seconds=seconds)
+def submission_scope_query(
+    user_id: int,
+    project_id: int,
+    checkpoint: bool,
+    checkpoint_id: int,
+):
+    query = Submissions.query.filter(
+        Submissions.User == int(user_id),
+        Submissions.Project == int(project_id),
+        Submissions.IsCheckpoint == bool(checkpoint),
+    )
 
-    if "cooldown_lifted_at" in mapping:
-        return parse_cooldown_lifted_at(mapping.get("cooldown_lifted_at"))
+    if checkpoint:
+        return query.filter(Submissions.CheckpointId == int(checkpoint_id or 0))
 
-    return None
+    return query.filter(Submissions.CheckpointId.is_(None))
+
+
+def pending_cooldown_skip_exists(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint_id: int,
+    submitted_at: datetime | None,
+) -> bool:
+    query = StudentCooldownSkips.query.filter(
+        StudentCooldownSkips.UserId == int(user_id),
+        StudentCooldownSkips.ClassId == int(class_id),
+        StudentCooldownSkips.ProjectId == int(project_id),
+        StudentCooldownSkips.CheckpointId == int(checkpoint_id or 0),
+        StudentCooldownSkips.UsedAt.is_(None),
+    )
+
+    if submitted_at is not None:
+        query = query.filter(StudentCooldownSkips.CreatedAt >= submitted_at)
+
+    return query.first() is not None
+
+
+def submission_cooldown_state(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint: bool,
+    checkpoint_id: int,
+) -> dict:
+    if project_id <= 0:
+        return {
+            "submission_attempt_count": 0,
+            "next_attempt_number": 1,
+            "submission_cooldown_seconds": 0,
+            "cooldown_remaining_seconds": 0,
+            "cooldown_lifted_at": None,
+        }
+
+    scope_query = submission_scope_query(
+        user_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
+    completed_attempts = scope_query.count()
+    next_attempt = completed_attempts + 1
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(completed_attempts)
+    latest = scope_query.order_by(Submissions.Time.desc(), Submissions.Id.desc()).first()
+    submitted_at = parse_submission_datetime_for_cooldown(
+        getattr(latest, "Time", None) if latest is not None else None
+    )
+
+    remaining_seconds = 0
+    cooldown_lifted_at = None
+
+    if submitted_at is not None and cooldown_seconds > 0:
+        cooldown_lifted_at = submitted_at + timedelta(seconds=cooldown_seconds)
+        remaining_seconds = seconds_until(cooldown_lifted_at)
+
+        if remaining_seconds > 0 and pending_cooldown_skip_exists(
+            user_id,
+            class_id,
+            project_id,
+            checkpoint_id if checkpoint else 0,
+            submitted_at,
+        ):
+            remaining_seconds = 0
+            cooldown_lifted_at = None
+
+    return {
+        "submission_attempt_count": completed_attempts,
+        "next_attempt_number": next_attempt,
+        "submission_cooldown_seconds": cooldown_seconds,
+        "cooldown_remaining_seconds": remaining_seconds,
+        "cooldown_lifted_at": serialize_cooldown_lifted_at(cooldown_lifted_at),
+    }
 
 
 def upload_state_scope_from_mapping(mapping) -> tuple[int, int, bool, int]:
@@ -657,8 +730,8 @@ def submission_matches_upload_state(submission, project_id: int, checkpoint: boo
 
 
 def serialize_student_upload_state(
-    row,
     submission_repo: SubmissionRepository,
+    class_id: int,
     project_id: int,
     checkpoint: bool,
     checkpoint_id: int,
@@ -674,21 +747,18 @@ def serialize_student_upload_state(
         if latest_submission is not None
         else None
     )
-
-    cooldown_lifted_at = getattr(row, "CooldownLiftedAt", None) if row else None
-
-    if cooldown_lifted_at is not None and cooldown_lifted_at <= current_utc_datetime():
-        if row is not None:
-            db.session.delete(row)
-            db.session.commit()
-        cooldown_lifted_at = None
+    cooldown_state = submission_cooldown_state(
+        int(current_user.Id),
+        class_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
 
     return {
         "last_submission_id": latest_submission_id,
         "previous_submission_id": latest_submission_id,
-        "cooldown_lifted_at": serialize_cooldown_lifted_at(cooldown_lifted_at),
-        "cooldown_remaining_seconds": seconds_until(cooldown_lifted_at),
-        "submission_cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+        **cooldown_state,
     }
 
 
@@ -1064,9 +1134,15 @@ def incentive_state():
     if project_id > 0 and not current_user_can_use_upload_state(class_id, project_id, checkpoint_id):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
 
-    payload = incentive_payload(int(current_user.Id), class_id, project_id, checkpoint, checkpoint_id)
-    payload["cooldown_remaining_seconds"] = cooldown_remaining_for_class(int(current_user.Id), class_id)
-    return jsonify(payload)
+    return jsonify(
+        incentive_payload(
+            int(current_user.Id),
+            class_id,
+            project_id,
+            checkpoint,
+            checkpoint_id,
+        )
+    )
 
 
 @submission_api.route('/skip-submission-cooldown', methods=['POST'])
@@ -1081,7 +1157,14 @@ def skip_submission_cooldown():
     if not current_user_can_use_upload_state(class_id, project_id, checkpoint_id):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
 
-    remaining_seconds = cooldown_remaining_for_class(int(current_user.Id), class_id)
+    cooldown_state = submission_cooldown_state(
+        int(current_user.Id),
+        class_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
+    remaining_seconds = int(cooldown_state["cooldown_remaining_seconds"])
     if remaining_seconds <= 0:
         row = get_student_upload_state_row(class_id, project_id, checkpoint_id)
         if row is not None:
@@ -1148,8 +1231,8 @@ def student_upload_state(submission_repo: SubmissionRepository = Provide[Contain
     if request.method == 'GET':
         return jsonify(
             serialize_student_upload_state(
-                row,
                 submission_repo,
+                class_id,
                 project_id,
                 checkpoint,
                 checkpoint_id,
@@ -1168,39 +1251,14 @@ def student_upload_state(submission_repo: SubmissionRepository = Provide[Contain
             "cooldown_remaining_seconds": 0,
         })
 
-    cooldown_lifted_at = cooldown_lifted_at_from_mapping(source)
-
-    if cooldown_lifted_at is None or cooldown_lifted_at <= current_utc_datetime():
-        if row is not None:
-            db.session.delete(row)
-            db.session.commit()
-
-        return jsonify(
-            serialize_student_upload_state(
-                None,
-                submission_repo,
-                project_id,
-                checkpoint,
-                checkpoint_id,
-            )
-        )
-
-    if row is None:
-        row = StudentUploadState(
-            UserId=int(current_user.Id),
-            ClassId=int(class_id),
-            ProjectId=int(project_id),
-            CheckpointId=int(checkpoint_id or 0),
-        )
-        db.session.add(row)
-
-    row.CooldownLiftedAt = cooldown_lifted_at
-    db.session.commit()
+    if row is not None:
+        db.session.delete(row)
+        db.session.commit()
 
     return jsonify(
         serialize_student_upload_state(
-            row,
             submission_repo,
+            class_id,
             project_id,
             checkpoint,
             checkpoint_id,

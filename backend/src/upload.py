@@ -48,7 +48,8 @@ ALLOWED_EXTENSIONS_BY_LANGUAGE = {
 }
 
 ALLOWED_SOURCE_EXTENSIONS = {".py", ".java", ".c", ".rkt"}
-SUBMISSION_COOLDOWN_SECONDS = 300
+SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
+SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
 EARLY_START_MULTIPLIER = 2
@@ -204,11 +205,18 @@ def award_completion_stars(
     }
 
 
-def consume_pending_cooldown_skip(user_id: int, class_id: int, latest_submission_time: datetime | None) -> bool:
-
+def consume_pending_cooldown_skip(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint_id: int,
+    latest_submission_time: datetime | None,
+) -> bool:
     query = StudentCooldownSkips.query.filter(
         StudentCooldownSkips.UserId == int(user_id),
         StudentCooldownSkips.ClassId == int(class_id),
+        StudentCooldownSkips.ProjectId == int(project_id),
+        StudentCooldownSkips.CheckpointId == int(checkpoint_id or 0),
         StudentCooldownSkips.UsedAt.is_(None),
     )
 
@@ -601,47 +609,88 @@ def parse_submission_datetime(value) -> datetime | None:
     return None
 
 
-def get_latest_student_submission_in_class(user_id: int, class_id: int):
-    try:
-        return (
-            db.session.query(Submissions)
-            .join(Projects, Submissions.Project == Projects.Id)
-            .filter(
-                Submissions.User == int(user_id),
-                Projects.ClassId == int(class_id),
-            )
-            .order_by(Submissions.Time.desc())
-            .first()
-        )
-    except Exception:
+def submission_cooldown_seconds_for_attempt_count(completed_attempts: int) -> int:
+    completed_attempts = max(0, int(completed_attempts or 0))
+
+    if completed_attempts <= 0:
+        return 0
+
+    return SUBMISSION_COOLDOWN_AFTER_ATTEMPT.get(
+        completed_attempts,
+        SUBMISSION_COOLDOWN_MAX_SECONDS,
+    )
+
+
+def student_submission_scope_query(
+    user_id: int,
+    project_id: int,
+    is_checkpoint: bool,
+    checkpoint_id: int,
+):
+    query = Submissions.query.filter(
+        Submissions.User == int(user_id),
+        Submissions.Project == int(project_id),
+        Submissions.IsCheckpoint == bool(is_checkpoint),
+    )
+
+    if is_checkpoint:
+        return query.filter(Submissions.CheckpointId == int(checkpoint_id or 0))
+
+    return query.filter(Submissions.CheckpointId.is_(None))
+
+
+def student_submission_cooldown_response(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    is_checkpoint: bool,
+    checkpoint_id: int,
+):
+    scope_query = student_submission_scope_query(
+        user_id,
+        project_id,
+        is_checkpoint,
+        checkpoint_id,
+    )
+    completed_attempts = scope_query.count()
+
+    if completed_attempts <= 0:
         return None
 
-
-def student_submission_cooldown_response(user_id: int, class_id: int):
-    latest = get_latest_student_submission_in_class(user_id, class_id)
-
-    if latest is None:
-        return None
-
+    latest = scope_query.order_by(Submissions.Time.desc(), Submissions.Id.desc()).first()
     submitted_at = parse_submission_datetime(getattr(latest, "Time", None))
 
     if submitted_at is None:
         return None
 
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(completed_attempts)
     elapsed_seconds = (datetime.now() - submitted_at).total_seconds()
-    remaining_seconds = int(ceil(SUBMISSION_COOLDOWN_SECONDS - elapsed_seconds))
+    remaining_seconds = int(ceil(cooldown_seconds - elapsed_seconds))
 
     if remaining_seconds <= 0:
         return None
 
-    if consume_pending_cooldown_skip(user_id, class_id, submitted_at):
+    if consume_pending_cooldown_skip(
+        user_id,
+        class_id,
+        project_id,
+        checkpoint_id if is_checkpoint else 0,
+        submitted_at,
+    ):
         return None
 
+    next_attempt = completed_attempts + 1
     response = make_response(
         {
-            "message": f"Please wait {remaining_seconds} seconds before submitting again.",
+            "message": (
+                f"Submission cooldown active. Attempt {next_attempt} is available in "
+                f"{remaining_seconds} seconds. Test your code in your local deployment "
+                "before submitting again."
+            ),
             "retry_after_seconds": remaining_seconds,
-            "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+            "cooldown_seconds": cooldown_seconds,
+            "submission_attempt_count": completed_attempts,
+            "next_attempt_number": next_attempt,
         },
         HTTPStatus.TOO_MANY_REQUESTS,
     )
@@ -811,7 +860,13 @@ def file_upload(
             )
 
     if not is_staff_upload:
-        cooldown_response = student_submission_cooldown_response(user_id, class_id_int)
+        cooldown_response = student_submission_cooldown_response(
+            user_id,
+            class_id_int,
+            int(project.Id),
+            is_checkpoint,
+            checkpoint_id,
+        )
 
         if cooldown_response is not None:
             return cooldown_response
@@ -1015,11 +1070,21 @@ def file_upload(
             submission_id=submission_id,
         )
 
+    completed_attempts = student_submission_scope_query(
+        user_id,
+        int(project.Id),
+        is_checkpoint,
+        checkpoint_id,
+    ).count()
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(completed_attempts)
+
     message = {
         "message": "Success",
         "remainder": 5,
         "sid": submission_id,
-        "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+        "cooldown_seconds": cooldown_seconds,
+        "submission_attempt_count": completed_attempts,
+        "next_attempt_number": completed_attempts + 1,
         "star_award": star_award,
         "stars": current_star_balance(user_id, class_id_int),
     }

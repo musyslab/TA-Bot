@@ -26,6 +26,7 @@ import {
   FaFilePowerpoint,
   FaForward,
   FaInfoCircle,
+  FaLock,
   FaStar,
 } from "react-icons/fa";
 
@@ -88,17 +89,14 @@ type ApiPastSubmissionsProject = {
   practices?: PastSubmissionCheckpoint[];
 };
 
-type UploadStatePatch = {
-  cooldown_seconds?: number;
-  cooldown_lifted_at?: string | null;
-};
-
 type IncentiveState = {
   stars?: number;
   star_balance?: number;
   cooldown_skip_cost?: number;
   submission_cooldown_seconds?: number;
   cooldown_remaining_seconds?: number;
+  submission_attempt_count?: number;
+  next_attempt_number?: number;
   checkpoint_completion_stars?: number;
   main_project_completion_stars?: number;
   early_start_multiplier?: number;
@@ -112,7 +110,13 @@ type IncentiveState = {
   reward_started_early?: boolean;
 };
 
-const SUBMISSION_COOLDOWN_SECONDS = 600;
+const SUBMISSION_COOLDOWN_SCHEDULE = [
+  { attempt: 1, label: "After 1st attempt", cooldown: "Free" },
+  { attempt: 2, label: "After 2nd attempt", cooldown: "2 minutes" },
+  { attempt: 3, label: "After 3rd attempt", cooldown: "5 minutes" },
+  { attempt: 4, label: "After 4th attempt", cooldown: "10 minutes" },
+  { attempt: 5, label: "After 5th+ attempt", cooldown: "20 minutes" },
+];
 
 const authHeader = () => ({
   Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
@@ -275,6 +279,7 @@ const StudentUpload = () => {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [incentives, setIncentives] = useState<IncentiveState | null>(null);
   const [isSkippingCooldown, setIsSkippingCooldown] = useState<boolean>(false);
+  const [isCooldownStateLoading, setIsCooldownStateLoading] = useState<boolean>(true);
 
   const [moduleName, setModuleName] = useState<string>("");
   const [checkpointLabel, setCheckpointLabel] = useState<string>("");
@@ -301,8 +306,23 @@ const StudentUpload = () => {
   const isCoolingDown = cooldownRemainingSeconds > 0;
   const starBalance = Number(incentives?.star_balance ?? incentives?.stars ?? 0);
   const cooldownSkipCost = Math.max(0, Number(incentives?.cooldown_skip_cost ?? 2));
+  const submissionAttemptCount = Math.max(
+    0,
+    Number(incentives?.submission_attempt_count ?? 0),
+  );
+  const nextAttemptNumber = Math.max(
+    1,
+    Number(incentives?.next_attempt_number ?? submissionAttemptCount + 1),
+  );
+  const submissionCooldownSeconds = Math.max(
+    0,
+    Number(incentives?.submission_cooldown_seconds ?? 0),
+  );
+  const highlightedCooldownAttempt = isCoolingDown
+    ? Math.max(1, submissionAttemptCount)
+    : nextAttemptNumber;
   const canSkipCooldown = isCoolingDown && cooldownSkipCost > 0 && starBalance >= cooldownSkipCost;
-  const canSubmit = !passedAllTests && !isCoolingDown;
+  const canSubmit = !passedAllTests && !isCoolingDown && !isCooldownStateLoading;
 
   const formatCooldown = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -413,34 +433,6 @@ const StudentUpload = () => {
     };
   }, [cid, project_id, isCheckpoint, checkpointId]);
 
-  const saveStudentUploadState = useCallback(
-    (patch: UploadStatePatch) => {
-      const scope = buildUploadStateScope();
-      const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
-
-      if (!scope || !token) {
-        return;
-      }
-
-      axios
-        .post(
-          `${import.meta.env.VITE_API_URL}/submissions/student-upload-state`,
-          {
-            ...scope,
-            ...patch,
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
-        )
-        .catch(() => {
-          // The upload API remains the source of truth. This state endpoint only
-          // keeps the UI in sync across page refreshes.
-        });
-    },
-    [buildUploadStateScope],
-  );
-
   const loadStudentUploadState = useCallback(() => {
     const scope = buildUploadStateScope();
     const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
@@ -466,12 +458,16 @@ const StudentUpload = () => {
 
         setPreviousSubmissionId(latestSubmission);
         setCooldownLiftedAtMs(cooldownUntil);
-        if (res?.data?.stars !== undefined || res?.data?.star_balance !== undefined) {
-          setIncentives(res.data);
-        }
+        setIncentives((previous) => ({
+          ...(previous || {}),
+          submission_attempt_count: Number(res?.data?.submission_attempt_count ?? 0),
+          next_attempt_number: Number(res?.data?.next_attempt_number ?? 1),
+          submission_cooldown_seconds: Number(res?.data?.submission_cooldown_seconds ?? 0),
+          cooldown_remaining_seconds: Number(res?.data?.cooldown_remaining_seconds ?? 0),
+        }));
       })
       .catch(() => {
-        setCooldownLiftedAtMs(0);
+        // incentive-state independently loads the authoritative cooldown timer.
       });
   }, [buildUploadStateScope]);
 
@@ -482,8 +478,13 @@ const StudentUpload = () => {
 
     if (!scope || !token) {
       setIncentives(null);
+      setCooldownLiftedAtMs(0);
+      setIsCooldownStateLoading(false);
       return;
     }
+
+    setCooldownLiftedAtMs(0);
+    setIsCooldownStateLoading(true);
 
     axios
       .get(`${import.meta.env.VITE_API_URL}/submissions/incentive-state`, {
@@ -491,10 +492,21 @@ const StudentUpload = () => {
         params: scope,
       })
       .then((res) => {
-        setIncentives(res.data || null);
+        const state = res.data || null;
+        setIncentives(state);
+        setCooldownLiftedAtMs(
+          cooldownLiftedAtToMs(
+            state?.cooldown_lifted_at,
+            state?.cooldown_remaining_seconds,
+          ),
+        );
       })
       .catch(() => {
         setIncentives(null);
+        setCooldownLiftedAtMs(0);
+      })
+      .finally(() => {
+        setIsCooldownStateLoading(false);
       });
   }, [buildUploadStateScope]);
 
@@ -520,7 +532,6 @@ const StudentUpload = () => {
         setCooldownLiftedAtMs(0);
         setNowMs(Date.now());
         setIncentives(res.data || null);
-        saveStudentUploadState({ cooldown_seconds: 0, cooldown_lifted_at: null });
       })
       .catch((err) => {
         setError_Message(
@@ -534,13 +545,13 @@ const StudentUpload = () => {
       });
   };
 
-  const startSubmissionCooldown = (seconds = SUBMISSION_COOLDOWN_SECONDS) => {
-    const safeSeconds = Math.max(1, Math.ceil(seconds));
-    const until = Date.now() + safeSeconds * 1000;
+  const startSubmissionCooldown = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.ceil(seconds));
 
-    setCooldownLiftedAtMs(until);
+    setCooldownLiftedAtMs(
+      safeSeconds > 0 ? Date.now() + safeSeconds * 1000 : 0,
+    );
     setNowMs(Date.now());
-    saveStudentUploadState({ cooldown_seconds: safeSeconds });
   };
 
   const ALLOWED_EXTS = [".py", ".java", ".c", ".rkt"];
@@ -718,6 +729,12 @@ const StudentUpload = () => {
 
     return () => window.clearInterval(timer);
   }, [isCoolingDown, earlyBonusWindowOpen]);
+
+  useEffect(() => {
+    if (isCoolingDown) {
+      setFiles([]);
+    }
+  }, [isCoolingDown]);
 
   useEffect(() => {
     const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
@@ -1054,8 +1071,8 @@ const StudentUpload = () => {
     if (isCoolingDown) {
       setError_Message(
         canSkipCooldown
-          ? `Please wait ${formatCooldown(cooldownRemainingSeconds)} or skip the timer for ${cooldownSkipCost} stars.`
-          : `Please wait ${formatCooldown(cooldownRemainingSeconds)} before submitting again.`,
+          ? `Please wait ${formatCooldown(cooldownRemainingSeconds)} or skip the timer for ${cooldownSkipCost} stars. Test your code in your local deployment before submitting again.`
+          : `Please wait ${formatCooldown(cooldownRemainingSeconds)} before submitting again. Test your code in your local deployment first.`,
       );
       setIsErrorMessageHidden(false);
       return;
@@ -1123,14 +1140,21 @@ const StudentUpload = () => {
         headers: authHeader(),
       })
       .then((res) => {
-        startSubmissionCooldown(Number(res?.data?.cooldown_seconds) || SUBMISSION_COOLDOWN_SECONDS);
-        if (res?.data?.stars !== undefined || res?.data?.star_award) {
-          setIncentives((previous) => ({
-            ...(previous || {}),
-            stars: Number(res?.data?.stars ?? previous?.stars ?? 0),
-            star_balance: Number(res?.data?.stars ?? previous?.star_balance ?? 0),
-          }));
-        }
+        startSubmissionCooldown(Number(res?.data?.cooldown_seconds ?? 0));
+        setIncentives((previous) => ({
+          ...(previous || {}),
+          stars: Number(res?.data?.stars ?? previous?.stars ?? 0),
+          star_balance: Number(res?.data?.stars ?? previous?.star_balance ?? 0),
+          submission_attempt_count: Number(
+            res?.data?.submission_attempt_count ??
+            previous?.submission_attempt_count ??
+            0,
+          ),
+          next_attempt_number: Number(
+            res?.data?.next_attempt_number ?? previous?.next_attempt_number ?? 1,
+          ),
+          submission_cooldown_seconds: Number(res?.data?.cooldown_seconds ?? 0),
+        }));
 
         const sid = getPayloadSubmissionId(res?.data);
 
@@ -1150,6 +1174,24 @@ const StudentUpload = () => {
 
         if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
           startSubmissionCooldown(retryAfterSeconds);
+          setIncentives((previous) => ({
+            ...(previous || {}),
+            submission_attempt_count: Number(
+              err.response?.data?.submission_attempt_count ??
+              previous?.submission_attempt_count ??
+              0,
+            ),
+            next_attempt_number: Number(
+              err.response?.data?.next_attempt_number ??
+              previous?.next_attempt_number ??
+              1,
+            ),
+            submission_cooldown_seconds: Number(
+              err.response?.data?.cooldown_seconds ??
+              previous?.submission_cooldown_seconds ??
+              retryAfterSeconds,
+            ),
+          }));
         }
 
         setError_Message(err.response?.data?.message || "Upload failed.");
@@ -1381,14 +1423,56 @@ const StudentUpload = () => {
             className={`upload-form ${isLoading ? "is-loading" : ""}`}
             onSubmit={handleSubmit}
           >
+            <section className="submission-cooldown-policy" aria-labelledby="submission-cooldown-title">
+              <div className="submission-cooldown-policy__header">
+                <div className="submission-cooldown-policy__heading">
+                  <span className="submission-cooldown-policy__icon" aria-hidden="true">
+                    <FaClock />
+                  </span>
+                  <div>
+                    <h2 id="submission-cooldown-title">Submission Cooldown</h2>
+                    <p>Each cooldown starts after the listed attempt. The second attempt is available immediately after the first.</p>
+                  </div>
+                </div>
+                <div className="submission-cooldown-policy__current">
+                  {isCoolingDown
+                    ? `Cooldown after attempt ${submissionAttemptCount}`
+                    : `Next: attempt ${nextAttemptNumber}`}
+                </div>
+              </div>
+
+              <div className="submission-cooldown-policy__grid" role="table" aria-label="Submission cooldown schedule">
+                {SUBMISSION_COOLDOWN_SCHEDULE.map((item) => {
+                  const isCurrent =
+                    highlightedCooldownAttempt === item.attempt ||
+                    (item.attempt === 5 && highlightedCooldownAttempt >= 5);
+
+                  return (
+                    <div
+                      className={`submission-cooldown-policy__step ${isCurrent ? "is-current" : ""}`}
+                      key={item.attempt}
+                      role="row"
+                    >
+                      <span role="cell">{item.label}</span>
+                      <strong role="cell">{item.cooldown}</strong>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
             <div className="dropzone">
               <div
-                className="file-drop-area"
-                onDragOver={(e) => e.preventDefault()}
+                className={`file-drop-area ${isCoolingDown ? "is-cooldown-locked" : ""}`}
+                aria-disabled={isCoolingDown}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (isCoolingDown) e.dataTransfer.dropEffect = "none";
+                }}
                 onDrop={(e) => {
                   e.preventDefault();
 
-                  if (passedAllTests) return;
+                  if (passedAllTests || isCoolingDown) return;
 
                   const dropped = Array.from(e.dataTransfer.files || []);
                   const valid = dropped.filter((f) =>
@@ -1461,7 +1545,7 @@ const StudentUpload = () => {
                       className="file-input"
                       accept=".py,.java,.c,.rkt"
                       multiple
-                      disabled={passedAllTests}
+                      disabled={passedAllTests || isCoolingDown}
                       onChange={handleFileChange}
                     />
 
@@ -1487,6 +1571,7 @@ const StudentUpload = () => {
                       aria-label="Clear selected files"
                       title="Clear selected files"
                       onClick={() => setFiles([])}
+                      disabled={isCoolingDown}
                     >
                       <FaExchangeAlt aria-hidden="true" />
                     </button>
@@ -1521,6 +1606,37 @@ const StudentUpload = () => {
                 )}
               </div>
 
+              {isCooldownStateLoading && !passedAllTests ? (
+                <div
+                  className="submission-cooldown-lock is-checking"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="submission-cooldown-lock__content">
+                    <FaClock aria-hidden="true" />
+                    <h2>Checking submission cooldown</h2>
+                    <p>Verifying whether this project is ready for another submission.</p>
+                  </div>
+                </div>
+              ) : isCoolingDown && !passedAllTests ? (
+                <div
+                  className="submission-cooldown-lock"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="submission-cooldown-lock__content">
+                    <FaLock aria-hidden="true" />
+                    <h2>Submission cooldown active</h2>
+                    <p className="submission-cooldown-lock__timer">
+                      Attempt {nextAttemptNumber} unlocks in {formatCooldown(cooldownRemainingSeconds)}
+                    </p>
+                    <p>
+                      Test your code in your local deployment before submitting it again.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
               {project_id === -1 && (
                 <div
                   className="no-active-project-overlay"
@@ -1542,12 +1658,12 @@ const StudentUpload = () => {
 
             <div className="actions">
               <div
-                className={`tbs-submission-status ${isCoolingDown ? "is-cooling" : "is-ready"}`}
+                className={`tbs-submission-status ${isCooldownStateLoading ? "is-checking" : isCoolingDown ? "is-cooling" : "is-ready"}`}
                 role="status"
                 aria-live="polite"
               >
                 <div className="tbs-submission-status__iconWrap" aria-hidden="true">
-                  {isCoolingDown ? (
+                  {isCooldownStateLoading || isCoolingDown ? (
                     <FaClock className="tbs-submission-status__icon" />
                   ) : (
                     <FaInfoCircle className="tbs-submission-status__icon" />
@@ -1556,15 +1672,23 @@ const StudentUpload = () => {
 
                 <div className="tbs-submission-status__copy">
                   <div className="tbs-submission-status__title">
-                    {isCoolingDown
-                      ? `Next submission available in ${formatCooldown(cooldownRemainingSeconds)}`
-                      : "Submission cooldown rule"}
+                    {isCooldownStateLoading
+                      ? "Checking submission cooldown"
+                      : isCoolingDown
+                        ? `Attempt ${nextAttemptNumber} unlocks in ${formatCooldown(cooldownRemainingSeconds)}`
+                        : nextAttemptNumber === 1
+                          ? "First submission is ready"
+                          : `Attempt ${nextAttemptNumber} is ready`}
                   </div>
 
                   <div className="tbs-submission-status__text">
-                    {isCoolingDown
-                      ? `A 5 minute cooldown applies after every submission. You can skip it for ${cooldownSkipCost} stars.`
-                      : `After each submission, you must wait 5 minutes before submitting again. Skipping costs ${cooldownSkipCost} stars.`}
+                    {isCooldownStateLoading
+                      ? "The upload screen stays locked until this project's cooldown state is verified."
+                      : isCoolingDown
+                        ? `The upload screen is locked during the ${formatDuration(submissionCooldownSeconds)} cooldown applied after attempt ${submissionAttemptCount}. Test in your local deployment before submitting again.`
+                        : nextAttemptNumber === 1
+                          ? `No cooldown applies after the first attempt, so attempt 2 can be submitted immediately. Later attempts follow the schedule above; skipping costs ${cooldownSkipCost} stars.`
+                          : `This project is ready. The cooldown shown for attempt ${nextAttemptNumber} begins only after that attempt is submitted.`}
                   </div>
                 </div>
               </div>
@@ -1593,7 +1717,7 @@ const StudentUpload = () => {
                 disabled={!is_allowed_to_submit || !canSubmit || passedAllTests || isLoading}
                 className={`primary ${!is_allowed_to_submit || !canSubmit || isLoading ? "disabled" : ""}`}
               >
-                {isCoolingDown ? "Cooling Down" : "Upload"}
+                {isCooldownStateLoading ? "Checking Cooldown" : isCoolingDown ? "Cooling Down" : "Upload"}
               </button>
             </div>
           </form>
