@@ -671,6 +671,138 @@
     }
 }
 
+.skip-cooldown-confirmation {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(15, 23, 42, 0.56);
+    backdrop-filter: blur(4px);
+}
+
+.skip-cooldown-confirmation__dialog {
+    box-sizing: border-box;
+    width: min(500px, 100%);
+    padding: 26px;
+    border: 1px solid #fde68a;
+    border-radius: 22px;
+    background: #ffffff;
+    color: #1e293b;
+    box-shadow: 0 28px 70px rgba(15, 23, 42, 0.28);
+    text-align: center;
+}
+
+.skip-cooldown-confirmation__icon {
+    width: 52px;
+    height: 52px;
+    display: grid;
+    place-items: center;
+    margin: 0 auto 13px;
+    border-radius: 16px;
+    background: #fef3c7;
+    color: #ca8a04;
+    font-size: 24px;
+}
+
+.skip-cooldown-confirmation__dialog h2 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 1.35rem;
+    font-weight: 950;
+}
+
+.skip-cooldown-confirmation__dialog > p {
+    max-width: 420px;
+    margin: 9px auto 0;
+    color: #64748b;
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.5;
+}
+
+.skip-cooldown-confirmation__balance {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
+    padding: 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #f8fafc;
+}
+
+.skip-cooldown-confirmation__balance > span {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #64748b;
+    font-size: 0.7rem;
+    font-weight: 850;
+    text-transform: uppercase;
+}
+
+.skip-cooldown-confirmation__balance strong {
+    color: #1e293b;
+    font-size: 0.95rem;
+    font-weight: 950;
+    text-transform: none;
+}
+
+.skip-cooldown-confirmation__balance > svg {
+    color: #94a3b8;
+}
+
+.skip-cooldown-confirmation__actions {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.skip-cooldown-confirmation__actions button {
+    min-height: 46px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 999px;
+    padding: 0 16px;
+    font-weight: 950;
+    cursor: pointer;
+}
+
+.skip-cooldown-confirmation__cancel {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #475569;
+}
+
+.skip-cooldown-confirmation__confirm {
+    border: 1px solid #f59e0b;
+    background: #f59e0b;
+    color: #ffffff;
+    box-shadow: 0 10px 24px rgba(180, 83, 9, 0.2);
+}
+
+.skip-cooldown-confirmation__actions button:hover:not(:disabled),
+.skip-cooldown-confirmation__actions button:focus-visible:not(:disabled) {
+    transform: translateY(-1px);
+    outline: none;
+}
+
+.skip-cooldown-confirmation__actions button:focus-visible:not(:disabled) {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2);
+}
+
+.skip-cooldown-confirmation__actions button:disabled {
+    cursor: wait;
+    opacity: 0.62;
+}
+
 @media (max-width: 640px) {
     .module-quest-side-cards {
         grid-template-columns: 1fr;

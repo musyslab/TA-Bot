@@ -50,7 +50,8 @@ CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
 EARLY_START_MULTIPLIER = 2
 CHECKPOINT_SKIP_COST_STARS = 6
-SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
+CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 1
+MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
 
 
 
@@ -144,7 +145,9 @@ def incentive_summary(user_id: int, class_id: int) -> dict:
         "main_project_completion_stars": MAIN_PROJECT_COMPLETION_STARS,
         "early_start_multiplier": EARLY_START_MULTIPLIER,
         "checkpoint_skip_cost": CHECKPOINT_SKIP_COST_STARS,
-        "cooldown_skip_cost": SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "checkpoint_cooldown_skip_cost": CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "main_project_cooldown_skip_cost": MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "cooldown_skip_cost": MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
     }
 
 

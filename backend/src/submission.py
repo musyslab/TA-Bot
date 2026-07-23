@@ -46,11 +46,12 @@ ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
 submission_api = Blueprint('submission_api', __name__)
 
-PRACTICE_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 60, 3: 120, 4: 300}
-PRACTICE_SUBMISSION_COOLDOWN_MAX_SECONDS = 600
-FINAL_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
-FINAL_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
-SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
+CHECKPOINT_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 60, 3: 120, 4: 300}
+CHECKPOINT_SUBMISSION_COOLDOWN_MAX_SECONDS = 300
+MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
+MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
+CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 1
+MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
 EARLY_START_MULTIPLIER = 2
@@ -67,6 +68,15 @@ def parse_bool(v) -> bool:
         return v
     s = str(v or "").strip().lower()
     return s in ("1", "true", "yes", "y", "on")
+
+
+def submission_cooldown_skip_cost(checkpoint: bool) -> int:
+    return (
+        CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS
+        if checkpoint
+        else MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS
+    )
+
 
 def role_from_row(role_row, default: int = STUDENT_ROLE) -> int:
     if hasattr(role_row, "Role"):
@@ -493,6 +503,7 @@ def incentive_payload(
     checkpoint_id: int = 0,
 ) -> dict:
     balance = get_star_balance(user_id, class_id)
+    cooldown_skip_cost = submission_cooldown_skip_cost(checkpoint)
     cooldown_state = submission_cooldown_state(
         user_id,
         class_id,
@@ -503,7 +514,9 @@ def incentive_payload(
     payload = {
         "stars": balance,
         "star_balance": balance,
-        "cooldown_skip_cost": SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "checkpoint_cooldown_skip_cost": CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "main_project_cooldown_skip_cost": MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "cooldown_skip_cost": cooldown_skip_cost,
         **cooldown_state,
     }
     payload.update(scoped_reward_payload(user_id, class_id, project_id, checkpoint, checkpoint_id))
@@ -538,7 +551,7 @@ def parse_submission_datetime_for_cooldown(value) -> datetime | None:
 
 def submission_cooldown_seconds_for_attempt_count(
     completed_attempts: int,
-    is_practice: bool,
+    is_checkpoint: bool,
 ) -> int:
     completed_attempts = max(0, int(completed_attempts or 0))
 
@@ -546,14 +559,14 @@ def submission_cooldown_seconds_for_attempt_count(
         return 0
 
     schedule = (
-        PRACTICE_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
-        if is_practice
-        else FINAL_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+        CHECKPOINT_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+        if is_checkpoint
+        else MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
     )
     max_seconds = (
-        PRACTICE_SUBMISSION_COOLDOWN_MAX_SECONDS
-        if is_practice
-        else FINAL_SUBMISSION_COOLDOWN_MAX_SECONDS
+        CHECKPOINT_SUBMISSION_COOLDOWN_MAX_SECONDS
+        if is_checkpoint
+        else MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS
     )
 
     return schedule.get(completed_attempts, max_seconds)
@@ -593,7 +606,12 @@ def pending_cooldown_skip_exists(
     )
 
     if submitted_at is not None:
-        query = query.filter(StudentCooldownSkips.CreatedAt >= submitted_at)
+        submitted_at_utc = (
+            submitted_at.astimezone(timezone.utc).replace(tzinfo=None)
+            if submitted_at.tzinfo is not None
+            else submitted_at.astimezone().astimezone(timezone.utc).replace(tzinfo=None)
+        )
+        query = query.filter(StudentCooldownSkips.CreatedAt >= submitted_at_utc)
 
     return query.first() is not None
 
@@ -635,8 +653,18 @@ def submission_cooldown_state(
     cooldown_lifted_at = None
 
     if submitted_at is not None and cooldown_seconds > 0:
-        cooldown_lifted_at = submitted_at + timedelta(seconds=cooldown_seconds)
-        remaining_seconds = seconds_until(cooldown_lifted_at)
+        # Submission timestamps are written with datetime.now() in upload.py and
+        # stored without timezone information. Compare them with the same
+        # server-local clock, then return a real UTC deadline to the browser.
+        elapsed_seconds = (datetime.now() - submitted_at).total_seconds()
+        remaining_seconds = max(
+            0,
+            int(cooldown_seconds - elapsed_seconds + 0.999),
+        )
+        if remaining_seconds > 0:
+            cooldown_lifted_at = current_utc_datetime() + timedelta(
+                seconds=remaining_seconds
+            )
 
         if remaining_seconds > 0 and pending_cooldown_skip_exists(
             user_id,
@@ -1150,7 +1178,7 @@ def incentive_state():
     if project_id > 0 and not current_user_can_use_upload_state(class_id, project_id, checkpoint_id):
         return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
 
-    return jsonify(
+    response = jsonify(
         incentive_payload(
             int(current_user.Id),
             class_id,
@@ -1159,6 +1187,8 @@ def incentive_state():
             checkpoint_id,
         )
     )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @submission_api.route('/skip-submission-cooldown', methods=['POST'])
@@ -1198,13 +1228,15 @@ def skip_submission_cooldown():
         db.session.rollback()
         return make_response({"message": "User not found."}, HTTPStatus.NOT_FOUND)
 
+    cooldown_skip_cost = submission_cooldown_skip_cost(checkpoint)
+    cooldown_skip_star_label = "star" if cooldown_skip_cost == 1 else "stars"
     balance = get_star_balance(int(current_user.Id), class_id)
-    if balance < SUBMISSION_COOLDOWN_SKIP_COST_STARS:
+    if balance < cooldown_skip_cost:
         db.session.rollback()
         return make_response({
-            "message": f"You need {SUBMISSION_COOLDOWN_SKIP_COST_STARS} stars to skip the submission timer.",
+            "message": f"You need {cooldown_skip_cost} {cooldown_skip_star_label} to skip the submission timer.",
             "stars": balance,
-            "required_stars": SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+            "required_stars": cooldown_skip_cost,
             "cooldown_remaining_seconds": remaining_seconds,
         }, HTTPStatus.BAD_REQUEST)
 
@@ -1213,7 +1245,7 @@ def skip_submission_cooldown():
         ClassId=int(class_id),
         ProjectId=int(project_id),
         CheckpointId=int(checkpoint_id or 0),
-        SpentStars=SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        SpentStars=cooldown_skip_cost,
         CreatedAt=current_utc_datetime(),
         UsedAt=None,
     ))
@@ -1245,7 +1277,7 @@ def student_upload_state(submission_repo: SubmissionRepository = Provide[Contain
     row = get_student_upload_state_row(class_id, project_id, checkpoint_id)
 
     if request.method == 'GET':
-        return jsonify(
+        response = jsonify(
             serialize_student_upload_state(
                 submission_repo,
                 class_id,
@@ -1254,6 +1286,8 @@ def student_upload_state(submission_repo: SubmissionRepository = Provide[Contain
                 checkpoint_id,
             )
         )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     if request.method == 'DELETE':
         if row is not None:

@@ -12,6 +12,7 @@ import axios from "axios";
 import { Helmet } from "react-helmet";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+    FaArrowRight,
     FaBolt,
     FaCheck,
     FaFlagCheckered,
@@ -120,6 +121,8 @@ export default function StudentModuleDetails() {
     const [actionMessage, setActionMessage] = useState("");
     const [actionError, setActionError] = useState("");
     const [skipBusyCheckpointId, setSkipBusyCheckpointId] = useState<number | null>(null);
+    const [skipConfirmationCheckpointId, setSkipConfirmationCheckpointId] =
+        useState<number | null>(null);
     const [incentives, setIncentives] = useState<IncentiveSummary | null>(null);
     const [pathSvgState, setPathSvgState] = useState<PathSvgState>({
         width: 0,
@@ -135,6 +138,7 @@ export default function StudentModuleDetails() {
 
     const starBalance = Number(incentives?.star_balance ?? incentives?.stars ?? 0);
     const checkpointSkipCost = Math.max(0, Number(incentives?.checkpoint_skip_cost ?? 6));
+    const checkpointSkipStarLabel = checkpointSkipCost === 1 ? "star" : "stars";
     const cooldownSkipCost = Math.max(0, Number(incentives?.cooldown_skip_cost ?? 2));
     const checkpointRewardBase = Math.max(0, Number(incentives?.checkpoint_completion_stars ?? 1));
     const mainRewardBase = Math.max(0, Number(incentives?.main_project_completion_stars ?? 3));
@@ -175,6 +179,10 @@ export default function StudentModuleDetails() {
     const formatStarValue = (value: number): string => {
         if (!Number.isFinite(value)) return "0";
         return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+    };
+
+    const formatStarCount = (value: number): string => {
+        return `${formatStarValue(value)} ${value === 1 ? "star" : "stars"}`;
     };
 
     const formatCountdown = (seconds: number): string => {
@@ -251,6 +259,9 @@ export default function StudentModuleDetails() {
             return a.id - b.id;
         });
     }, [checkpoints]);
+    const skipConfirmationCheckpoint = sortedCheckpoints.find(
+        (problem) => problem.id === skipConfirmationCheckpointId,
+    );
 
     const completedCheckpointCount = sortedCheckpoints.filter(
         (problem) => checkpointIsComplete(problem),
@@ -666,6 +677,7 @@ export default function StudentModuleDetails() {
             })
             .finally(() => {
                 setSkipBusyCheckpointId(null);
+                setSkipConfirmationCheckpointId(null);
             });
     };
 
@@ -926,7 +938,9 @@ export default function StudentModuleDetails() {
                                                         onClick={(event) => {
                                                             event.preventDefault();
                                                             event.stopPropagation();
-                                                            if (canSkip) skipCheckpoint(problem.id);
+                                                            if (canSkip) {
+                                                                setSkipConfirmationCheckpointId(problem.id);
+                                                            }
                                                         }}
                                                     >
                                                         <FaForward aria-hidden="true" />
@@ -1006,6 +1020,87 @@ export default function StudentModuleDetails() {
                     </>
                 ) : null}
             </div>
+
+            {skipConfirmationCheckpoint ? (
+                <div
+                    className="skip-cooldown-confirmation"
+                    onMouseDown={(event) => {
+                        if (
+                            event.target === event.currentTarget &&
+                            skipBusyCheckpointId === null
+                        ) {
+                            setSkipConfirmationCheckpointId(null);
+                        }
+                    }}
+                >
+                    <div
+                        className="skip-cooldown-confirmation__dialog"
+                        role="alertdialog"
+                        aria-modal="true"
+                        aria-labelledby="skip-cooldown-confirmation-title"
+                        aria-describedby="skip-cooldown-confirmation-description"
+                        onKeyDown={(event) => {
+                            if (event.key === "Escape" && skipBusyCheckpointId === null) {
+                                setSkipConfirmationCheckpointId(null);
+                            }
+                        }}
+                    >
+                        <span
+                            className="skip-cooldown-confirmation__icon"
+                            aria-hidden="true"
+                        >
+                            <FaStar />
+                        </span>
+                        <h2 id="skip-cooldown-confirmation-title">
+                            Spend {checkpointSkipCost} {checkpointSkipStarLabel}?
+                        </h2>
+                        <p id="skip-cooldown-confirmation-description">
+                            This will immediately skip Checkpoint{" "}
+                            {skipConfirmationCheckpoint.number}:{" "}
+                            {skipConfirmationCheckpoint.name}. This purchase cannot be undone.
+                        </p>
+
+                        <div className="skip-cooldown-confirmation__balance">
+                            <span>
+                                Current balance
+                                <strong>{formatStarCount(starBalance)}</strong>
+                            </span>
+                            <FaArrowRight aria-hidden="true" />
+                            <span>
+                                Balance after
+                                <strong>
+                                    {formatStarCount(
+                                        Math.max(0, starBalance - checkpointSkipCost),
+                                    )}
+                                </strong>
+                            </span>
+                        </div>
+
+                        <div className="skip-cooldown-confirmation__actions">
+                            <button
+                                type="button"
+                                className="skip-cooldown-confirmation__cancel"
+                                disabled={skipBusyCheckpointId !== null}
+                                onClick={() => setSkipConfirmationCheckpointId(null)}
+                                autoFocus
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="skip-cooldown-confirmation__confirm"
+                                disabled={skipBusyCheckpointId !== null}
+                                onClick={() => skipCheckpoint(skipConfirmationCheckpoint.id)}
+                            >
+                                <FaForward aria-hidden="true" />
+                                {skipBusyCheckpointId === skipConfirmationCheckpoint.id
+                                    ? "Spending..."
+                                    : `Confirm and spend ${checkpointSkipCost} ${checkpointSkipStarLabel}`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }

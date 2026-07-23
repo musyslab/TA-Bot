@@ -10,7 +10,7 @@ from flask import Blueprint
 from flask import request
 from flask import make_response
 from http import HTTPStatus
-from datetime import datetime
+from datetime import datetime, timezone
 from math import ceil
 from dependency_injector.wiring import inject, Provide
 from sqlalchemy import func
@@ -48,10 +48,10 @@ ALLOWED_EXTENSIONS_BY_LANGUAGE = {
 }
 
 ALLOWED_SOURCE_EXTENSIONS = {".py", ".java", ".c", ".rkt"}
-PRACTICE_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 60, 3: 120, 4: 300}
-PRACTICE_SUBMISSION_COOLDOWN_MAX_SECONDS = 600
-FINAL_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
-FINAL_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
+CHECKPOINT_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 60, 3: 120, 4: 300}
+CHECKPOINT_SUBMISSION_COOLDOWN_MAX_SECONDS = 300
+MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
+MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
 EARLY_START_MULTIPLIER = 2
@@ -223,13 +223,18 @@ def consume_pending_cooldown_skip(
     )
 
     if latest_submission_time is not None:
-        query = query.filter(StudentCooldownSkips.CreatedAt >= latest_submission_time)
+        submission_time_utc = (
+            latest_submission_time.astimezone(timezone.utc).replace(tzinfo=None)
+            if latest_submission_time.tzinfo is not None
+            else latest_submission_time.astimezone().astimezone(timezone.utc).replace(tzinfo=None)
+        )
+        query = query.filter(StudentCooldownSkips.CreatedAt >= submission_time_utc)
 
     row = query.order_by(StudentCooldownSkips.CreatedAt.asc()).first()
     if row is None:
         return False
 
-    row.UsedAt = datetime.now()
+    row.UsedAt = datetime.now(timezone.utc).replace(tzinfo=None)
     db.session.commit()
     return True
 
@@ -613,7 +618,7 @@ def parse_submission_datetime(value) -> datetime | None:
 
 def submission_cooldown_seconds_for_attempt_count(
     completed_attempts: int,
-    is_practice: bool,
+    is_checkpoint: bool,
 ) -> int:
     completed_attempts = max(0, int(completed_attempts or 0))
 
@@ -621,14 +626,14 @@ def submission_cooldown_seconds_for_attempt_count(
         return 0
 
     schedule = (
-        PRACTICE_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
-        if is_practice
-        else FINAL_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+        CHECKPOINT_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+        if is_checkpoint
+        else MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
     )
     max_seconds = (
-        PRACTICE_SUBMISSION_COOLDOWN_MAX_SECONDS
-        if is_practice
-        else FINAL_SUBMISSION_COOLDOWN_MAX_SECONDS
+        CHECKPOINT_SUBMISSION_COOLDOWN_MAX_SECONDS
+        if is_checkpoint
+        else MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS
     )
 
     return schedule.get(completed_attempts, max_seconds)
