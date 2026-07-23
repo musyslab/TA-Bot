@@ -1357,7 +1357,7 @@
 }
 
 .file-drop-area.is-cooldown-locked {
-    min-height: 300px;
+    min-height: 330px;
     border-color: #fbbf24;
     background: #fffbeb;
 }
@@ -1415,6 +1415,11 @@
     color: #b45309;
     font-size: 1.05rem;
     font-weight: 950;
+}
+
+.submission-cooldown-lock__content .submission-cooldown-view-button {
+    width: min(360px, 100%);
+    margin-top: 3px;
 }
 
 .submission-cooldown-lock__content .skip-cooldown-button {

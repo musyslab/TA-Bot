@@ -1716,6 +1716,14 @@ const StudentUpload = () => {
                     <p>
                       Test your code in your local deployment before submitting it again.
                     </p>
+                    <Link
+                      to={latestSubmissionHref || getResultsHref()}
+                      className="previous-submission-button submission-cooldown-view-button"
+                      aria-label="View latest submission"
+                    >
+                      <FaEye aria-hidden="true" />
+                      <span>View Submission</span>
+                    </Link>
                     <button
                       type="button"
                       className={`skip-cooldown-button ${!canSkipCooldown || isSkippingCooldown ? "disabled" : ""}`}
