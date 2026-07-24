@@ -41,7 +41,7 @@ type UiLogAction = 'Diff Finder' | 'Diff Mode' | 'Diff Layout'
 
 type NewJsonResult = {
     name: string
-    description?: string
+    order?: number
     passed: boolean
     hidden?: boolean
     shortDiff?: string
@@ -52,14 +52,15 @@ type NewJsonResult = {
 type LegacyJsonTest = {
     output?: Array<string>
     type?: number
-    description?: string
     name?: string
     hidden?: boolean
+    order?: number
 }
 
 type LegacyJsonResult = {
     skipped?: boolean
     passed?: boolean
+    order?: number
     test?: LegacyJsonTest
 }
 
@@ -70,8 +71,8 @@ type AnyPayload = {
 type DiffEntry = {
     id: string
     num: number
+    order: number
     test: string
-    description: string
     status: string
     passed: boolean
     skipped: boolean
@@ -433,6 +434,8 @@ export default function DiffView(props: DiffViewProps) {
 
     useEffect(() => {
         setTestsLoaded(false)
+        setPayload({ results: [] })
+        setSelectedDiffId(null)
         setCodeFiles([])
         setSelectedCodeFile('')
 
@@ -460,7 +463,7 @@ export default function DiffView(props: DiffViewProps) {
                 setPayload({ results: [] })
                 setTestsLoaded(true)
             })
-    }, [submissionId, classId])
+    }, [submissionId, classId, isPractice, practiceProblemId])
 
     // Baseline the toggles on mount per submission/class
     useEffect(() => {
@@ -487,7 +490,7 @@ export default function DiffView(props: DiffViewProps) {
             initialIntraRef.current ? 'On' : 'Off'
         )
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [submissionId, classId])
+    }, [submissionId, classId, isPractice, practiceProblemId])
 
     useEffect(() => {
         if (submissionId < 0 || classId < 0) {
@@ -535,7 +538,7 @@ export default function DiffView(props: DiffViewProps) {
                 setCodeFiles([{ name: 'Submission', content: '' }])
                 setSelectedCodeFile('Submission')
             })
-    }, [submissionId, classId])
+    }, [submissionId, classId, isPractice, practiceProblemId])
 
     const diffFilesAll: DiffEntry[] = useMemo(() => {
         const raw = Array.isArray(payload?.results) ? payload.results : []
@@ -554,12 +557,15 @@ export default function DiffView(props: DiffViewProps) {
                 const shortDiff = String(rr.shortDiff ?? '')
                 const longDiff = String(rr.longDiff ?? '')
                 const shortDiffSameAsLong = Boolean((rr as any).shortDiffSameAsLong)
-                const desc = String(rr.description ?? '')
+                const parsedOrder = Number(rr.order)
+                const order = Number.isFinite(parsedOrder) && parsedOrder > 0
+                    ? parsedOrder
+                    : idx + 1
                 entries.push({
                     id: `${idx}__${testName}`,
                     num: idx + 1,
+                    order,
                     test: testName,
-                    description: desc,
                     status: passed ? 'Passed' : 'Failed',
                     passed,
                     skipped: false,
@@ -569,7 +575,9 @@ export default function DiffView(props: DiffViewProps) {
                     hidden,
                 })
             })
-            return entries.sort((a, b) => Number(a.passed) - Number(b.passed) || a.test.localeCompare(b.test))
+            return entries
+                .sort((a, b) => a.order - b.order || a.num - b.num)
+                .map((entry, index) => ({ ...entry, num: index + 1 }))
         }
 
         // Legacy fallback (should be rare now): convert old shape into unified-ish diffs
@@ -579,8 +587,11 @@ export default function DiffView(props: DiffViewProps) {
             const passed = Boolean(rr.passed)
             const t = rr.test ?? {}
             const testName = String(t.name ?? `Test ${idx + 1}`)
-            const desc = String(t.description ?? '')
             const hidden = Boolean((t as any).hidden)
+            const parsedOrder = Number(rr.order ?? t.order)
+            const order = Number.isFinite(parsedOrder) && parsedOrder > 0
+                ? parsedOrder
+                : idx + 1
             const rawOut = (skipped ? ['This test did not run due to a configuration issue.'] : (t.output || [])).join(
                 '\n'
             )
@@ -590,8 +601,8 @@ export default function DiffView(props: DiffViewProps) {
             entries.push({
                 id: `${idx}__${testName}`,
                 num: idx + 1,
+                order,
                 test: testName,
-                description: desc,
                 status: skipped ? 'Skipped' : passed ? 'Passed' : 'Failed',
                 passed,
                 skipped,
@@ -609,11 +620,15 @@ export default function DiffView(props: DiffViewProps) {
             }
         })
 
-        return entries.sort((a, b) => Number(a.passed) - Number(b.passed) || a.test.localeCompare(b.test))
+        return entries
+            .sort((a, b) => a.order - b.order || a.num - b.num)
+            .map((entry, index) => ({ ...entry, num: index + 1 }))
     }, [payload])
 
     useEffect(() => {
-        if (!selectedDiffId && diffFilesAll.length > 0) {
+        if (diffFilesAll.length === 0) {
+            if (selectedDiffId !== null) setSelectedDiffId(null)
+        } else if (!selectedDiffId) {
             setSelectedDiffId(diffFilesAll[0].id)
         } else if (selectedDiffId && diffFilesAll.every((f) => f.id !== selectedDiffId)) {
             setSelectedDiffId(diffFilesAll[0]?.id ?? null)

@@ -186,13 +186,14 @@ CREATE TABLE `Testcases` (
   `ProjectId` int NOT NULL,
   `CheckpointId` int DEFAULT NULL,
   `Name` longtext,
-  `Description` longtext,
   `input` longtext,
   `Output` longtext,
   `Hidden` tinyint(1) NOT NULL DEFAULT 0,
+  `SortOrder` int NOT NULL DEFAULT 0,
   `Checkpoint` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`Id`),
-  KEY `idx_testcases_project_checkpoint` (`ProjectId`, `CheckpointId`),
+  KEY `idx_testcases_project_checkpoint_order`
+    (`ProjectId`, `CheckpointId`, `SortOrder`, `Id`),
   CONSTRAINT `fk_testcases_project`
     FOREIGN KEY (`ProjectId`) REFERENCES `Assignments` (`Id`)
     ON DELETE CASCADE,

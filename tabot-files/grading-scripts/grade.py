@@ -4,7 +4,7 @@ Entry-point grader.
 
 Writes JSON instead of TAP. Per testcase, outputs:
   - name
-  - description
+  - order
   - passed
   - shortDiff (unified diff, only changed lines)
   - longDiff (unified diff, all lines)
@@ -161,16 +161,7 @@ def normalize_testcase_items(testcases_obj: Any) -> List[Tuple[str, Any]]:
     Returns a stable list of (key, value).
     """
     if isinstance(testcases_obj, dict):
-        keys = list(testcases_obj.keys())
-
-        def sort_key(k: Any) -> Tuple[int, str]:
-            ks = str(k)
-            if ks.isdigit():
-                return (0, f"{int(ks):012d}")
-            return (1, ks)
-
-        keys_sorted = sorted(keys, key=sort_key)
-        return [(str(k), testcases_obj[k]) for k in keys_sorted]
+        return [(str(key), value) for key, value in testcases_obj.items()]
 
     if isinstance(testcases_obj, list):
         return [(str(i), v) for i, v in enumerate(testcases_obj)]
@@ -181,21 +172,19 @@ def normalize_testcase_items(testcases_obj: Any) -> List[Tuple[str, Any]]:
 def parse_entry_class_and_additional_files(value: Any) -> Tuple[str, Any]:
     """
     Backward-compatible parsing:
-      value[4] or value[5] may be:
+      the additional-files slot may be:
         - list of additional files
         - dict { "entry_class": "...", "files": [...] }
-      value[6] may be a string entry_class
+      the final slot may be a string entry_class
     """
     entry_class = ""
     additional_files: Any = []
 
     if isinstance(value, (list, tuple)):
-        # Newer layout (hidden removed): [name, desc, in, expected, additional_files]
-        # Older layout:                [name, desc, in, expected, hidden, additional_files]
-        if len(value) > 5:
-            additional_files = value[5]
-        elif len(value) > 4:
-            additional_files = value[4]
+        current_layout = len(value) > 3 and isinstance(value[3], bool)
+        additional_index = 4 if current_layout else 5
+        if len(value) > additional_index:
+            additional_files = value[additional_index]
         if isinstance(additional_files, dict):
             entry_class = (additional_files.get("entry_class") or "").strip()
             additional_files = additional_files.get("files") or []
@@ -318,23 +307,32 @@ def run(student_name: str, language: str, testcases_json: str, path: str, additi
     proj_base_dir, proj_files = parse_project_additional_payload(additional_file_path)
     proj_files = resolve_additional_files(proj_files, base_dir=proj_base_dir)
 
-    for key, value in testcase_items:
+    for position, (key, value) in enumerate(testcase_items, start=1):
         # Expected tuple layout (backward-compatible):
-        # [ test_name, test_description, testcase_in, testcase_expected, hidden?, additional_files?, entry_class? ]
+        # Current: [test_name, testcase_in, testcase_expected, hidden, additional_files, order]
         test_name = ""
-        test_description = ""
         testcase_in = ""
         testcase_expected = ""
+        test_order = position
 
         if isinstance(value, (list, tuple)):
             test_name = value[0] if len(value) > 0 else ""
-            test_description = value[1] if len(value) > 1 else ""
-            testcase_in = value[2] if len(value) > 2 else ""
-            testcase_expected = value[3] if len(value) > 3 else ""
+            current_layout = len(value) > 3 and isinstance(value[3], bool)
+            if current_layout:
+                testcase_in = value[1] if len(value) > 1 else ""
+                testcase_expected = value[2] if len(value) > 2 else ""
+                try:
+                    test_order = int(value[5]) if len(value) > 5 else position
+                except (TypeError, ValueError):
+                    test_order = position
+            else:
+                # Accept previously generated testcase tuples without exposing
+                # their retired metadata in the result payload.
+                testcase_in = value[2] if len(value) > 2 else ""
+                testcase_expected = value[3] if len(value) > 3 else ""
         else:
             # If it's not a list/tuple, treat it as invalid but keep output stable.
             test_name = str(key)
-            test_description = ""
             testcase_in = ""
             testcase_expected = ""
 
@@ -384,7 +382,7 @@ def run(student_name: str, language: str, testcases_json: str, path: str, additi
         results.append(
             {
                 "name": test_name,
-                "description": test_description,
+                "order": test_order,
                 "passed": bool(passed),
                 "shortDiff": short_diff,
                 "longDiff": long_diff,

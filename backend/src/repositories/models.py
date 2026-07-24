@@ -219,10 +219,10 @@ class Testcases(db.Model):
         nullable=True,
     )
     Name = Column(Text)
-    Description = Column(Text)
     input = Column(Text)
     Output = Column(Text)
     Hidden = Column(Boolean, nullable=False, default=False)
+    SortOrder = Column(Integer, nullable=False, default=0)
     Checkpoint = Column(Boolean, nullable=False, default=False)
 
 class Grades(db.Model):

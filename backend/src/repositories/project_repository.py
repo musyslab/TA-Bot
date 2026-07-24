@@ -640,17 +640,17 @@ class ProjectRepository():
         else:
             q = q.filter(Testcases.CheckpointId.is_(None))
 
-        testcases = q.all()
+        testcases = q.order_by(Testcases.SortOrder.asc(), Testcases.Id.asc()).all()
         testcase_info: Dict[int, list] = {}
 
-        for test in testcases:
+        for index, test in enumerate(testcases, start=1):
             testcase_info[test.Id] = [
                 test.Id,
                 test.Name,
-                test.Description,
                 test.input,
                 test.Output,
                 bool(getattr(test, "Hidden", False)),
+                index,
             ]
 
         return testcase_info
@@ -660,11 +660,11 @@ class ProjectRepository():
         project_id: int,
         testcase_id: int,
         name: str,
-        description: str,
         input_data: str,
         output: str,
         class_id: int,
         hidden: bool = False,
+        sort_order: Optional[int] = None,
         checkpoint_id: Optional[int] = None,
     ):
         from flask import current_app
@@ -713,23 +713,36 @@ class ProjectRepository():
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
 
         if testcase is None:
+            if sort_order is None or int(sort_order or 0) <= 0:
+                scope = Testcases.query.filter(Testcases.ProjectId == int(project_id))
+                if checkpoint_id:
+                    scope = scope.filter(Testcases.CheckpointId == int(checkpoint_id))
+                else:
+                    scope = scope.filter(Testcases.CheckpointId.is_(None))
+                max_order = scope.with_entities(func.max(Testcases.SortOrder)).scalar()
+                sort_order = max(
+                    int(max_order or 0),
+                    int(scope.count() or 0),
+                ) + 1
+
             testcase = Testcases(
                 ProjectId=project_id,
                 CheckpointId=(int(checkpoint_id) if checkpoint_id else None),
                 Name=name,
-                Description=description,
                 input=input_data,
                 Output=output,
                 Hidden=bool(hidden),
+                SortOrder=int(sort_order or 1),
                 Checkpoint=bool(checkpoint_id),
             )
             db.session.add(testcase)
         else:
             testcase.Name = name
-            testcase.Description = description
             testcase.input = input_data
             testcase.Output = output
             testcase.Hidden = bool(hidden)
+            if sort_order is not None and int(sort_order or 0) > 0:
+                testcase.SortOrder = int(sort_order)
             testcase.CheckpointId = (int(checkpoint_id) if checkpoint_id else None)
             testcase.Checkpoint = bool(checkpoint_id)
 
@@ -737,7 +750,51 @@ class ProjectRepository():
 
     def remove_testcase(self, testcase_id: int):
         testcase = Testcases.query.filter(Testcases.Id == testcase_id).first()
+        if testcase is None:
+            return
+
+        project_id = int(testcase.ProjectId)
+        checkpoint_id = int(testcase.CheckpointId) if testcase.CheckpointId is not None else None
         db.session.delete(testcase)
+        db.session.flush()
+
+        q = Testcases.query.filter(Testcases.ProjectId == project_id)
+        if checkpoint_id is not None:
+            q = q.filter(Testcases.CheckpointId == checkpoint_id)
+        else:
+            q = q.filter(Testcases.CheckpointId.is_(None))
+        for index, remaining in enumerate(
+            q.order_by(Testcases.SortOrder.asc(), Testcases.Id.asc()).all(),
+            start=1,
+        ):
+            remaining.SortOrder = index
+
+        db.session.commit()
+
+    def reorder_testcases(
+        self,
+        project_id: int,
+        testcase_ids: list[int],
+        checkpoint_id: Optional[int] = None,
+    ):
+        q = Testcases.query.filter(Testcases.ProjectId == int(project_id))
+        if checkpoint_id:
+            q = q.filter(Testcases.CheckpointId == int(checkpoint_id))
+        else:
+            q = q.filter(Testcases.CheckpointId.is_(None))
+
+        testcases = q.all()
+        by_id = {int(test.Id): test for test in testcases}
+        ordered_ids = [int(testcase_id) for testcase_id in testcase_ids]
+
+        if len(ordered_ids) != len(set(ordered_ids)):
+            raise ValueError("Duplicate testcase id")
+        if set(ordered_ids) != set(by_id):
+            raise ValueError("Testcase order must include every testcase exactly once")
+
+        for index, testcase_id in enumerate(ordered_ids, start=1):
+            by_id[testcase_id].SortOrder = index
+
         db.session.commit()
 
     def count_testcases(self, project_id: int, checkpoint_id: Optional[int] = None) -> int:
@@ -761,7 +818,7 @@ class ProjectRepository():
         return {int(ppid): int(count or 0) for ppid, count in rows if ppid is not None}
 
     def testcases_to_json(self, project_id: int, checkpoint_id: Optional[int] = None) -> str:
-        testcase_holder: Dict[int, list] = {}
+        testcase_holder: list[list] = []
         proj = Projects.query.filter(Projects.Id == project_id).first()
         add_field = getattr(proj, "AdditionalFilePath", "") if proj else ""
         add_list = self.json_list_field(add_field)
@@ -782,17 +839,17 @@ class ProjectRepository():
         else:
             q = q.filter(Testcases.CheckpointId.is_(None))
 
-        tests = q.all()
+        tests = q.order_by(Testcases.SortOrder.asc(), Testcases.Id.asc()).all()
 
-        for test in tests:
-            testcase_holder[test.Id] = [
+        for index, test in enumerate(tests, start=1):
+            testcase_holder.append([
                 test.Name,
-                test.Description,
                 test.input,
                 test.Output,
                 bool(getattr(test, "Hidden", False)),
                 add_list,
-            ]
+                index,
+            ])
 
         json_object = json.dumps(testcase_holder)
         print(json_object, flush=True)

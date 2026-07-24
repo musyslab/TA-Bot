@@ -918,15 +918,20 @@ def apply_hidden_flags_to_results(output_json: str, project_id: int, checkpoint_
             q = q.filter(Testcases.CheckpointId == int(checkpoint_id))
         else:
             q = q.filter(Testcases.CheckpointId.is_(None))
-        tcs = q.all()
-        hidden_by_name = {
-            (str(getattr(tc, "Name", "") or "").strip().lower()): bool(getattr(tc, "Hidden", False))
-            for tc in (tcs or [])
-        }
+        tcs = q.order_by(Testcases.SortOrder.asc(), Testcases.Id.asc()).all()
+        testcase_meta_by_name = {}
+        for index, tc in enumerate(tcs or [], start=1):
+            key = str(getattr(tc, "Name", "") or "").strip().lower()
+            testcase_meta_by_name.setdefault(key, []).append({
+                "hidden": bool(getattr(tc, "Hidden", False)),
+                "order": index,
+            })
 
-        for r in results:
+        name_occurrences = {}
+        for original_index, r in enumerate(results):
             if not isinstance(r, dict):
                 continue
+            r.pop("description", None)
             name = None
             if isinstance(r.get("name"), str):
                 name = r.get("name")
@@ -934,10 +939,33 @@ def apply_hidden_flags_to_results(output_json: str, project_id: int, checkpoint_
                 name = r["test"]["name"]
 
             key = (str(name or "").strip().lower())
-            is_hidden = hidden_by_name.get(key, False)
-            r["hidden"] = is_hidden
+            occurrence = int(name_occurrences.get(key, 0))
+            name_occurrences[key] = occurrence + 1
+            matches = testcase_meta_by_name.get(key, [])
+            metadata = matches[occurrence] if occurrence < len(matches) else None
+
+            r["hidden"] = bool(metadata["hidden"]) if metadata else False
+            if metadata:
+                r["order"] = int(metadata["order"])
+            elif not isinstance(r.get("order"), int):
+                r["order"] = len(tcs) + original_index + 1
+            r["_original_index"] = original_index
+
             if isinstance(r.get("test"), dict):
-                r["test"]["hidden"] = is_hidden
+                r["test"].pop("description", None)
+                r["test"]["hidden"] = r["hidden"]
+
+        results.sort(
+            key=lambda result: (
+                parse_int(result.get("order"), len(tcs) + len(results) + 1)
+                if isinstance(result, dict)
+                else len(tcs) + len(results) + 1,
+                parse_int(result.get("_original_index"), 0) if isinstance(result, dict) else 0,
+            )
+        )
+        for result in results:
+            if isinstance(result, dict):
+                result.pop("_original_index", None)
 
         return json.dumps(obj, sort_keys=True, indent=4)
     except Exception:
@@ -981,6 +1009,7 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
 
     def sanitize_yaml_block(yaml_block: dict) -> dict:
         new_yaml = (yaml_block or {}).copy()
+        new_yaml.pop("description", None)
         return new_yaml
 
     def parse_suite(yaml_block: dict) -> int:
@@ -1017,7 +1046,6 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
         else:
             locked_yaml = {
                 "name": yaml_clean.get("name", ""),
-                "description": yaml_clean.get("description", ""),
                 "suite": suite_req,
                 "locked": True
             }

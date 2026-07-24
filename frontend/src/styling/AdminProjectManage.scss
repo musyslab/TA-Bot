@@ -688,10 +688,51 @@
         margin: 0;
       }
 
-      // Description cell: slightly muted
-      td:nth-child(5) {
-        color: #505f7e;
-        font-size: 0.98em;
+      th:first-child,
+      td:first-child {
+        width: 8.5rem;
+        min-width: 8.5rem;
+      }
+
+      .testcase-order-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .testcase-order-number {
+        min-width: 1.5rem;
+        color: #334155;
+        font-weight: 700;
+        text-align: center;
+      }
+
+      .testcase-order-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        padding: 0;
+        color: #1d4ed8;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 5px;
+        cursor: pointer;
+
+        &:hover:not(:disabled),
+        &:focus-visible:not(:disabled) {
+          color: #fff;
+          background: #2563eb;
+          border-color: #2563eb;
+        }
+
+        &:disabled {
+          color: #94a3b8;
+          background: #f8fafc;
+          border-color: #e2e8f0;
+          cursor: not-allowed;
+        }
       }
 
       // Action button cell
@@ -1300,7 +1341,7 @@ body:has(.testcase-modal) {
         }
       }
 
-      /* Make input/description textareas start at the same height as the name input,
+      /* Make testcase textareas start at the same height as the name input,
          but allow users to grow them vertically if needed. */
       &.modal-textarea textarea,
       .modal-textarea {

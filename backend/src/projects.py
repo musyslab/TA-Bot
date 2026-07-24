@@ -2432,10 +2432,11 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
             add_path = getattr(proj_obj, "AdditionalFilePath", "") if proj_obj else ""
         try:
             name = vals[1] if len(vals) > 1 else ""
-            desc = vals[2] if len(vals) > 2 else ""
-            inp = vals[3] if len(vals) > 3 else ""
+            inp = vals[2] if len(vals) > 2 else ""
+            hidden = bool(vals[4]) if len(vals) > 4 else False
+            sort_order = int(vals[5]) if len(vals) > 5 else None
         except Exception:
-            name, desc, inp = "", "", "", False
+            name, inp, hidden, sort_order = "", "", False, None
 
         new_out = run_solution_for_input(solution_root, lang, inp, project_id, class_id, add_path)
         try:
@@ -2443,10 +2444,11 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
                 int(project_id),
                 int(tc_id),
                 name or "",
-                desc or "",
                 inp or "",
                 new_out,
                 int(class_id),
+                hidden,
+                sort_order,
                 checkpoint_id=checkpoint_id,
             )
         except Exception:
@@ -2572,7 +2574,7 @@ def get_testcases(project_repo: ProjectRepository = Provide[Container.project_re
     ppid = opt_int(request.args.get("checkpoint_id", ""))
     testcases = project_repo.get_testcases(int(project_id), checkpoint_id=ppid)
  
-    return make_response(json.dumps(testcases), HTTPStatus.OK)
+    return make_response(json.dumps(list(testcases.values())), HTTPStatus.OK)
 
 
 @projects_api.route('/count_testcases', methods=['GET'])
@@ -2624,16 +2626,56 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
         }
          return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
     else:
-        for testcase in json_obj:
+        if not isinstance(json_obj, list):
+            return make_response(
+                {'message': 'Testcase JSON must be an array'},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        ordered_testcases = sorted(
+            enumerate(json_obj),
+            key=lambda item: (
+                parse_int(item[1].get("order", item[0] + 1), item[0] + 1)
+                if isinstance(item[1], dict)
+                else item[0] + 1
+            ),
+        )
+        validated_testcases = []
+        for _, testcase in ordered_testcases:
+            if not isinstance(testcase, dict):
+                return make_response(
+                    {'message': 'Each testcase must be an object'},
+                    HTTPStatus.BAD_REQUEST,
+                )
+
+            name = str(testcase.get("name", "") or "").strip()
+            input_data = str(testcase.get("input", "") or "")
+            if not name or input_data == "":
+                return make_response(
+                    {'message': 'Each testcase requires a name and input'},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            validated_testcases.append({
+                "name": name,
+                "input": input_data,
+                "output": str(testcase.get("output", "") or ""),
+                "hidden": parse_bool(testcase.get("hidden", False)),
+            })
+
+        existing_count = project_repo.count_testcases(
+            int(project_id),
+            checkpoint_id=ppid,
+        )
+        for offset, testcase in enumerate(validated_testcases, start=1):
             project_repo.add_or_update_testcase(
                 int(project_id),
                 -1,
                 testcase["name"],
-                testcase["description"],
                 testcase["input"],
                 testcase["output"],
                 class_id,
-                bool(testcase.get("hidden", False)),
+                testcase["hidden"],
+                existing_count + offset,
                 checkpoint_id=ppid,
             )
 
@@ -2652,12 +2694,12 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     input_data = request.form.get('input', '')
     output = request.form.get('output', '')
     project_id = request.form.get('project_id', '').strip()
-    description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
+    sort_order_raw = request.form.get('order', '').strip()
 
     ppid_raw = request.form.get('checkpoint_id', '').strip()
     
-    if id_val == '' or name == '' or input_data == '' or project_id == '' or description == '' or class_id == '':
+    if id_val == '' or name == '' or input_data == '' or project_id == '' or class_id == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
 
     # Coerce types with validation
@@ -2669,6 +2711,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         return make_response("Invalid numeric id", HTTPStatus.BAD_REQUEST)
 
     hidden = parse_bool(request.form.get("hidden", ""))
+    sort_order = int(sort_order_raw) if sort_order_raw.isdigit() and int(sort_order_raw) > 0 else None
     checkpoint_id = int(ppid_raw) if (ppid_raw or "").isdigit() else None
     if not user_can_access_project_id(project_id):
         return access_denied_response(HTTPStatus.FORBIDDEN)
@@ -2707,15 +2750,43 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         project_id,
         id_val,
         name,
-        description,
         input_data,
         output,
         class_id_int,
         hidden,
+        sort_order,
         checkpoint_id=checkpoint_id,
     )
 
     return make_response("Testcase Added", HTTPStatus.OK)
+
+
+@projects_api.route('/reorder_testcases', methods=['POST'])
+@jwt_required()
+@inject
+def reorder_testcases(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if not is_staff_user():
+        return access_denied_response()
+
+    project_id = parse_int(request.form.get("project_id", ""), 0)
+    if project_id <= 0 or not user_can_access_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    checkpoint_id = opt_int(request.form.get("checkpoint_id", ""))
+    try:
+        testcase_ids = json.loads(request.form.get("testcase_ids", "[]"))
+        if not isinstance(testcase_ids, list):
+            raise ValueError("testcase_ids must be an array")
+        ordered_ids = [int(testcase_id) for testcase_id in testcase_ids]
+        project_repo.reorder_testcases(
+            project_id,
+            ordered_ids,
+            checkpoint_id=checkpoint_id,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        return make_response({"message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    return make_response("Testcase order updated", HTTPStatus.OK)
 
 @projects_api.route('/remove_testcase', methods=['POST'])
 @jwt_required()

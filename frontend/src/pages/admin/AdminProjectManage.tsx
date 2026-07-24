@@ -12,6 +12,8 @@ import LoadingAnimation from '../components/LoadingAnimation'
 import { TbJson } from 'react-icons/tb'
 import {
     FaAlignJustify,
+    FaArrowDown,
+    FaArrowUp,
     FaCircleNotch,
     FaCloudUploadAlt,
     FaCode,
@@ -29,18 +31,18 @@ class Testcase {
     constructor() {
         this.id = 0
         this.name = ''
-        this.description = ''
         this.input = ''
         this.output = ''
         this.hidden = false
+        this.order = 0
     }
 
     id: number
     name: string
-    description: string
     input: string
     output: string
     hidden: boolean
+    order: number
 }
 
 type AdminProjectManageProps = {
@@ -93,6 +95,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     const [submittingProject, setSubmittingProject] = useState<boolean>(false)
     const [submittingTestcase, setSubmittingTestcase] = useState<boolean>(false)
     const [submittingJson, setSubmittingJson] = useState<boolean>(false)
+    const [reorderingTestcases, setReorderingTestcases] = useState<boolean>(false)
     const [loadingProjectState, setLoadingProjectState] = useState<boolean>(true)
     const [modalDraft, setModalDraft] = useState<Testcase | null>(null)
     const [previewOpen, setPreviewOpen] = useState(false)
@@ -187,6 +190,47 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             return s === '1' || s === 'true' || s === 'yes' || s === 'y'
         }
         return false
+    }
+
+    const parseTestcaseRows = (data: any): Array<Testcase> => {
+        let parsedData = data
+        if (typeof data === 'string') {
+            try {
+                parsedData = JSON.parse(data)
+            } catch {
+                parsedData = []
+            }
+        }
+
+        const rawRows = Array.isArray(parsedData)
+            ? parsedData
+            : parsedData && typeof parsedData === 'object'
+                ? Object.values(parsedData)
+                : []
+
+        const rows = rawRows
+            .map((value: any, index: number) => {
+                const values = Array.isArray(value) ? value : []
+                const testcase = new Testcase()
+                testcase.id = Number(values[0] ?? 0)
+                testcase.name = String(values[1] ?? '')
+                testcase.input = String(values[2] ?? '')
+                testcase.output = String(values[3] ?? '')
+                testcase.hidden = parseHidden(values[4])
+                const parsedOrder = Number(values[5])
+                testcase.order = Number.isFinite(parsedOrder) && parsedOrder > 0
+                    ? parsedOrder
+                    : index + 1
+                return testcase
+            })
+            .filter(testcase => testcase.id > 0)
+            .sort((a, b) => a.order - b.order || a.id - b.id)
+            .map((testcase, index) => ({ ...testcase, order: index + 1 } as Testcase))
+
+        const blank = new Testcase()
+        blank.id = -1
+        blank.order = rows.length + 1
+        return [...rows, blank]
     }
 
     type SolutionLang = 'java' | 'python' | 'c' | 'racket'
@@ -579,28 +623,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
                 // Testcases
                 {
-                    const data = tcRes.data
-                    const rows: Array<Testcase> = []
-                    Object.entries(data).forEach(([key, value]) => {
-                        const testcase = new Testcase()
-                        const values = value as Array<string>
-                        testcase.id = parseInt(key)
-                        testcase.name = values[1]
-                        testcase.description = values[2]
-                        testcase.input = values[3]
-                        testcase.output = values[4]
-                        testcase.hidden = parseHidden((values as any)[5])
-                        rows.push(testcase)
-                    })
-                    const blank = new Testcase()
-                    blank.id = -1
-                    blank.name = ''
-                    blank.description = ''
-                    blank.input = ''
-                    blank.output = ''
-                    blank.hidden = false
-                    rows.push(blank)
-                    setTestcases(rows)
+                    setTestcases(parseTestcaseRows(tcRes.data))
                 }
 
                 // Project info
@@ -677,13 +700,6 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         })
     }
 
-    function handleDescriptionChange(testcase_id: number, description: string) {
-        setModalDraft(prev => {
-            if (prev && prev.id === testcase_id) return { ...prev, description }
-            return prev
-        })
-    }
-
     function handleInputChange(testcase_id: number, input_data: string) {
         setModalDraft(prev => {
             if (prev && prev.id === testcase_id) return { ...prev, input: input_data }
@@ -730,34 +746,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
-                const data = res.data
-                const rows: Array<Testcase> = []
-
-                Object.entries(data).map(([key, value]) => {
-                    const testcase = new Testcase()
-                    const values = value as Array<string>
-
-                    testcase.id = parseInt(key)
-                    testcase.name = values[1]
-                    testcase.description = values[2]
-                    testcase.input = values[3]
-                    testcase.output = values[4]
-                    testcase.hidden = parseHidden((values as any)[5])
-                    rows.push(testcase)
-
-                    return testcase
-                })
-
-                const testcase = new Testcase()
-                testcase.id = -1
-                testcase.name = ''
-                testcase.description = ''
-                testcase.input = ''
-                testcase.output = ''
-                testcase.hidden = false
-
-                rows.push(testcase)
-                setTestcases(rows)
+                setTestcases(parseTestcaseRows(res.data))
             })
             .catch(err => {
                 console.log(err)
@@ -1000,10 +989,10 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
             const t = new Testcase()
             t.id = -1
             t.name = ''
-            t.description = ''
             t.input = ''
             t.output = ''
             t.hidden = false
+            t.order = testcases.filter(tc => tc.id > 0).length + 1
             setModalDraft(t)
         } else {
             const source = testcases.find(tc => tc.id === TestCaseId)
@@ -1025,8 +1014,8 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         formData.append('class_id', classId.toString())
         formData.append('input', tc.input.toString())
         formData.append('output', tc.output.toString())
-        formData.append('description', tc.description.toString())
         formData.append('hidden', hidden ? 'true' : 'false')
+        formData.append('order', tc.order.toString())
         formData.append('practice', isPractice ? 'true' : 'false')
         if (isPractice && practiceProblemId) {
             formData.append('checkpoint_id', String(practiceProblemId))
@@ -1349,16 +1338,16 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
         formData.append('class_id', classId.toString())
         formData.append('input', modalDraft.input.toString())
         formData.append('output', modalDraft.output.toString())
-        formData.append('description', modalDraft.description.toString())
         formData.append('hidden', modalDraft.hidden ? 'true' : 'false')
+        formData.append('order', modalDraft.order.toString())
         formData.append('practice', isPractice ? 'true' : 'false')
 
         if (isPractice && practiceProblemId) {
             formData.append('checkpoint_id', String(practiceProblemId))
         }
 
-        if (modalDraft.name === '' || modalDraft.input === '' || modalDraft.description === '') {
-            window.alert('Please fill out all fields')
+        if (modalDraft.name.trim() === '' || modalDraft.input === '') {
+            window.alert('Please provide a testcase name and input')
             return
         }
 
@@ -1383,21 +1372,15 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                 headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
             })
             .then(res => {
-                const data = res.data
-                const rows: Array<Testcase> = []
-
-                Object.entries(data).map(([key, value]) => {
-                    const testcase = new Testcase()
-                    const values = value as Array<string>
-                    testcase.id = -1
-                    testcase.name = values[1]
-                    testcase.description = values[2]
-                    testcase.input = values[3]
-                    testcase.output = values[4]
-                    testcase.hidden = parseHidden((values as any)[5])
-                    rows.push(testcase)
-                    return testcase
-                })
+                const rows = parseTestcaseRows(res.data)
+                    .filter(testcase => testcase.id > 0)
+                    .map(testcase => ({
+                        name: testcase.name,
+                        input: testcase.input,
+                        output: testcase.output,
+                        hidden: testcase.hidden,
+                        order: testcase.order,
+                    }))
 
                 const fileContent = JSON.stringify(rows, null, 2)
                 const fileName = ProjectName + '.json'
@@ -1416,6 +1399,55 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
     }
 
     const selectedTestCase = modalDraft
+    const orderedTestcases = useMemo(
+        () => testcases
+            .filter(testcase => testcase.id > 0)
+            .sort((a, b) => a.order - b.order || a.id - b.id),
+        [testcases]
+    )
+
+    async function moveTestcase(testcaseId: number, direction: -1 | 1) {
+        if (reorderingTestcases) return
+
+        const currentIndex = orderedTestcases.findIndex(testcase => testcase.id === testcaseId)
+        const nextIndex = currentIndex + direction
+        if (currentIndex < 0 || nextIndex < 0 || nextIndex >= orderedTestcases.length) return
+
+        const reordered = orderedTestcases.map(testcase => ({ ...testcase } as Testcase))
+        const [moved] = reordered.splice(currentIndex, 1)
+        reordered.splice(nextIndex, 0, moved)
+        reordered.forEach((testcase, index) => {
+            testcase.order = index + 1
+        })
+
+        const existingBlank = testcases.find(testcase => testcase.id === -1)
+        const blank = existingBlank ? ({ ...existingBlank } as Testcase) : new Testcase()
+        blank.id = -1
+        blank.order = reordered.length + 1
+        setTestcases([...reordered, blank])
+
+        const formData = new FormData()
+        formData.append('project_id', project_id.toString())
+        formData.append('testcase_ids', JSON.stringify(reordered.map(testcase => testcase.id)))
+        if (isPractice && practiceProblemId) {
+            formData.append('checkpoint_id', String(practiceProblemId))
+        }
+
+        try {
+            setReorderingTestcases(true)
+            await axios.post(
+                import.meta.env.VITE_API_URL + `/projects/reorder_testcases`,
+                formData,
+                { headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` } }
+            )
+        } catch (error) {
+            console.log(error)
+            await reloadtests()
+            window.alert('The testcase order could not be saved.')
+        } finally {
+            setReorderingTestcases(false)
+        }
+    }
 
     type DirEntry = { key: string; name: string; status: 'none' | 'add' | 'remove'; kind: 'server' | 'local' | 'other' }
     const baseName = (p: string) => (p || '').split(/[\\/]/).pop()!
@@ -1966,22 +1998,46 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                     <table className="testcases-table">
                                                         <thead>
                                                             <tr>
+                                                                <th>Order</th>
                                                                 <th>Name</th>
                                                                 <th>Input</th>
                                                                 <th>Output</th>
-                                                                <th>Description</th>
                                                                 <th>Actions</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
-                                                            {testcases
-                                                                .filter(tc => tc.id !== -1)
-                                                                .map(tc => (
+                                                            {orderedTestcases
+                                                                .map((tc, index) => (
                                                                     <tr
                                                                         key={tc.id}
                                                                         className={tc.hidden ? 'hidden-testcase' : undefined}
                                                                         aria-label={tc.hidden ? 'Hidden test case' : undefined}
                                                                     >
+                                                                        <td>
+                                                                            <div className="testcase-order-controls">
+                                                                                <span className="testcase-order-number">{index + 1}</span>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    className="testcase-order-button"
+                                                                                    onClick={() => moveTestcase(tc.id, -1)}
+                                                                                    disabled={index === 0 || reorderingTestcases}
+                                                                                    aria-label={`Move ${tc.name} up`}
+                                                                                    title="Move testcase up"
+                                                                                >
+                                                                                    <FaArrowUp aria-hidden="true" />
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    className="testcase-order-button"
+                                                                                    onClick={() => moveTestcase(tc.id, 1)}
+                                                                                    disabled={index === orderedTestcases.length - 1 || reorderingTestcases}
+                                                                                    aria-label={`Move ${tc.name} down`}
+                                                                                    title="Move testcase down"
+                                                                                >
+                                                                                    <FaArrowDown aria-hidden="true" />
+                                                                                </button>
+                                                                            </div>
+                                                                        </td>
                                                                         <td>{tc.name}</td>
                                                                         <td>
                                                                             <pre className="testcase-input">{tc.input}</pre>
@@ -1989,7 +2045,6 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                                         <td>
                                                                             <pre className="testcase-output">{tc.output}</pre>
                                                                         </td>
-                                                                        <td>{tc.description}</td>
                                                                         <td>
                                                                             <button
                                                                                 type="button"
@@ -2016,7 +2071,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                                     </tr>
                                                                 ))}
                                                             <tr>
-                                                                <td colSpan={6} className="add-row-cell">
+                                                                <td colSpan={5} className="add-row-cell">
                                                                     <button
                                                                         type="button"
                                                                         className="add-testcase-button"
@@ -2228,22 +2283,6 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                 readOnly
                                                 aria-readonly="true"
                                             />
-                                        </div>
-
-                                        <div className="grid">
-                                            <div className="grid-column grid-column-13">
-                                                <div className="form-field modal-description-field">
-                                                    <label>Description</label>
-                                                    <textarea
-                                                        className="modal-textarea"
-                                                        rows={1}
-                                                        value={selectedTestCase?.description || ''}
-                                                        onChange={e =>
-                                                            handleDescriptionChange(selectedTestCaseId!, e.currentTarget.value)
-                                                        }
-                                                    />
-                                                </div>
-                                            </div>
                                         </div>
 
                                         <div className="form-field modal-checkbox">
