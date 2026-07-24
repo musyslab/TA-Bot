@@ -24,8 +24,11 @@ DROP TABLE IF EXISTS `Schools`;
 CREATE TABLE `Schools` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `Name` varchar(255) NOT NULL,
+  `AuthProvider` varchar(20) NOT NULL,
   PRIMARY KEY (`Id`),
-  UNIQUE KEY `uq_schools_name` (`Name`)
+  UNIQUE KEY `uq_schools_name` (`Name`),
+  CONSTRAINT `ck_schools_auth_provider`
+    CHECK (`AuthProvider` IN ('google', 'microsoft'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `Users` (
@@ -382,8 +385,8 @@ CREATE TABLE `SubmissionAnnotations` (
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-INSERT INTO `Schools` (`Id`, `Name`)
-VALUES (1, 'Marquette University');
+INSERT INTO `Schools` (`Id`, `Name`, `AuthProvider`)
+VALUES (1, 'Marquette University', 'microsoft');
 
 INSERT INTO `Classes` (`Id`, `Name`, `SchoolId`)
 VALUES (1, 'COSC 1010', 1);

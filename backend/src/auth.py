@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 from http import HTTPStatus
 from typing import Any, Dict, Literal, Tuple
 
@@ -12,12 +11,11 @@ from jwt import PyJWKClient
 
 from container import Container
 from src.api_utils import get_value_or_empty
-from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
+from src.constants import STUDENT_ROLE, TEACHER_ROLE
 from src.jwt_manager import jwt
 from src.repositories.models import ClassAssignments, Classes, Labs, LectureSections, Schools, Users
 from src.repositories.class_repository import ClassRepository
 from src.repositories.user_repository import UserRepository
-from src.services.authentication_service import PAMAuthenticationService
 
 auth_api = Blueprint("auth_api", __name__)
 
@@ -30,13 +28,6 @@ def require_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"{name} is not set.")
     return value
-
-
-def env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    return raw.strip().lower() in ("1", "true", "yes", "y", "on")
 
 
 def env_int(name: str, default: int) -> int:
@@ -60,6 +51,26 @@ def normalize_email(value: str) -> str:
     return (value or "").strip().lower()
 
 
+def get_school_by_id(school_id: int):
+    if school_id <= 0:
+        return None
+    return Schools.query.filter(Schools.Id == school_id).first()
+
+
+def get_school_auth_provider(school: Any) -> str:
+    return str(getattr(school, "AuthProvider", "") or "").strip().lower()
+
+
+def microsoft_env_name(school_id: int, setting: str) -> str:
+    return f"MICROSOFT_SCHOOL_{school_id}_{setting}"
+
+
+def get_microsoft_oauth_settings(school_id: int) -> Tuple[str, str]:
+    client_id = (os.environ.get(microsoft_env_name(school_id, "CLIENT_ID")) or "").strip()
+    tenant_id = (os.environ.get(microsoft_env_name(school_id, "TENANT_ID")) or "").strip()
+    return client_id, tenant_id
+
+
 def is_user_locked(user: Any) -> bool:
     return bool(getattr(user, "IsLocked", False))
 
@@ -79,6 +90,18 @@ def user_class_assignments(user: Any):
         return []
 
     return ClassAssignments.query.filter(ClassAssignments.UserId == user.Id).all()
+
+
+def user_has_school_assignment(user_id: int, school_id: int) -> bool:
+    return (
+        Classes.query
+        .join(ClassAssignments, Classes.Id == ClassAssignments.ClassId)
+        .filter(
+            ClassAssignments.UserId == user_id,
+            Classes.SchoolId == school_id,
+        )
+        .first()
+    ) is not None
 
 
 def build_access_summary(user: Any) -> Dict[str, Any]:
@@ -183,9 +206,13 @@ def verify_google_id_token(id_token: str) -> Dict[str, Any]:
     return claims
 
 
-def verify_microsoft_id_token(id_token: str) -> Dict[str, Any]:
-    client_id = require_env("MICROSOFT_OAUTH_CLIENT_ID")
-    tenant_id = require_env("MICROSOFT_TENANT_ID")
+def verify_microsoft_id_token(id_token: str, school_id: int) -> Dict[str, Any]:
+    client_id, tenant_id = get_microsoft_oauth_settings(school_id)
+
+    if not client_id:
+        raise RuntimeError(f"{microsoft_env_name(school_id, 'CLIENT_ID')} is not set.")
+    if not tenant_id:
+        raise RuntimeError(f"{microsoft_env_name(school_id, 'TENANT_ID')} is not set.")
 
     jwks_client = PyJWKClient(
         f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
@@ -201,7 +228,11 @@ def verify_microsoft_id_token(id_token: str) -> Dict[str, Any]:
     )
 
 
-def build_oauth_profile(provider: OAuthProvider, claims: Dict[str, Any]) -> Dict[str, Any]:
+def build_oauth_profile(
+    provider: OAuthProvider,
+    claims: Dict[str, Any],
+    school_id: int,
+) -> Dict[str, Any]:
     if provider == "google":
         email = normalize_email(str(claims.get("email") or ""))
         first_name = (claims.get("given_name") or "").strip()
@@ -233,6 +264,7 @@ def build_oauth_profile(provider: OAuthProvider, claims: Dict[str, Any]) -> Dict
 
     return {
         "provider": provider,
+        "school_id": school_id,
         "external_id": external_id,
         "email": email,
         "username": email,
@@ -242,14 +274,18 @@ def build_oauth_profile(provider: OAuthProvider, claims: Dict[str, Any]) -> Dict
     }
 
 
-def verify_oauth_token(provider: OAuthProvider, id_token: str) -> Dict[str, Any]:
+def verify_oauth_token(
+    provider: OAuthProvider,
+    id_token: str,
+    school_id: int,
+) -> Dict[str, Any]:
     if provider == "google":
         claims = verify_google_id_token(id_token)
     elif provider == "microsoft":
-        claims = verify_microsoft_id_token(id_token)
+        claims = verify_microsoft_id_token(id_token, school_id)
     else:
         raise ValueError("Unsupported OAuth provider.")
-    return build_oauth_profile(provider, claims)
+    return build_oauth_profile(provider, claims, school_id)
 
 
 @jwt.user_identity_loader
@@ -289,80 +325,50 @@ def access_summary():
 
 @auth_api.route("/oauth/config", methods=["GET"])
 def oauth_config():
-    tenant_id = (os.environ.get("MICROSOFT_TENANT_ID") or "").strip()
+    school_id = parse_int(request.args.get("school_id"))
+    school = get_school_by_id(school_id)
 
-    return make_response(
-        {
-            "google_enabled": bool((os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or "").strip()),
-            "google_client_id": (os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or "").strip(),
-            "microsoft_enabled": bool((os.environ.get("MICROSOFT_OAUTH_CLIENT_ID") or "").strip()),
-            "microsoft_client_id": (os.environ.get("MICROSOFT_OAUTH_CLIENT_ID") or "").strip(),
-            "microsoft_authority": (
-                f"https://login.microsoftonline.com/{tenant_id}" if tenant_id else ""
-            ),
+    if school is None:
+        return make_response({"message": "School not found."}, HTTPStatus.NOT_FOUND)
+
+    provider = get_school_auth_provider(school)
+    response = {
+        "enabled": False,
+        "provider": provider,
+        "school": {
+            "id": school.Id,
+            "name": school.Name,
         },
-        HTTPStatus.OK,
-    )
+        "google_client_id": "",
+        "microsoft_client_id": "",
+        "microsoft_authority": "",
+    }
+
+    if provider == "google":
+        client_id = (os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or "").strip()
+        response["enabled"] = bool(client_id)
+        response["google_client_id"] = client_id
+    elif provider == "microsoft":
+        client_id, tenant_id = get_microsoft_oauth_settings(school.Id)
+        response["enabled"] = bool(client_id and tenant_id)
+        response["microsoft_client_id"] = client_id
+        response["microsoft_authority"] = (
+            f"https://login.microsoftonline.com/{tenant_id}" if tenant_id else ""
+        )
+    else:
+        return make_response(
+            {"message": "This school has an unsupported authentication provider."},
+            HTTPStatus.CONFLICT,
+        )
+
+    return make_response(response, HTTPStatus.OK)
 
 
 @auth_api.route("/login", methods=["POST"])
-@inject
-def auth(
-    auth_service: PAMAuthenticationService = Provide[Container.auth_service],
-    user_repo: UserRepository = Provide[Container.user_repo],
-):
-    input_json = request.get_json() or {}
-    username = get_value_or_empty(input_json, "username")
-    password = get_value_or_empty(input_json, "password")
-
-    exists = user_repo.doesUserExist(username)
-
-    if exists:
-        existing_user = user_repo.getUserByName(username)
-        if is_user_locked(existing_user):
-            return make_response(
-                {"message": LOCKED_ACCOUNT_MESSAGE},
-                HTTPStatus.FORBIDDEN,
-            )
-
-    if user_repo.can_user_login(username) >= current_app.config["MAX_FAILED_LOGINS"]:
-        user_repo.lock_user_account(username)
-        return make_response(
-            {"message": LOCKED_ACCOUNT_MESSAGE},
-            HTTPStatus.FORBIDDEN,
-        )
-
-    try:
-        authenticated = auth_service.login(username, password)
-    except Exception as exc:
-        current_app.logger.exception("Authentication service failure")
-        return make_response(
-            {"message": f"Authentication service unavailable: {str(exc)}"},
-            HTTPStatus.SERVICE_UNAVAILABLE,
-        )
-
-    if not authenticated:
-        if exists:
-            user_repo.send_attempt_data(
-                username,
-                request.remote_addr,
-                datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
-            )
-        return make_response(
-            {"message": "Invalid username and/or password! Please try again!"},
-            HTTPStatus.FORBIDDEN,
-        )
-
-    if not exists:
-        return make_response({"message": "New User"}, HTTPStatus.OK)
-
-    user = user_repo.getUserByName(username)
-    user_repo.clear_failed_attempts(username)
-    access_token = create_access_token(identity=user)
-
+def auth():
     return make_response(
-        build_session_payload(user, access_token),
-        HTTPStatus.OK,
+        {"message": "Password login is no longer supported. Choose a school and use Google or Microsoft."},
+        HTTPStatus.GONE,
     )
 
 
@@ -372,15 +378,27 @@ def oauth_login(user_repo: UserRepository = Provide[Container.user_repo]):
     input_json = request.get_json() or {}
     provider = str(get_value_or_empty(input_json, "provider")).strip().lower()
     id_token = get_value_or_empty(input_json, "id_token").strip()
+    school_id = parse_int(get_value_or_empty(input_json, "school_id"))
 
-    if not provider or not id_token:
+    if not provider or not id_token or school_id <= 0:
         return make_response(
-            {"message": "provider and id_token are required."},
+            {"message": "provider, id_token, and school_id are required."},
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
+    school = get_school_by_id(school_id)
+    if school is None:
+        return make_response({"message": "School not found."}, HTTPStatus.NOT_FOUND)
+
+    school_provider = get_school_auth_provider(school)
+    if provider != school_provider:
+        return make_response(
+            {"message": f"{school.Name} requires {school_provider.title()} login."},
+            HTTPStatus.FORBIDDEN,
+        )
+
     try:
-        profile = verify_oauth_token(provider, id_token)
+        profile = verify_oauth_token(provider, id_token, school_id)
     except Exception as exc:
         return make_response(
             {"message": f"OAuth login failed: {str(exc)}"},
@@ -394,6 +412,12 @@ def oauth_login(user_repo: UserRepository = Provide[Container.user_repo]):
         if is_user_locked(user):
             return make_response(
                 {"message": LOCKED_ACCOUNT_MESSAGE},
+                HTTPStatus.FORBIDDEN,
+            )
+
+        if not user_has_school_assignment(int(user.Id), school_id):
+            return make_response(
+                {"message": f"Your MAAT account is not assigned to {school.Name}."},
                 HTTPStatus.FORBIDDEN,
             )
 
@@ -421,62 +445,10 @@ def oauth_login(user_repo: UserRepository = Provide[Container.user_repo]):
 
 
 @auth_api.route("/create", methods=["POST"])
-@inject
-def create_user(
-    auth_service: PAMAuthenticationService = Provide[Container.auth_service],
-    user_repo: UserRepository = Provide[Container.user_repo],
-    class_repo: ClassRepository = Provide[Container.class_repo],
-):
-    input_json = request.get_json() or {}
-    username = get_value_or_empty(input_json, "username")
-    password = get_value_or_empty(input_json, "password")
-
-    if user_repo.doesUserExist(username):
-        return make_response({"message": "User already exists"}, HTTPStatus.NOT_ACCEPTABLE)
-
-    if not auth_service.login(username, password):
-        return make_response(
-            {"message": "Invalid username and/or password! Please try again!"},
-            HTTPStatus.FORBIDDEN,
-        )
-
-    first_name = get_value_or_empty(input_json, "fname")
-    last_name = get_value_or_empty(input_json, "lname")
-    student_number = get_value_or_empty(input_json, "id")
-    email = normalize_email(get_value_or_empty(input_json, "email"))
-    school_id = parse_int(get_value_or_empty(input_json, "school_id"))
-    class_id = parse_int(get_value_or_empty(input_json, "class_id"))
-    lab_id = parse_int(get_value_or_empty(input_json, "lab_id"))
-    lecture_id = parse_int(get_value_or_empty(input_json, "lecture_id"))
-
-    if not (first_name and last_name and student_number and email and school_id and class_id and lab_id and lecture_id):
-        return make_response(
-            {"message": "Missing required data. All fields are required."},
-            HTTPStatus.NOT_ACCEPTABLE,
-        )
-
-    if school_id == -1 or class_id == -1 or lab_id == -1 or lecture_id == -1:
-        return make_response(
-            {"message": "Please fill in valid school, class, lecture, and lab data."},
-            HTTPStatus.NOT_ACCEPTABLE,
-        )
-
-    if not is_valid_school_selection(school_id, class_id, lab_id, lecture_id):
-        return make_response(
-            {"message": "The selected school, class, lecture, and lab combination is invalid."},
-
-            HTTPStatus.NOT_ACCEPTABLE,
-        )
-
-    user_repo.create_user(username, first_name, last_name, email, student_number)
-    user = user_repo.getUserByName(username)
-    class_repo.add_class_assignment(class_id, lab_id, int(user.Id), lecture_id)
-    set_class_assignment_role(int(user.Id), class_id, STUDENT_ROLE)
-
-    access_token = create_access_token(identity=user)
+def create_user():
     return make_response(
-        build_session_payload(user, access_token),
-        HTTPStatus.OK,
+        {"message": "Password-based account creation is no longer supported."},
+        HTTPStatus.GONE,
     )
 
 
@@ -528,6 +500,25 @@ def create_oauth_user(
     except BadSignature:
         return make_response(
             {"message": "Invalid sign-up session. Please sign in again."},
+            HTTPStatus.FORBIDDEN,
+        )
+
+    token_school_id = parse_int(profile.get("school_id"))
+    token_provider = str(profile.get("provider") or "").strip().lower()
+    school = get_school_by_id(school_id)
+
+    if school is None:
+        return make_response({"message": "School not found."}, HTTPStatus.NOT_FOUND)
+
+    if token_school_id != school_id:
+        return make_response(
+            {"message": "The selected school does not match the school used to sign in."},
+            HTTPStatus.FORBIDDEN,
+        )
+
+    if token_provider != get_school_auth_provider(school):
+        return make_response(
+            {"message": "The login provider does not match the selected school."},
             HTTPStatus.FORBIDDEN,
         )
 

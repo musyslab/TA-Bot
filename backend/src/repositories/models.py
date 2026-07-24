@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -16,9 +17,16 @@ from src.repositories.database import db
 
 class Schools(db.Model):
     __tablename__ = "Schools"
+    __table_args__ = (
+        CheckConstraint(
+            "AuthProvider IN ('google', 'microsoft')",
+            name="ck_schools_auth_provider",
+        ),
+    )
 
     Id = Column(Integer, primary_key=True, autoincrement=True)
     Name = Column(String(255), nullable=False, unique=True)
+    AuthProvider = Column(String(20), nullable=False)
 
     Classes = relationship("Classes", back_populates="School")
 
