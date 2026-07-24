@@ -61,6 +61,10 @@ def get_school_auth_provider(school: Any) -> str:
     return str(getattr(school, "AuthProvider", "") or "").strip().lower()
 
 
+def school_requires_lab_and_lecture(school: Any) -> bool:
+    return bool(getattr(school, "RequiresLabAndLecture", True))
+
+
 def microsoft_env_name(school_id: int, setting: str) -> str:
     return f"MICROSOFT_SCHOOL_{school_id}_{setting}"
 
@@ -144,7 +148,7 @@ def set_class_assignment_role(user_id: int, class_id: int, role: int) -> None:
         ClassAssignments.query.session.commit()
 
 def is_valid_school_selection(school_id: int, class_id: int, lab_id: int, lecture_id: int) -> bool:
-    if school_id <= 0 or class_id <= 0 or lab_id <= 0 or lecture_id <= 0:
+    if school_id <= 0 or class_id <= 0:
         return False
 
     school = Schools.query.filter(Schools.Id == school_id).first()
@@ -152,6 +156,16 @@ def is_valid_school_selection(school_id: int, class_id: int, lab_id: int, lectur
         Classes.Id == class_id,
         Classes.SchoolId == school_id,
     ).first()
+
+    if school is None or school_class is None:
+        return False
+
+    if not school_requires_lab_and_lecture(school):
+        return True
+
+    if lab_id <= 0 or lecture_id <= 0:
+        return False
+
     lab = Labs.query.filter(
         Labs.Id == lab_id,
         Labs.ClassId == class_id,
@@ -161,7 +175,7 @@ def is_valid_school_selection(school_id: int, class_id: int, lab_id: int, lectur
         LectureSections.ClassId == class_id,
     ).first()
 
-    return all([school, school_class, lab, lecture])    
+    return lab is not None and lecture is not None
 
 def split_display_name(name: str) -> Tuple[str, str]:
     cleaned = (name or "").strip()
@@ -338,6 +352,7 @@ def oauth_config():
         "school": {
             "id": school.Id,
             "name": school.Name,
+            "requires_lab_and_lecture": school_requires_lab_and_lecture(school),
         },
         "google_client_id": "",
         "microsoft_client_id": "",
@@ -472,21 +487,32 @@ def create_oauth_user(
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
-    if not (student_number and school_id and class_id and lab_id and lecture_id):
+    school = get_school_by_id(school_id)
+    if school is None:
+        return make_response({"message": "School not found."}, HTTPStatus.NOT_FOUND)
+
+    requires_lab_and_lecture = school_requires_lab_and_lecture(school)
+
+    if not (student_number and school_id > 0 and class_id > 0):
         return make_response(
-            {"message": "Missing required data. School ID, class, lab, and lecture are required."},
+            {"message": "Missing required data. School ID and class are required."},
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
-    if school_id == -1 or class_id == -1 or lab_id == -1 or lecture_id == -1:
+    if requires_lab_and_lecture and (lab_id <= 0 or lecture_id <= 0):
         return make_response(
-            {"message": "Please fill in valid school, class, lecture, and lab data."},
+            {"message": "Please choose a valid lecture and lab."},
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
     if not is_valid_school_selection(school_id, class_id, lab_id, lecture_id):
+        selection_message = (
+            "The selected school, class, lecture, and lab combination is invalid."
+            if requires_lab_and_lecture
+            else "The selected school and class combination is invalid."
+        )
         return make_response(
-            {"message": "The selected school, class, lecture, and lab combination is invalid."},
+            {"message": selection_message},
             HTTPStatus.NOT_ACCEPTABLE,
         )
 
@@ -505,10 +531,6 @@ def create_oauth_user(
 
     token_school_id = parse_int(profile.get("school_id"))
     token_provider = str(profile.get("provider") or "").strip().lower()
-    school = get_school_by_id(school_id)
-
-    if school is None:
-        return make_response({"message": "School not found."}, HTTPStatus.NOT_FOUND)
 
     if token_school_id != school_id:
         return make_response(
@@ -544,7 +566,14 @@ def create_oauth_user(
         user_repo.create_user(username, first_name, last_name, email, student_number)
         user = user_repo.getUserByName(username)
 
-    class_repo.add_class_assignment(class_id, lab_id, int(user.Id), lecture_id)
+    assignment_lab_id = lab_id if requires_lab_and_lecture else None
+    assignment_lecture_id = lecture_id if requires_lab_and_lecture else None
+    class_repo.add_class_assignment(
+        class_id,
+        assignment_lab_id,
+        int(user.Id),
+        assignment_lecture_id,
+    )
     set_class_assignment_role(int(user.Id), class_id, STUDENT_ROLE)
 
     access_token = create_access_token(identity=user)

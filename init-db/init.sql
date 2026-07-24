@@ -25,6 +25,7 @@ CREATE TABLE `Schools` (
   `Id` int NOT NULL AUTO_INCREMENT,
   `Name` varchar(255) NOT NULL,
   `AuthProvider` varchar(20) NOT NULL,
+  `RequiresLabAndLecture` tinyint(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `uq_schools_name` (`Name`),
   CONSTRAINT `ck_schools_auth_provider`
@@ -139,8 +140,8 @@ CREATE TABLE `Assignments` (
 CREATE TABLE `ClassAssignments` (
   `UserId` int NOT NULL,
   `ClassId` int NOT NULL,
-  `LabId` int NOT NULL,
-  `LectureId` int NOT NULL,
+  `LabId` int DEFAULT NULL,
+  `LectureId` int DEFAULT NULL,
   `Role` int NOT NULL DEFAULT 0,
   PRIMARY KEY (`UserId`, `ClassId`),
   KEY `idx_class_assignments_class` (`ClassId`),
@@ -385,11 +386,15 @@ CREATE TABLE `SubmissionAnnotations` (
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-INSERT INTO `Schools` (`Id`, `Name`, `AuthProvider`)
-VALUES (1, 'Marquette University', 'microsoft');
+INSERT INTO `Schools` (`Id`, `Name`, `AuthProvider`, `RequiresLabAndLecture`)
+VALUES
+  (1, 'Marquette University', 'microsoft', 1),
+  (2, 'MPS Training', 'google', 0);
 
 INSERT INTO `Classes` (`Id`, `Name`, `SchoolId`)
-VALUES (1, 'COSC 1010', 1);
+VALUES
+  (1, 'COSC 1010', 1),
+  (2, '2026-2027', 2);
 
 INSERT INTO `Labs` (`Id`, `Name`, `ClassId`)
 VALUES (1, '401', 1);

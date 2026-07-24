@@ -45,6 +45,12 @@ from src.repositories.user_repository import UserRepository
 projects_api = Blueprint('projects_api', __name__)
 
 ALLOWED_SOURCE_EXTS = {'.py', '.c', '.java', '.rkt'}
+ALLOWED_PRESENTATION_EXTS = {'.pdf', '.ppt', '.pptx'}
+PRESENTATION_MIME_TYPES = {
+    '.pdf': 'application/pdf',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
 TS_DIR_RE = re.compile(r"^\d{8}_\d{6}$")
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
@@ -904,6 +910,42 @@ def module_folder_name(module: Modules | None, fallback_name: str, timestamp_hin
     return f"{ts}_{first_name}"
 
 
+def teacher_module_dir(module: Modules) -> str:
+    return os.path.join(
+        teacher_root_for_class(int(module.ClassId)),
+        module_folder_name(module, getattr(module, "Name", "module")),
+    )
+
+
+def module_presentation_path(module: Modules | None) -> str | None:
+    if module is None:
+        return None
+
+    timestamp = str(getattr(module, "FileTimestamp", "") or "").strip()
+    first_name = str(getattr(module, "FirstName", "") or "").strip()
+    if not timestamp or not first_name:
+        return None
+
+    module_dir = os.path.join(
+        teacher_root_for_class(int(module.ClassId)),
+        f"{timestamp}_{path_segment(first_name, 'module')}",
+    )
+    try:
+        candidates = [
+            os.path.join(module_dir, name)
+            for name in os.listdir(module_dir)
+            if os.path.isfile(os.path.join(module_dir, name))
+            and os.path.splitext(name)[1].lower() in ALLOWED_PRESENTATION_EXTS
+        ]
+    except OSError:
+        return None
+
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda path: os.path.getmtime(path))
+
+
 def teacher_main_project_dir(project: Projects, timestamp_hint: str | None = None) -> str:
     module = project_module(project)
     module_folder = module_folder_name(module, getattr(project, "Name", "module"), timestamp_hint)
@@ -1020,6 +1062,8 @@ def module_payload(
         except Exception:
             main_completed = False
 
+    presentation_path = module_presentation_path(module)
+
     return {
         "Id": module.Id,
         "ClassId": module.ClassId,
@@ -1036,6 +1080,8 @@ def module_payload(
         "MainRewardStars": int((main_award or {}).get("stars", 0) or 0),
         "MainRewardMultiplier": int((main_award or {}).get("multiplier", 1) or 1),
         "MainStartedEarly": bool((main_award or {}).get("started_early", False)),
+        "HasPresentation": bool(presentation_path),
+        "PresentationFileName": os.path.basename(presentation_path) if presentation_path else "",
     }
 
 
@@ -3066,6 +3112,131 @@ def update_module(project_repo: ProjectRepository = Provide[Container.project_re
         return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
 
     return jsonify({'message': 'Module updated'})
+
+
+def requested_presentation_module():
+    module_id = parse_int(
+        request.form.get('module_id')
+        if request.method == 'POST'
+        else request.args.get('module_id'),
+        0,
+    )
+    project_id = parse_int(
+        request.form.get('project_id')
+        if request.method == 'POST'
+        else request.args.get('project_id'),
+        0,
+    )
+
+    module = Modules.query.filter(Modules.Id == module_id).first() if module_id > 0 else None
+    if module is None and project_id > 0:
+        project = Projects.query.filter(Projects.Id == project_id).first()
+        resolved_module_id = parse_int(getattr(project, 'ModuleId', 0) if project else 0, 0)
+        module = (
+            Modules.query.filter(Modules.Id == resolved_module_id).first()
+            if resolved_module_id > 0
+            else None
+        )
+
+    return module
+
+
+@projects_api.route('/module_presentation', methods=['GET'])
+@jwt_required()
+def get_module_presentation():
+    module = requested_presentation_module()
+    if module is None:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+    if not current_user_can_access_visible_module_id(int(module.Id)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    presentation_path = module_presentation_path(module)
+    if not presentation_path:
+        return make_response(
+            {'message': 'No presentation has been saved for this module.'},
+            HTTPStatus.NOT_FOUND,
+        )
+
+    with open(presentation_path, 'rb') as presentation_file:
+        data = presentation_file.read()
+
+    filename = os.path.basename(presentation_path)
+    ext = os.path.splitext(filename)[1].lower()
+    return Response(
+        data,
+        content_type=PRESENTATION_MIME_TYPES.get(ext, 'application/octet-stream'),
+        headers={
+            'Content-Disposition': f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}",
+            'Content-Length': str(len(data)),
+            'X-Filename': filename,
+            'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type, X-Filename',
+        },
+    )
+
+
+@projects_api.route('/module_presentation', methods=['POST'])
+@jwt_required()
+def save_module_presentation():
+    if not is_staff_user():
+        return access_denied_response()
+
+    module = requested_presentation_module()
+    if module is None:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+    if not user_can_access_module_id(int(module.Id)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    presentation = request.files.get('presentation')
+    if presentation is None or not presentation.filename:
+        return make_response(
+            {'message': 'Choose a presentation to save.'},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    filename = secure_filename(presentation.filename)
+    ext = os.path.splitext(filename)[1].lower()
+    if not filename or ext not in ALLOWED_PRESENTATION_EXTS:
+        return make_response(
+            {'message': 'Presentations must be PDF, PPT, or PPTX files.'},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    module_dir = teacher_module_dir(module)
+    os.makedirs(module_dir, exist_ok=True)
+    destination = os.path.join(module_dir, filename)
+    temporary_path = os.path.join(
+        module_dir,
+        f'.presentation-{datetime.now().strftime("%Y%m%d_%H%M%S_%f")}.upload',
+    )
+
+    try:
+        presentation.save(temporary_path)
+        os.replace(temporary_path, destination)
+
+        for name in os.listdir(module_dir):
+            existing_path = os.path.join(module_dir, name)
+            if (
+                existing_path != destination
+                and os.path.isfile(existing_path)
+                and os.path.splitext(name)[1].lower() in ALLOWED_PRESENTATION_EXTS
+            ):
+                os.remove(existing_path)
+    except OSError as exc:
+        try:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        except OSError:
+            pass
+        return make_response(
+            {'message': f'Could not save presentation: {exc}'},
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+        )
+
+    return jsonify({
+        'message': 'Module presentation saved.',
+        'file_name': filename,
+    })
+
 
 @projects_api.route('/get_module_overview', methods=['GET'])
 @jwt_required()

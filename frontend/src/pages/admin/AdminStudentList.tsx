@@ -347,8 +347,10 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                     row.id = parseInt(key, 10)
                     row.Lname = String(student_output_data[0] ?? '')
                     row.Fname = String(student_output_data[1] ?? '')
-                    row.lecture_number = parseInt(String(student_output_data[2] ?? '0'), 10)
-                    row.lab_number = parseInt(String(student_output_data[3] ?? '0'), 10)
+                    const lectureNumber = parseInt(String(student_output_data[2] ?? ''), 10)
+                    const labNumber = parseInt(String(student_output_data[3] ?? ''), 10)
+                    row.lecture_number = Number.isFinite(lectureNumber) ? lectureNumber : -1
+                    row.lab_number = Number.isFinite(labNumber) ? labNumber : -1
 
                     lectureSet.add(row.lecture_number)
                     labSet.add(row.lab_number)
@@ -943,37 +945,45 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
 
                             <div className="student-sub-panel">
                                 <div className="filter-bar">
-                                    <label className="filter-label" htmlFor="lectureFilter">
-                                        Lecture:
-                                    </label>
-                                    <select
-                                        id="lectureFilter"
-                                        className="filter-select lecture-filter"
-                                        onChange={this.handleLectureChange}
-                                        value={this.state.selectedLecture}
-                                    >
-                                        {this.state.lecture_numbers.map((opt) => (
-                                            <option className="lecture-option" key={`lec-${opt.key}`} value={opt.value}>
-                                                {opt.text}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    {this.state.lecture_numbers.length > 1 && (
+                                        <>
+                                            <label className="filter-label" htmlFor="lectureFilter">
+                                                Lecture:
+                                            </label>
+                                            <select
+                                                id="lectureFilter"
+                                                className="filter-select lecture-filter"
+                                                onChange={this.handleLectureChange}
+                                                value={this.state.selectedLecture}
+                                            >
+                                                {this.state.lecture_numbers.map((opt) => (
+                                                    <option className="lecture-option" key={`lec-${opt.key}`} value={opt.value}>
+                                                        {opt.text}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </>
+                                    )}
 
-                                    <label className="filter-label" htmlFor="labFilter">
-                                        Lab:
-                                    </label>
-                                    <select
-                                        id="labFilter"
-                                        className="filter-select lab-filter"
-                                        onChange={this.handleLabChange}
-                                        value={this.state.selectedLab}
-                                    >
-                                        {this.state.lab_numbers.map((opt) => (
-                                            <option className="lab-option" key={`lab-${opt.key}`} value={opt.value}>
-                                                {opt.text}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    {this.state.lab_numbers.length > 1 && (
+                                        <>
+                                            <label className="filter-label" htmlFor="labFilter">
+                                                Lab:
+                                            </label>
+                                            <select
+                                                id="labFilter"
+                                                className="filter-select lab-filter"
+                                                onChange={this.handleLabChange}
+                                                value={this.state.selectedLab}
+                                            >
+                                                {this.state.lab_numbers.map((opt) => (
+                                                    <option className="lab-option" key={`lab-${opt.key}`} value={opt.value}>
+                                                        {opt.text}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </>
+                                    )}
 
                                     <>
                                         <button
@@ -1060,8 +1070,12 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                     return (
                                                         <tr className="student-row student-row--no-submission" key={`row-${row.id}-na`}>
                                                             {renderStudentName()}
-                                                            <td className="lecture-number-cell">{row.lecture_number}</td>
-                                                            <td className="lab-number-cell">{row.lab_number}</td>
+                                                            <td className="lecture-number-cell">
+                                                                {row.lecture_number >= 0 ? row.lecture_number : 'N/A'}
+                                                            </td>
+                                                            <td className="lab-number-cell">
+                                                                {row.lab_number >= 0 ? row.lab_number : 'N/A'}
+                                                            </td>
                                                             <td className="submissions-cell">N/A</td>
                                                             <td className="date-cell">N/A</td>
                                                             <td className="status-cell">N/A</td>
@@ -1091,8 +1105,12 @@ class StudentListInternal extends Component<StudentListProps, StudentListState> 
                                                 return (
                                                     <tr className="student-row" key={`row-${row.id}`}>
                                                         {renderStudentName()}
-                                                        <td className="lecture-number-cell">{row.lecture_number}</td>
-                                                        <td className="lab-number-cell">{row.lab_number}</td>
+                                                        <td className="lecture-number-cell">
+                                                            {row.lecture_number >= 0 ? row.lecture_number : 'N/A'}
+                                                        </td>
+                                                        <td className="lab-number-cell">
+                                                            {row.lab_number >= 0 ? row.lab_number : 'N/A'}
+                                                        </td>
                                                         <td className="submissions-cell">{row.numberOfSubmissions}</td>
                                                         <td className="date-cell">{this.formatDate12h(row.date)}</td>
                                                         <td className={row.isPassing ? 'status-cell status passed' : 'status-cell status failed'}>

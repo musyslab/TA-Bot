@@ -27,6 +27,7 @@ class Schools(db.Model):
     Id = Column(Integer, primary_key=True, autoincrement=True)
     Name = Column(String(255), nullable=False, unique=True)
     AuthProvider = Column(String(20), nullable=False)
+    RequiresLabAndLecture = Column(Boolean, nullable=False, default=True)
 
     Classes = relationship("Classes", back_populates="School")
 
@@ -181,12 +182,12 @@ class ClassAssignments(db.Model):
     LabId = Column(
         Integer,
         ForeignKey("Labs.Id"),
-        nullable=False,
+        nullable=True,
     )
     LectureId = Column(
         Integer,
         ForeignKey("LectureSections.Id"),
-        nullable=False,
+        nullable=True,
     )
     Role = Column(Integer, nullable=False, default=0)
 

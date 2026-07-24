@@ -62,6 +62,7 @@ interface OAuthConfig {
   school: {
     id: number;
     name: string;
+    requires_lab_and_lecture: boolean;
   };
   google_client_id: string;
   microsoft_client_id: string;
@@ -149,6 +150,7 @@ function Login() {
   const [oauthSignupToken, setOAuthSignupToken] = useState<string>("");
 
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
+  const requiresLabAndLecture = oauthConfig?.school.requires_lab_and_lecture ?? true;
 
   const persistSession = useCallback(
     (accessToken: string, _userRole: number, _accessSummary?: SessionAccessSummary) => {
@@ -198,7 +200,7 @@ function Login() {
       }
     } catch (err) {
       console.error(err);
-      setNewUserError("Could not load class, lecture, and lab options.");
+      setNewUserError("Could not load class options.");
     }
   }, [apiBase, selectedSchoolId]);
 
@@ -375,8 +377,16 @@ function Login() {
       return;
     }
 
-    if (classId <= 0 || labId <= 0 || lectureId <= 0 || !studentNumber.trim()) {
-      setNewUserError("Please enter your school ID and choose a class, lecture, and lab.");
+    if (
+      classId <= 0 ||
+      !studentNumber.trim() ||
+      (requiresLabAndLecture && (labId <= 0 || lectureId <= 0))
+    ) {
+      setNewUserError(
+        requiresLabAndLecture
+          ? "Please enter your school ID and choose a class, lecture, and lab."
+          : "Please enter your school ID and choose a class."
+      );
       return;
     }
 
@@ -388,8 +398,8 @@ function Login() {
         id: studentNumber,
         school_id: selectedSchoolId,
         class_id: classId,
-        lab_id: labId,
-        lecture_id: lectureId,
+        lab_id: requiresLabAndLecture ? labId : null,
+        lecture_id: requiresLabAndLecture ? lectureId : null,
       });
 
       persistSession(res.data.access_token, Number(res.data.role || 0), res.data as SessionAccessSummary);
@@ -488,45 +498,49 @@ function Login() {
                 </select>
               </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor="lectureSelect">
-                  Lecture Number
-                </label>
-                <select
-                  id="lectureSelect"
-                  value={lectureId}
-                  onChange={(event) => setLectureId(Number(event.target.value))}
-                  disabled={!hasClassSelected}
-                  className="form-select"
-                >
-                  <option value={-1}>Lecture</option>
-                  {lectureOptions.map((option) => (
-                    <option key={option.key} value={option.value}>
-                      {option.text}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {requiresLabAndLecture ? (
+                <>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="lectureSelect">
+                      Lecture Number
+                    </label>
+                    <select
+                      id="lectureSelect"
+                      value={lectureId}
+                      onChange={(event) => setLectureId(Number(event.target.value))}
+                      disabled={!hasClassSelected}
+                      className="form-select"
+                    >
+                      <option value={-1}>Lecture</option>
+                      {lectureOptions.map((option) => (
+                        <option key={option.key} value={option.value}>
+                          {option.text}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor="labSelect">
-                  Lab Number
-                </label>
-                <select
-                  id="labSelect"
-                  value={labId}
-                  onChange={(event) => setLabId(Number(event.target.value))}
-                  disabled={!hasClassSelected}
-                  className="form-select"
-                >
-                  <option value={-1}>Lab</option>
-                  {labOptions.map((option) => (
-                    <option key={option.key} value={option.value}>
-                      {option.text}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="labSelect">
+                      Lab Number
+                    </label>
+                    <select
+                      id="labSelect"
+                      value={labId}
+                      onChange={(event) => setLabId(Number(event.target.value))}
+                      disabled={!hasClassSelected}
+                      className="form-select"
+                    >
+                      <option value={-1}>Lab</option>
+                      {labOptions.map((option) => (
+                        <option key={option.key} value={option.value}>
+                          {option.text}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : null}
 
               {newUserError ? (
                 <div className="alert alert--error" role="alert" aria-live="assertive">

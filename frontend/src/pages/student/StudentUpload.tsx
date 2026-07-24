@@ -52,6 +52,8 @@ type ModuleObjectLite = {
   Start: string;
   End: string;
   MainProjectId?: number;
+  HasPresentation?: boolean;
+  PresentationFileName?: string;
 };
 
 type PastSubmissionMain = {
@@ -332,6 +334,10 @@ const StudentUpload = () => {
   const [isCooldownStateLoading, setIsCooldownStateLoading] = useState<boolean>(true);
 
   const [moduleName, setModuleName] = useState<string>("");
+  const [hasModulePresentation, setHasModulePresentation] =
+    useState<boolean>(false);
+  const [modulePresentationFileName, setModulePresentationFileName] =
+    useState<string>("");
   const [checkpointLabel, setCheckpointLabel] = useState<string>("");
   const [hideClassSelectionCrumb, setHideClassSelectionCrumb] =
     useState<boolean>(false);
@@ -341,6 +347,56 @@ const StudentUpload = () => {
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   };
+
+  const loadModulePresentationStatus = useCallback(
+    (targetProjectId: number) => {
+      if (!Number.isFinite(cid) || cid <= 0 || targetProjectId <= 0) {
+        setHasModulePresentation(false);
+        setModulePresentationFileName("");
+        return;
+      }
+
+      setHasModulePresentation(false);
+      setModulePresentationFileName("");
+
+      axios
+        .get(
+          `${import.meta.env.VITE_API_URL}/projects/get_modules_by_class_id_student?id=${cid}`,
+          {
+            headers: authHeader(),
+          },
+        )
+        .then((res) => {
+          const modules: ModuleObjectLite[] = Array.isArray(res.data)
+            ? res.data.map((item: unknown) =>
+              normalizeMaybeJson<ModuleObjectLite>(item),
+            )
+            : [];
+          const selectedModule =
+            (moduleId
+              ? modules.find((item) => Number(item.Id) === Number(moduleId))
+              : null) ||
+            modules.find(
+              (item) => Number(item.MainProjectId) === Number(targetProjectId),
+            ) ||
+            null;
+
+          setModuleName(selectedModule?.Name || "");
+          setHasModulePresentation(Boolean(selectedModule?.HasPresentation));
+          setModulePresentationFileName(
+            selectedModule?.PresentationFileName || "",
+          );
+        })
+        .catch(() => {
+          setHasModulePresentation(false);
+          setModulePresentationFileName("");
+          if (hasModuleRoute) {
+            setModuleName("");
+          }
+        });
+    },
+    [cid, hasModuleRoute, moduleId],
+  );
 
   const testcaseProgress = useMemo(() => {
     const total = Math.max(0, testcasesTotalCount);
@@ -1026,37 +1082,14 @@ const StudentUpload = () => {
     if (!Number.isFinite(cid) || cid <= 0) {
       setProject_name("");
       setProject_id(-1);
+      setHasModulePresentation(false);
+      setModulePresentationFileName("");
       return;
     }
 
     if (hasModuleRoute && routeProjectId) {
       setProject_id(routeProjectId);
-
-      axios
-        .get(
-          `${import.meta.env.VITE_API_URL}/projects/get_modules_by_class_id_student?id=${cid}`,
-          {
-            headers: authHeader(),
-          },
-        )
-        .then((res) => {
-          const modules: ModuleObjectLite[] = Array.isArray(res.data)
-            ? res.data.map((item: unknown) =>
-              normalizeMaybeJson<ModuleObjectLite>(item),
-            )
-            : [];
-
-          const selectedModule =
-            modules.find((item) => Number(item.Id) === Number(moduleId)) ||
-            null;
-
-          if (selectedModule) {
-            setModuleName(selectedModule.Name || "");
-          }
-        })
-        .catch(() => {
-          setModuleName("");
-        });
+      loadModulePresentationStatus(routeProjectId);
 
       axios
         .get(
@@ -1093,13 +1126,17 @@ const StudentUpload = () => {
         },
       )
       .then((res) => {
+        const activeProjectId = Number(res.data[5] || 0);
         setProject_name(res.data[3]);
         setDueDate(res.data[4]);
-        setProject_id(Number(res.data[5] || 0));
+        setProject_id(activeProjectId);
+        loadModulePresentationStatus(activeProjectId);
       })
       .catch(() => {
         setProject_name("");
         setProject_id(-1);
+        setHasModulePresentation(false);
+        setModulePresentationFileName("");
       });
   }
 
@@ -1119,6 +1156,34 @@ const StudentUpload = () => {
       )
       .then((res) => downloadBlobResponse(res, "assignment_description"))
       .catch((err) => console.error("Download failed:", err));
+  };
+
+  const downloadModulePresentation = () => {
+    const params = moduleId
+      ? { module_id: moduleId }
+      : { project_id };
+
+    if ((!moduleId && project_id <= 0) || !hasModulePresentation) return;
+
+    axios
+      .get(
+        `${import.meta.env.VITE_API_URL}/projects/module_presentation`,
+        {
+          headers: authHeader(),
+          params,
+          responseType: "blob",
+        },
+      )
+      .then((res) =>
+        downloadBlobResponse(
+          res,
+          modulePresentationFileName || "module_presentation",
+        ),
+      )
+      .catch(() => {
+        setError_Message("The module presentation could not be downloaded.");
+        setIsErrorMessageHidden(false);
+      });
   };
 
   function submitSuggestions() {
@@ -1442,10 +1507,19 @@ const StudentUpload = () => {
                 <button
                   type="button"
                   className="presentation-download"
-                  disabled
-                  aria-disabled="true"
-                  aria-label="Download presentation unavailable"
-                  title="Download presentation unavailable"
+                  onClick={downloadModulePresentation}
+                  disabled={!hasModulePresentation}
+                  aria-disabled={!hasModulePresentation}
+                  aria-label={
+                    hasModulePresentation
+                      ? "Download module presentation"
+                      : "Module presentation unavailable"
+                  }
+                  title={
+                    hasModulePresentation
+                      ? `Download ${modulePresentationFileName || "module presentation"}`
+                      : "No presentation has been saved for this module"
+                  }
                 >
                   <FaFilePowerpoint aria-hidden="true" />
                   <span>Download Presentation</span>

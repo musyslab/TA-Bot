@@ -185,22 +185,26 @@ class UserRepository:
         query.IsLocked=True
         db.session.commit()
     
-    def get_user_lectures(self, userIds: List[int], class_id) -> Dict[int, ClassAssignments]:
+    def get_user_lectures(self, userIds: List[int], class_id) -> Dict[int, str]:
         """Returns a dictionary of lecture names for each user in the given list of user IDs.
         
         Args:
             userIds (List[int]): A list of user IDs for which to retrieve lecture names.
             
         Returns:
-            Dict[int, ClassAssignments]: A dictionary where the keys are user IDs and the values are the names of the lectures
+            Dict[int, str]: A dictionary where the keys are user IDs and the values are the names of the lectures
             assigned to each user.
         """
         #TODO: Do we still use this? seems to only work for single class submissions.
         class_assignments = ClassAssignments.query.filter(and_(ClassAssignments.UserId.in_(userIds), ClassAssignments.ClassId == class_id)).all()
         
-        user_lectures_dict={}
+        user_lectures_dict = {user_id: "" for user_id in userIds}
         for class_assignment in class_assignments:
-            user_lectures_dict[class_assignment.UserId] = LectureSections.query.filter(LectureSections.Id == class_assignment.LectureId).one().Name
+            lecture = LectureSections.query.filter(
+                LectureSections.Id == class_assignment.LectureId
+            ).one_or_none()
+            if lecture is not None:
+                user_lectures_dict[class_assignment.UserId] = lecture.Name
 
         return user_lectures_dict
 

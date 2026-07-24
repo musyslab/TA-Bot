@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy import desc
 
@@ -18,9 +18,9 @@ class ClassRepository:
     def add_class_assignment(
         self,
         class_id: int,
-        lab_id: int,
+        lab_id: Optional[int],
         user_id: int,
-        lecture_id: int,
+        lecture_id: Optional[int],
     ) -> ClassAssignments:
         assignment = ClassAssignments.query.filter(
             ClassAssignments.UserId == user_id,
