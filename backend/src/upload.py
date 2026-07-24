@@ -719,6 +719,136 @@ def student_submission_cooldown_response(
     return response
 
 
+def student_upload_targets(
+    project_repo: ProjectRepository,
+    user_id: int,
+    project_id: int,
+) -> dict:
+    """
+    Return the assignment targets that are open to a student.
+
+    This mirrors StudentModuleDetails: completed checkpoints stay open, the
+    first incomplete checkpoint is open, later checkpoints are locked, and the
+    main problem opens only after every enabled checkpoint is passed or skipped.
+    """
+    checkpoint_rows = project_repo.list_checkpoints(int(project_id))
+    checkpoint_ids = [
+        int(getattr(checkpoint, "Id", 0) or 0)
+        for checkpoint in checkpoint_rows
+        if int(getattr(checkpoint, "Id", 0) or 0) > 0
+    ]
+
+    passed_checkpoint_ids: set[int] = set()
+    if checkpoint_ids:
+        passed_rows = (
+            db.session.query(Submissions.CheckpointId)
+            .filter(
+                Submissions.User == int(user_id),
+                Submissions.Project == int(project_id),
+                Submissions.IsCheckpoint == True,
+                Submissions.IsPassing == True,
+                Submissions.CheckpointId.in_(checkpoint_ids),
+            )
+            .distinct()
+            .all()
+        )
+        passed_checkpoint_ids = {
+            int(row[0])
+            for row in passed_rows
+            if row and row[0] is not None
+        }
+
+    skipped_rows = StudentCheckpointSkips.query.filter(
+        StudentCheckpointSkips.UserId == int(user_id),
+        StudentCheckpointSkips.ProjectId == int(project_id),
+    ).all()
+    skipped_checkpoint_ids = {
+        int(getattr(row, "CheckpointId", 0) or 0)
+        for row in skipped_rows
+    }
+
+    completed_checkpoint_ids = passed_checkpoint_ids | skipped_checkpoint_ids
+    first_incomplete_index = next(
+        (
+            index
+            for index, checkpoint_id in enumerate(checkpoint_ids)
+            if checkpoint_id not in completed_checkpoint_ids
+        ),
+        None,
+    )
+
+    targets = []
+    for index, checkpoint in enumerate(checkpoint_rows):
+        checkpoint_id = int(getattr(checkpoint, "Id", 0) or 0)
+        completed = checkpoint_id in completed_checkpoint_ids
+        available = completed or index == first_incomplete_index
+
+        targets.append(
+            {
+                "id": checkpoint_id,
+                "number": index + 1,
+                "name": str(
+                    getattr(checkpoint, "Name", "")
+                    or f"Checkpoint {index + 1}"
+                ),
+                "enabled": bool(getattr(checkpoint, "Enabled", True)),
+                "completed": completed,
+                "available": available,
+            }
+        )
+
+    return {
+        "checkpoints": targets,
+        "mainAvailable": first_incomplete_index is None,
+    }
+
+
+def upload_target_order_error(
+    project_repo: ProjectRepository,
+    user_id: int,
+    project_id: int,
+    is_checkpoint: bool,
+    checkpoint_id: int,
+):
+    targets = student_upload_targets(project_repo, user_id, project_id)
+
+    if not is_checkpoint:
+        if bool(targets.get("mainAvailable")):
+            return None
+
+        return make_response(
+            {
+                "message": (
+                    "The main problem is locked for this student. "
+                    "Complete or skip all checkpoints first."
+                )
+            },
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    checkpoint_target = next(
+        (
+            row
+            for row in targets.get("checkpoints", [])
+            if int(row.get("id", 0) or 0) == int(checkpoint_id)
+        ),
+        None,
+    )
+
+    if checkpoint_target is not None and bool(checkpoint_target.get("available")):
+        return None
+
+    return make_response(
+        {
+            "message": (
+                "This checkpoint is locked for this student. "
+                "Complete or skip earlier checkpoints first."
+            )
+        },
+        HTTPStatus.BAD_REQUEST,
+    )
+
+
 @upload_api.route("/total_students_by_cid", methods=["GET"])
 @jwt_required()
 @inject
@@ -755,6 +885,44 @@ def total_students(user_repo: UserRepository = Provide[Container.user_repo]):
         )
 
     return jsonify(list_of_user_info)
+
+
+@upload_api.route("/available_targets", methods=["GET"])
+@jwt_required()
+@inject
+def available_targets(
+    project_repo: ProjectRepository = Provide[Container.project_repo],
+):
+    class_id = parse_int(request.args.get("class_id"), 0)
+    project_id = parse_int(request.args.get("project_id"), 0)
+    student_id = parse_int(request.args.get("student_id"), 0)
+
+    if class_id <= 0 or project_id <= 0 or student_id <= 0:
+        return make_response(
+            {"message": "class_id, project_id, and student_id are required"},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    if not user_can_access_class_id(class_id):
+        return make_response({"message": "Access Denied"}, HTTPStatus.FORBIDDEN)
+
+    if not user_id_is_enrolled_in_class(student_id, class_id):
+        return make_response(
+            {"message": "Student is not enrolled in this class"},
+            HTTPStatus.FORBIDDEN,
+        )
+
+    project = project_repo.get_selected_project(project_id)
+    if (
+        project is None
+        or int(getattr(project, "ClassId", 0) or 0) != class_id
+    ):
+        return make_response(
+            {"message": "Project does not belong to this class"},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    return jsonify(student_upload_targets(project_repo, student_id, project_id))
 
 
 @upload_api.route("/", methods=["POST"])
@@ -879,6 +1047,16 @@ def file_upload(
                 {"message": "Checkpoint is disabled"},
                 HTTPStatus.FORBIDDEN,
             )
+
+    order_error = upload_target_order_error(
+        project_repo,
+        user_id,
+        int(project.Id),
+        is_checkpoint,
+        checkpoint_id,
+    )
+    if order_error is not None:
+        return order_error
 
     if not is_staff_upload:
         cooldown_response = student_submission_cooldown_response(
