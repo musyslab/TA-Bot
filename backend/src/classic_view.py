@@ -83,14 +83,14 @@ def create_classic_view():
 
     Request JSON:
       {
-        "tap_text":        "<full TAP .out file contents>",
-        "student_name":    "Angel Mora",
-        "assignment_label":"COSC 3250 Spring 2024 HW #03",
-        "expires_hours":   168          // optional, default 168 (7 days)
+        "tap_text":        ,
+        "student_name":    ,
+        "assignment_label": ,
+        "expires_hours":
       }
 
     Response JSON:
-      { "token": "...", "url": "https://tabot.example.com/classic/<token>" }
+      { "token": "...", "url": "https://tabot.cs.mu.edu/classic/<token>" }
     """
     if not _check_mailbot_secret():
         return make_response({"error": "Forbidden"}, HTTPStatus.FORBIDDEN)
