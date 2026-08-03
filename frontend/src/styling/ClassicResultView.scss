@@ -1,26 +1,20 @@
-/* ClassicResultView.scss
-   Styled to match the visual language of CodeDiffView.scss:
-   light backgrounds, blue accents, green/red pass/fail indicators. */
-
-/* ── page shell ─────────────────────────────────────────────────────────── */
 .cvr-page {
   min-height: 100vh;
-  background: #f4f6f9;
-  color: #1f2937;
+  background: #0f1117;
+  color: #e2e8f0;
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
   display: flex;
   flex-direction: column;
 }
 
-/* ── header ─────────────────────────────────────────────────────────────── */
 .cvr-header {
-  background: #ffffff;
-  border-bottom: 1px solid #e7eaf1;
+  background: #161b27;
+  border-bottom: 1px solid #1e2536;
   padding: 1.25rem 2rem;
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  box-shadow: 0 1px 6px rgba(80, 95, 126, 0.07);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
 }
 
 .cvr-header__logo {
@@ -31,8 +25,8 @@
   line-height: 1;
 }
 
-.cvr-header__logo-mark { color: #007bff; }
-.cvr-header__logo-bot  { color: #1f2937; }
+.cvr-header__logo-mark { color: #60a5fa; }
+.cvr-header__logo-bot  { color: #e2e8f0; }
 
 .cvr-header__titles {
   display: flex;
@@ -44,16 +38,15 @@
   margin: 0;
   font-size: 1.05rem;
   font-weight: 600;
-  color: #222e3a;
+  color: #e2e8f0;
 }
 
 .cvr-header__student {
   margin: 0;
   font-size: 0.85rem;
-  color: #6b7280;
+  color: #64748b;
 }
 
-/* ── main content ───────────────────────────────────────────────────────── */
 .cvr-main {
   flex: 1;
   max-width: 900px;
@@ -61,50 +54,153 @@
   margin: 2rem auto 4rem;
 }
 
-/* ── summary bar ────────────────────────────────────────────────────────── */
+.cvr-compile-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-left: 4px solid #f87171;
+  border-radius: 10px;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+.cvr-compile-banner__icon {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #f87171;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.cvr-compile-banner__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cvr-compile-banner__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f87171;
+}
+
+.cvr-compile-banner__message {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
 .cvr-summary {
-  background: #ffffff;
-  border: 1px solid #e7eaf1;
-  border-radius: 8px;
+  background: #161b27;
+  border: 1px solid #1e2536;
+  border-radius: 10px;
   padding: 1.25rem 1.5rem;
   margin-bottom: 1.5rem;
-  box-shadow: 0 1px 6px rgba(80, 95, 126, 0.07);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+.cvr-summary__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  gap: 1rem;
 }
 
 .cvr-summary__counts {
   display: flex;
   align-items: baseline;
   gap: 0.2rem;
-  margin-bottom: 0.75rem;
 }
 
-.cvr-summary__big   { font-size: 2.25rem; font-weight: 800; color: #065f46; line-height: 1; }
-.cvr-summary__slash { font-size: 1.5rem; color: #9ca3af; }
-.cvr-summary__total { font-size: 1.5rem; font-weight: 600; color: #6b7280; }
-.cvr-summary__label { font-size: 0.9rem; color: #9ca3af; margin-left: 0.4rem; }
+.cvr-summary__big   { font-size: 2.25rem; font-weight: 800; color: #4ade80; line-height: 1; }
+.cvr-summary__slash { font-size: 1.5rem; color: #334155; }
+.cvr-summary__total { font-size: 1.5rem; font-weight: 600; color: #64748b; }
+.cvr-summary__label { font-size: 0.9rem; color: #475569; margin-left: 0.4rem; }
 
 .cvr-summary__bar-track {
   height: 6px;
-  background: #f0f4f8;
+  background: #1e2536;
   border-radius: 9999px;
   overflow: hidden;
+  margin-bottom: 1rem;
 }
 
 .cvr-summary__bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #10b981, #34d399);
+  background: linear-gradient(90deg, #22c55e, #4ade80);
   border-radius: 9999px;
   transition: width 0.6s ease;
   min-width: 4px;
 }
 
-/* -- category sections ----------------------------------------------------- */
+/* per-category breakdown */
+.cvr-summary__breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.cvr-summary__cat {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25em 0.65em;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.cvr-summary__cat--pass {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.cvr-summary__cat--fail {
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+
+.cvr-summary__cat-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+.cvr-summary__cat-score {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+/* timestamp */
+.cvr-summary__timestamp {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.cvr-summary__timestamp--standalone {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+
+
+
+
 .cvr-category {
   margin-bottom: 1.5rem;
   border-radius: 10px;
-  border: 1px solid #e7eaf1;
+  border: 1px solid #1e2536;
   overflow: hidden;
-  box-shadow: 0 1px 6px rgba(80, 95, 126, 0.07);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
 }
 
 .cvr-category:last-child {
@@ -112,13 +208,13 @@
 }
 
 .cvr-category--pass .cvr-category__header {
-  border-left: 4px solid #10b981;
-  background: rgba(16, 185, 129, 0.04);
+  border-left: 4px solid #22c55e;
+  background: rgba(34, 197, 94, 0.06);
 }
 
 .cvr-category--fail .cvr-category__header {
-  border-left: 4px solid #ef4444;
-  background: rgba(239, 68, 68, 0.04);
+  border-left: 4px solid #f87171;
+  background: rgba(248, 113, 113, 0.06);
 }
 
 .cvr-category__header {
@@ -126,8 +222,15 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.85rem 1rem;
-  border-bottom: 1px solid #e7eaf1;
+  border-bottom: 1px solid #1e2536;
   border-left: 4px solid transparent;
+  background: #161b27;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.cvr-category__header:hover {
+  background: #1a2030;
 }
 
 .cvr-category__header-left {
@@ -140,13 +243,12 @@
   margin: 0;
   font-size: 0.95rem;
   font-weight: 700;
-  color: #222e3a;
-  text-transform: capitalize;
+  color: #e2e8f0;
 }
 
 .cvr-category__comment {
   font-size: 0.78rem;
-  color: #6b7280;
+  color: #64748b;
   font-weight: 500;
 }
 
@@ -159,21 +261,37 @@
 }
 
 .cvr-category__count--pass {
-  background: rgba(16, 185, 129, 0.12);
-  color: #065f46;
+  background: rgba(34, 197, 94, 0.12);
+  color: #4ade80;
 }
 
 .cvr-category__count--fail {
-  background: rgba(239, 68, 68, 0.12);
-  color: #7f1d1d;
+  background: rgba(248, 113, 113, 0.12);
+  color: #f87171;
+}
+
+.cvr-category__header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.cvr-category__chevron {
+  font-size: 0.65rem;
+  color: #475569;
+  transition: transform 0.15s;
+}
+
+.cvr-category--collapsed .cvr-category__header {
+  border-bottom: none;
 }
 
 .cvr-category .cvr-list {
   padding: 0.5rem;
-  background: #fafcff;
+  background: #0f1117;
 }
 
-/* ── test rows ──────────────────────────────────────────────────────────── */
 .cvr-list {
   display: flex;
   flex-direction: column;
@@ -182,20 +300,20 @@
 
 .cvr-row {
   border-radius: 8px;
-  border: 1px solid #e7eaf1;
+  border: 1px solid #1e2536;
   overflow: hidden;
-  background: #ffffff;
-  box-shadow: 0 1px 6px rgba(80, 95, 126, 0.07);
-  transition: box-shadow 0.15s;
+  background: #161b27;
+  transition: border-color 0.15s, box-shadow 0.15s;
 
   &:hover {
-    box-shadow: 0 2px 10px rgba(80, 95, 126, 0.12);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    border-color: #2d3748;
   }
 }
 
-.cvr-row--pass    { border-left: 3px solid #10b981; }
-.cvr-row--fail    { border-left: 3px solid #ef4444; }
-.cvr-row--unknown { border-left: 3px solid #9ca3af; }
+.cvr-row--pass    { border-left: 3px solid #22c55e; }
+.cvr-row--fail    { border-left: 3px solid #f87171; }
+.cvr-row--unknown { border-left: 3px solid #475569; }
 
 .cvr-row__header {
   display: flex;
@@ -208,14 +326,14 @@
 .cvr-row__num {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
-  color: #9ca3af;
+  color: #475569;
   min-width: 1.5rem;
 }
 
 .cvr-row__name {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   font-size: 0.9rem;
-  color: #1f2937;
+  color: #cbd5e1;
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
@@ -224,7 +342,7 @@
 
 .cvr-row__group {
   font-size: 0.78rem;
-  color: #6b7280;
+  color: #475569;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -232,9 +350,8 @@
 }
 
 .cvr-row__badge   { flex-shrink: 0; }
-.cvr-row__chevron { font-size: 0.65rem; color: #9ca3af; flex-shrink: 0; }
+.cvr-row__chevron { font-size: 0.65rem; color: #475569; flex-shrink: 0; }
 
-/* ── badges ─────────────────────────────────────────────────────────────── */
 .cvr-badge {
   display: inline-block;
   padding: 0.2em 0.65em;
@@ -245,20 +362,19 @@
   text-transform: uppercase;
 }
 
-.cvr-badge--pass    { background: rgba(16, 185, 129, 0.12); color: #065f46; border: 1px solid rgba(16, 185, 129, 0.3); }
-.cvr-badge--fail    { background: rgba(239, 68, 68, 0.12);  color: #7f1d1d; border: 1px solid rgba(239, 68, 68, 0.3); }
-.cvr-badge--unknown { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+.cvr-badge--pass    { background: rgba(34, 197, 94, 0.12);  color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.25); }
+.cvr-badge--fail    { background: rgba(248, 113, 113, 0.12); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.25); }
+.cvr-badge--unknown { background: #1e2536; color: #64748b; border: 1px solid #2d3748; }
 
-/* ── expanded diff body ─────────────────────────────────────────────────── */
 .cvr-row__body {
   padding: 0 1rem 1rem;
-  border-top: 1px solid #f0f4f8;
+  border-top: 1px solid #1e2536;
 }
 
 .cvr-diff__legend {
   margin: 0.75rem 0 0.5rem;
   font-size: 0.78rem;
-  color: #6b7280;
+  color: #475569;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -272,48 +388,46 @@
   vertical-align: middle;
 }
 
-.cvr-diff__swatch--expected { background: #10b981; }
-.cvr-diff__swatch--actual   { background: #ef4444; }
+.cvr-diff__swatch--expected { background: #22c55e; }
+.cvr-diff__swatch--actual   { background: #f87171; }
 
 .cvr-diff {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   line-height: 1.5;
-  background: #ffffff;
-  border: 1px solid #e7eaf1;
+  background: #0d1117;
+  border: 1px solid #1e2536;
   border-radius: 8px;
   padding: 0;
   overflow-x: auto;
   white-space: pre;
-  box-shadow: 0 1px 3px rgba(80, 95, 126, 0.06);
 }
 
 .cvr-diff__line {
   display: block;
   padding: 0.1rem 0.75rem;
-  color: #374151;
+  color: #94a3b8;
   border-left: 3px solid transparent;
 }
 
 .cvr-diff__line--expected {
-  background: rgba(16, 185, 129, 0.18);
-  color: #065f46;
-  border-left-color: #10b981;
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  border-left-color: #22c55e;
 }
 
 .cvr-diff__line--actual {
-  background: rgba(239, 68, 68, 0.18);
-  color: #7f1d1d;
-  border-left-color: #ef4444;
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+  border-left-color: #f87171;
 }
 
 .cvr-diff__line--sep {
-  color: #9ca3af;
-  background: #f9fafb;
+  color: #334155;
+  background: #0f1117;
 }
 
-/* ── expected / actual output blocks ────────────────────────────────────── */
 .cvr-output-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -323,28 +437,27 @@
 
 .cvr-output-block {
   border-radius: 8px;
-  border: 1px solid #e7eaf1;
+  border: 1px solid #1e2536;
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(80, 95, 126, 0.06);
 }
 
 .cvr-output-block--expected {
-  border-top: 3px solid #10b981;
+  border-top: 3px solid #22c55e;
 
   .cvr-output-block__label {
-    background: rgba(16, 185, 129, 0.08);
-    color: #065f46;
-    border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+    background: rgba(34, 197, 94, 0.08);
+    color: #4ade80;
+    border-bottom: 1px solid rgba(34, 197, 94, 0.15);
   }
 }
 
 .cvr-output-block--actual {
-  border-top: 3px solid #ef4444;
+  border-top: 3px solid #f87171;
 
   .cvr-output-block__label {
-    background: rgba(239, 68, 68, 0.08);
-    color: #7f1d1d;
-    border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+    background: rgba(248, 113, 113, 0.08);
+    color: #f87171;
+    border-bottom: 1px solid rgba(248, 113, 113, 0.15);
   }
 }
 
@@ -362,14 +475,13 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   font-size: 0.88rem;
   line-height: 1.5;
-  color: #1f2937;
-  background: #ffffff;
+  color: #cbd5e1;
+  background: #0d1117;
   white-space: pre-wrap;
   word-break: break-all;
   overflow-x: auto;
 }
 
-/* ── state screens (loading / error / expired) ──────────────────────────── */
 .cvr-state {
   display: flex;
   flex-direction: column;
@@ -378,11 +490,11 @@
   text-align: center;
   padding: 4rem 1rem;
   gap: 0.75rem;
-  color: #6b7280;
+  color: #64748b;
 
   h2 {
     margin: 0;
-    color: #222e3a;
+    color: #e2e8f0;
     font-size: 1.25rem;
   }
 
@@ -395,12 +507,11 @@
 
 .cvr-state__icon { font-size: 2.5rem; line-height: 1; }
 
-/* spinner */
 .cvr-spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e7eaf1;
-  border-top-color: #007bff;
+  border: 3px solid #1e2536;
+  border-top-color: #60a5fa;
   border-radius: 50%;
   animation: cvr-spin 0.8s linear infinite;
 }
@@ -409,9 +520,8 @@
   to { transform: rotate(360deg); }
 }
 
-/* ── empty / expiry notices ─────────────────────────────────────────────── */
 .cvr-empty {
-  color: #9ca3af;
+  color: #475569;
   font-size: 0.9rem;
   text-align: center;
   padding: 2rem 0;
@@ -421,10 +531,9 @@
   margin-top: 2rem;
   text-align: center;
   font-size: 0.8rem;
-  color: #9ca3af;
+  color: #334155;
 }
 
-/* ── responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .cvr-header {
     flex-direction: column;

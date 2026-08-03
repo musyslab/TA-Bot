@@ -1,16 +1,8 @@
-// frontend/src/pages/public/ClassicResultView.tsx
-//
-// Public page – no login required.
-// Reached via the one-time link emailed by the classic TABOT system.
-// URL: /classic/:token
-
 import React from 'react'
 import { useParams } from 'react-router-dom'
 import axios from 'axios'
 import { Helmet } from 'react-helmet'
 import '../../styling/ClassicResultView.scss'
-
-// ── types ────────────────────────────────────────────────────────────────────
 
 type TestResult = {
     passed: boolean | ''
@@ -26,6 +18,7 @@ type TestResult = {
         expected?: string
         actual?: string
         diff?: string
+        message?: string
         locked?: boolean
         hidden?: boolean
     }
@@ -39,9 +32,28 @@ type ClassicViewPayload = {
     results: { results: TestResult[] }
 }
 
+function isCompilationFailure(results: TestResult[]): boolean {
+    return (
+        results.length === 1 &&
+        results[0].passed === false &&
+        results[0].test.name === 'compilation'
+    )
+}
 
-
-// ── status badge ─────────────────────────────────────────────────────────────
+function formatTimestamp(iso: string): string {
+    if (!iso) return ''
+    try {
+        return new Date(iso).toLocaleString(undefined, {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        })
+    } catch {
+        return iso
+    }
+}
 
 function StatusBadge({ passed }: { passed: boolean | '' }) {
     if (passed === true)
@@ -51,7 +63,18 @@ function StatusBadge({ passed }: { passed: boolean | '' }) {
     return <span className="cvr-badge cvr-badge--unknown">NO OUTPUT</span>
 }
 
-// ── diff block ────────────────────────────────────────────────────────────────
+function CompilationBanner({ result }: { result: TestResult }) {
+    const message = result.test.message || 'Compilation failed. See the attached .txt file for details.'
+    return (
+        <div className="cvr-compile-banner">
+            <div className="cvr-compile-banner__icon">✗</div>
+            <div className="cvr-compile-banner__body">
+                <p className="cvr-compile-banner__title">Compilation Failed</p>
+                <p className="cvr-compile-banner__message">{message}</p>
+            </div>
+        </div>
+    )
+}
 
 function DiffBlock({ diff }: { diff: string }) {
     if (!diff.trim()) return null
@@ -73,8 +96,6 @@ function DiffBlock({ diff }: { diff: string }) {
     )
 }
 
-// ── expected / actual output blocks ──────────────────────────────────────────
-
 function OutputGrid({ expected, actual }: { expected?: string; actual?: string }) {
     if (!expected && !actual) return null
     return (
@@ -95,9 +116,13 @@ function OutputGrid({ expected, actual }: { expected?: string; actual?: string }
     )
 }
 
-// ── individual test row ───────────────────────────────────────────────────────
-
-function TestRow({ result, index }: { result: TestResult; index: number }) {
+function TestRow({
+    result,
+    index,
+}: {
+    result: TestResult
+    index: number
+}) {
     const [open, setOpen] = React.useState(false)
     const hasDiff = Boolean(result.test.diff?.trim())
     const hasOutput = Boolean(result.test.expected || result.test.actual)
@@ -149,8 +174,6 @@ function TestRow({ result, index }: { result: TestResult; index: number }) {
     )
 }
 
-// ── category group ────────────────────────────────────────────────────────────
-
 type CategoryGroup = {
     category: string
     comment: string
@@ -163,7 +186,6 @@ function groupByCategory(results: TestResult[]): CategoryGroup[] {
 
     for (const r of results) {
         const cat = r.test.category?.trim() || 'Other'
-        // Use comment from the first result in the group that has one
         const comment = r.test.comment?.trim() || ''
         if (!map.has(cat)) {
             order.push(cat)
@@ -177,51 +199,81 @@ function groupByCategory(results: TestResult[]): CategoryGroup[] {
     return order.map(category => map.get(category)!)
 }
 
-function CategorySection({ group, startIndex }: { group: CategoryGroup; startIndex: number }) {
+function CategorySection({
+    group,
+    startIndex,
+}: {
+    group: CategoryGroup
+    startIndex: number
+}) {
+    const [collapsed, setCollapsed] = React.useState(false)
     const passed = group.results.filter(r => r.passed === true).length
     const total = group.results.length
     const allPass = passed === total
     const anyFail = passed < total
 
     return (
-        <section className={`cvr-category ${allPass ? 'cvr-category--pass' : anyFail ? 'cvr-category--fail' : ''}`}>
-            <div className="cvr-category__header">
+        <section className={`cvr-category ${allPass ? 'cvr-category--pass' : anyFail ? 'cvr-category--fail' : ''} ${collapsed ? 'cvr-category--collapsed' : ''}`}>
+            <div
+                className="cvr-category__header"
+                onClick={() => setCollapsed(c => !c)}
+                style={{ cursor: 'pointer' }}
+                aria-expanded={!collapsed}
+            >
                 <div className="cvr-category__header-left">
-                    <h2 className="cvr-category__title">
-                        {group.category}
-                    </h2>
+                    <h2 className="cvr-category__title">{group.category}</h2>
                     {group.comment && (
                         <span className="cvr-category__comment">{group.comment}</span>
                     )}
                 </div>
-                <span className={`cvr-category__count ${allPass ? 'cvr-category__count--pass' : 'cvr-category__count--fail'}`}>
-                    {passed} / {total}
-                </span>
+                <div className="cvr-category__header-right">
+                    <span className={`cvr-category__count ${allPass ? 'cvr-category__count--pass' : 'cvr-category__count--fail'}`}>
+                        {passed} / {total}
+                    </span>
+                    <span className="cvr-category__chevron" aria-hidden>
+                        {collapsed ? '▶' : '▼'}
+                    </span>
+                </div>
             </div>
-            <div className="cvr-list">
-                {group.results.map((r, i) => (
-                    <TestRow key={i} result={r} index={startIndex + i} />
-                ))}
-            </div>
+            {!collapsed && (
+                <div className="cvr-list">
+                    {group.results.map((r, i) => (
+                        <TestRow
+                            key={i}
+                            result={r}
+                            index={startIndex + i}
+                        />
+                    ))}
+                </div>
+            )}
         </section>
     )
 }
 
-// ── summary bar ───────────────────────────────────────────────────────────────
-
-function SummaryBar({ results }: { results: TestResult[] }) {
+function SummaryBar({
+    results,
+    groups,
+    createdAt,
+}: {
+    results: TestResult[]
+    groups: CategoryGroup[]
+    createdAt: string
+}) {
     const passed = results.filter(r => r.passed === true).length
     const total = results.length
     const pct = total > 0 ? Math.round((passed / total) * 100) : 0
 
     return (
         <div className="cvr-summary">
-            <div className="cvr-summary__counts">
-                <span className="cvr-summary__big">{passed}</span>
-                <span className="cvr-summary__slash"> / </span>
-                <span className="cvr-summary__total">{total}</span>
-                <span className="cvr-summary__label"> tests passed</span>
+            <div className="cvr-summary__top">
+                <div className="cvr-summary__counts">
+                    <span className="cvr-summary__big">{passed}</span>
+                    <span className="cvr-summary__slash"> / </span>
+                    <span className="cvr-summary__total">{total}</span>
+                    <span className="cvr-summary__label"> tests passed</span>
+                </div>
             </div>
+
             <div className="cvr-summary__bar-track">
                 <div
                     className="cvr-summary__bar-fill"
@@ -229,11 +281,34 @@ function SummaryBar({ results }: { results: TestResult[] }) {
                     aria-label={`${pct}% passed`}
                 />
             </div>
+
+            {/* Per-category breakdown */}
+            {groups.length > 1 && (
+                <div className="cvr-summary__breakdown">
+                    {groups.map((group, i) => {
+                        const gPassed = group.results.filter(r => r.passed === true).length
+                        const gTotal = group.results.length
+                        const gAllPass = gPassed === gTotal
+                        return (
+                            <div key={i} className={`cvr-summary__cat ${gAllPass ? 'cvr-summary__cat--pass' : 'cvr-summary__cat--fail'}`}>
+                                <span className="cvr-summary__cat-name">{group.category}</span>
+                                <span className="cvr-summary__cat-score">{gPassed}/{gTotal}</span>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
+
+            {/* Graded timestamp */}
+            {createdAt && (
+                <p className="cvr-summary__timestamp">
+                    Graded on {formatTimestamp(createdAt)}
+                </p>
+            )}
         </div>
     )
 }
 
-// ── main page ─────────────────────────────────────────────────────────────────
 
 export function ClassicResultView() {
     const { token } = useParams<{ token: string }>()
@@ -269,6 +344,7 @@ export function ClassicResultView() {
 
     const results: TestResult[] = payload?.results?.results ?? []
     const groups = React.useMemo(() => groupByCategory(results), [results])
+    const compilationFailed = isCompilationFailure(results)
 
     return (
         <>
@@ -325,27 +401,44 @@ export function ClassicResultView() {
 
                     {status === 'ok' && (
                         <>
-                            <SummaryBar results={results} />
-
-                            {results.length === 0 ? (
-                                <p className="cvr-empty">
-                                    No test case results were recorded for this submission.
-                                </p>
+                            {compilationFailed ? (
+                                <>
+                                    <CompilationBanner result={results[0]} />
+                                    {payload?.createdAt && (
+                                        <p className="cvr-summary__timestamp cvr-summary__timestamp--standalone">
+                                            Graded on {formatTimestamp(payload.createdAt)}
+                                        </p>
+                                    )}
+                                </>
                             ) : (
-                                (() => {
-                                    let runningIndex = 0
-                                    return groups.map((group, gi) => {
-                                        const startIndex = runningIndex
-                                        runningIndex += group.results.length
-                                        return (
-                                            <CategorySection
-                                                key={gi}
-                                                group={group}
-                                                startIndex={startIndex}
-                                            />
-                                        )
-                                    })
-                                })()
+                                <>
+                                    <SummaryBar
+                                        results={results}
+                                        groups={groups}
+                                        createdAt={payload?.createdAt ?? ''}
+                                    />
+
+                                    {results.length === 0 ? (
+                                        <p className="cvr-empty">
+                                            No test case results were recorded for this submission.
+                                        </p>
+                                    ) : (
+                                        (() => {
+                                            let runningIndex = 0
+                                            return groups.map((group, gi) => {
+                                                const startIndex = runningIndex
+                                                runningIndex += group.results.length
+                                                return (
+                                                    <CategorySection
+                                                        key={gi}
+                                                        group={group}
+                                                        startIndex={startIndex}
+                                                    />
+                                                )
+                                            })
+                                        })()
+                                    )}
+                                </>
                             )}
 
                             {payload?.expiresAt && (
