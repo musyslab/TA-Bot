@@ -186,3 +186,14 @@ class SubmissionManualErrors(db.Model):
     ErrorId = Column(String(80))
     Count = Column(Integer)
     Note = Column(String(2000))
+
+class ClassicSubmissionView(db.Model):
+    __tablename__ = "ClassicSubmissionViews"
+ 
+    Id              = Column(Integer, primary_key=True, autoincrement=True)
+    Token           = Column(String(64), unique=True, nullable=False, index=True)
+    ResultsJson     = Column(Text, nullable=False)
+    StudentName     = Column(String(256))
+    AssignmentLabel = Column(String(256))
+    ExpiresAt       = Column(DateTime, nullable=True)
+    CreatedAt       = Column(DateTime, nullable=False)

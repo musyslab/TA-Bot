@@ -6,6 +6,7 @@ import LoginPage from './pages/public/Login';
 import HomePage from './pages/public/HomePage';
 import NotFound from './pages/public/NotFound';
 import SchoolSelect from './pages/public/SchoolSelect';
+import ClassicResultView from './pages/public/ClassicResultView';
 
 import StudentUpload from './pages/student/StudentUpload';
 import StudentOutputDiff from './pages/student/StudentOutputDiff';
@@ -304,6 +305,12 @@ class App extends Component {
                             <StudentOfficeHours />
                         </ProtectedRoute>
                     } />
+                    <Route path="/student/:class_id/OfficeHours" element={
+                        <ProtectedRoute>
+                            <StudentOfficeHours />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/classic/:token" element={<ClassicResultView />} />
                     <Route path="*" element={<NotFound />} />
                 </Routes>
             </BrowserRouter>

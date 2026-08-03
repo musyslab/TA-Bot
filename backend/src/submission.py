@@ -615,10 +615,8 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
     for line in parser.parse_file(file_path):
         if line.category != "test":
             continue
-        if line.yaml_block is None:
-            continue
 
-        yaml_clean = sanitize_yaml_block(line.yaml_block)
+        yaml_clean = sanitize_yaml_block(line.yaml_block) if line.yaml_block is not None else {}
 
         # Levels disabled: return tests as-is
         if not hasLVLSYSEnabled:
