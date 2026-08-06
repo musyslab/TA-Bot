@@ -35,6 +35,7 @@ from src.repositories.models import (
     StudentCheckpointSkips,
     StudentCooldownSkips,
     StudentStarAwards,
+    StudentTestcaseInputPurchases,
     StudentUploadState,
     Submissions,
     Users,
@@ -52,6 +53,8 @@ MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
 MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
 CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 1
 MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
+CHECKPOINT_TESTCASE_INPUT_COST_STARS = 1
+MAIN_PROJECT_TESTCASE_INPUT_COST_STARS = 2
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
 EARLY_START_MULTIPLIER = 2
@@ -75,6 +78,14 @@ def submission_cooldown_skip_cost(checkpoint: bool) -> int:
         CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS
         if checkpoint
         else MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS
+    )
+
+
+def testcase_input_purchase_cost(checkpoint: bool) -> int:
+    return (
+        CHECKPOINT_TESTCASE_INPUT_COST_STARS
+        if checkpoint
+        else MAIN_PROJECT_TESTCASE_INPUT_COST_STARS
     )
 
 
@@ -304,6 +315,7 @@ def ensure_incentive_tables():
         StudentStarAwards,
         StudentCheckpointSkips,
         StudentCooldownSkips,
+        StudentTestcaseInputPurchases,
     ):
         try:
             model.__table__.create(db.engine, checkfirst=True)
@@ -312,7 +324,7 @@ def ensure_incentive_tables():
 
 
 def get_star_balance(user_id: int, class_id: int) -> int:
-    """Return awards minus checkpoint and cooldown skip purchases."""
+    """Return awards minus every star purchase made in the class."""
     ensure_incentive_tables()
     user_id = int(user_id)
     class_id = int(class_id)
@@ -338,11 +350,19 @@ def get_star_balance(user_id: int, class_id: int) -> int:
         StudentCooldownSkips.ClassId == class_id,
     ).scalar()
 
+    testcase_input_spent = db.session.query(
+        func.coalesce(func.sum(StudentTestcaseInputPurchases.SpentStars), 0)
+    ).filter(
+        StudentTestcaseInputPurchases.UserId == user_id,
+        StudentTestcaseInputPurchases.ClassId == class_id,
+    ).scalar()
+
     return max(
         0,
         parse_int(awarded, 0)
         - parse_int(checkpoint_spent, 0)
-        - parse_int(cooldown_spent, 0),
+        - parse_int(cooldown_spent, 0)
+        - parse_int(testcase_input_spent, 0),
     )
 
 
@@ -971,6 +991,170 @@ def apply_hidden_flags_to_results(output_json: str, project_id: int, checkpoint_
     except Exception:
         return output_json
 
+
+def resolve_testcase_input_purchase_scope(
+    submission_repo: SubmissionRepository,
+    submission_id: int,
+    class_id: int,
+):
+    if submission_id <= 0 or class_id <= 0:
+        return None, "submission_id and class_id are required.", HTTPStatus.BAD_REQUEST
+
+    user_id = int(current_user.Id)
+    if not user_is_student_in_class_id(user_id, class_id):
+        return None, "Not Authorized", HTTPStatus.UNAUTHORIZED
+
+    submission = submission_repo.get_submission_by_submission_id(submission_id)
+    if submission is None:
+        return None, "Submission not found.", HTTPStatus.NOT_FOUND
+
+    if int(getattr(submission, "User", 0) or 0) != user_id:
+        return None, "Not Authorized", HTTPStatus.UNAUTHORIZED
+
+    project_id = int(getattr(submission, "Project", 0) or 0)
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return None, "Project not found.", HTTPStatus.NOT_FOUND
+
+    if int(getattr(project, "ClassId", 0) or 0) != class_id:
+        return None, "Not Authorized", HTTPStatus.UNAUTHORIZED
+
+    is_checkpoint = bool(getattr(submission, "IsCheckpoint", False))
+    checkpoint_id = (
+        int(getattr(submission, "CheckpointId", 0) or 0)
+        if is_checkpoint
+        else 0
+    )
+    if is_checkpoint and checkpoint_id <= 0:
+        return None, "Checkpoint not found.", HTTPStatus.NOT_FOUND
+
+    return {
+        "user_id": user_id,
+        "class_id": class_id,
+        "project_id": project_id,
+        "checkpoint_id": checkpoint_id,
+        "is_checkpoint": is_checkpoint,
+        "submission_id": int(getattr(submission, "Id", submission_id) or submission_id),
+        "submission_output_path": str(
+            getattr(submission, "OutputFilepath", "") or ""
+        ),
+    }, None, HTTPStatus.OK
+
+
+def testcase_input_rows_for_scope(project_id: int, checkpoint_id: int):
+    query = Testcases.query.filter(Testcases.ProjectId == int(project_id))
+    if checkpoint_id > 0:
+        query = query.filter(Testcases.CheckpointId == int(checkpoint_id))
+    else:
+        query = query.filter(Testcases.CheckpointId.is_(None))
+
+    return query.order_by(Testcases.SortOrder.asc(), Testcases.Id.asc()).all()
+
+
+def testcase_result_status(result: dict) -> str:
+    if parse_bool(result.get("skipped", False)):
+        return "skipped"
+
+    raw_passed = result.get("passed")
+    if isinstance(raw_passed, bool):
+        return "passed" if raw_passed else "failed"
+    if isinstance(raw_passed, (int, float)) and raw_passed in (0, 1):
+        return "passed" if raw_passed == 1 else "failed"
+    if isinstance(raw_passed, str):
+        normalized = raw_passed.strip().lower()
+        if normalized in ("1", "true", "yes", "y", "passed", "pass"):
+            return "passed"
+        if normalized in ("0", "false", "no", "n", "failed", "fail"):
+            return "failed"
+
+    return "unavailable"
+
+
+def testcase_result_statuses_for_scope(scope: dict, rows: list) -> dict:
+    statuses = {
+        int(testcase.Id): "unavailable"
+        for testcase in rows
+    }
+
+    try:
+        output = convert_tap_to_json(
+            scope["submission_output_path"],
+            current_user_effective_role(),
+            0,
+            False,
+        )
+        output = apply_hidden_flags_to_results(
+            output,
+            scope["project_id"],
+            scope["checkpoint_id"] if scope["checkpoint_id"] > 0 else None,
+        )
+        parsed = json.loads(output) if isinstance(output, str) else (output or {})
+        results = parsed.get("results", []) if isinstance(parsed, dict) else []
+        statuses_by_order = {}
+
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            order = parse_int(result.get("order"), 0)
+            if order > 0:
+                statuses_by_order[order] = testcase_result_status(result)
+
+        for index, testcase in enumerate(rows, start=1):
+            statuses[int(testcase.Id)] = statuses_by_order.get(
+                index,
+                "unavailable",
+            )
+    except Exception:
+        pass
+
+    return statuses
+
+
+def serialize_testcase_input_store(scope: dict) -> dict:
+    ensure_incentive_tables()
+    rows = testcase_input_rows_for_scope(
+        scope["project_id"],
+        scope["checkpoint_id"],
+    )
+    result_statuses = testcase_result_statuses_for_scope(scope, rows)
+    purchase_rows = StudentTestcaseInputPurchases.query.filter(
+        StudentTestcaseInputPurchases.UserId == scope["user_id"],
+        StudentTestcaseInputPurchases.ClassId == scope["class_id"],
+        StudentTestcaseInputPurchases.ProjectId == scope["project_id"],
+        StudentTestcaseInputPurchases.CheckpointId == scope["checkpoint_id"],
+    ).all()
+    purchased_ids = {int(row.TestcaseId) for row in purchase_rows}
+
+    return {
+        "project_id": scope["project_id"],
+        "checkpoint_id": scope["checkpoint_id"],
+        "is_checkpoint": scope["is_checkpoint"],
+        "input_cost": testcase_input_purchase_cost(scope["is_checkpoint"]),
+        "star_balance": get_star_balance(scope["user_id"], scope["class_id"]),
+        "testcases": [
+            {
+                "testcase_id": int(testcase.Id),
+                "name": str(getattr(testcase, "Name", "") or f"Testcase {index}"),
+                "order": index,
+                "purchased": int(testcase.Id) in purchased_ids,
+                "result_status": result_statuses.get(
+                    int(testcase.Id),
+                    "unavailable",
+                ),
+                "purchase_eligible": (
+                    result_statuses.get(int(testcase.Id)) == "failed"
+                ),
+                "input": (
+                    str(getattr(testcase, "input", "") or "")
+                    if int(testcase.Id) in purchased_ids
+                    else None
+                ),
+            }
+            for index, testcase in enumerate(rows, start=1)
+        ],
+    }
+
+
 def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
     # New grader may write JSON directly. Accept either:
     #  1) a JSON file path
@@ -1084,6 +1268,132 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
     output = apply_hidden_flags_to_results(output, int(projectid), checkpoint_id)
 
     return make_response(output, HTTPStatus.OK)
+
+
+@submission_api.route('/testcase-inputs', methods=['GET', 'POST'])
+@jwt_required()
+@inject
+def testcase_inputs(
+    submission_repo: SubmissionRepository = Provide[Container.submission_repo],
+):
+    source = request.args if request.method == 'GET' else (request.get_json(silent=True) or {})
+    submission_id = parse_int(
+        source.get("id", source.get("submission_id", 0)),
+        0,
+    )
+    class_id = parse_int(source.get("class_id", 0), 0)
+
+    scope, error_message, error_status = resolve_testcase_input_purchase_scope(
+        submission_repo,
+        submission_id,
+        class_id,
+    )
+    if scope is None:
+        return make_response({"message": error_message}, error_status)
+
+    if request.method == 'GET':
+        response = jsonify(serialize_testcase_input_store(scope))
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    testcase_id = parse_int(source.get("testcase_id", 0), 0)
+    if testcase_id <= 0:
+        return make_response({"message": "testcase_id is required."}, HTTPStatus.BAD_REQUEST)
+
+    testcase = Testcases.query.filter(
+        Testcases.Id == testcase_id,
+        Testcases.ProjectId == scope["project_id"],
+    ).first()
+    if testcase is None:
+        return make_response({"message": "Testcase not found."}, HTTPStatus.NOT_FOUND)
+
+    testcase_checkpoint_id = int(getattr(testcase, "CheckpointId", 0) or 0)
+    if testcase_checkpoint_id != scope["checkpoint_id"]:
+        return make_response({"message": "Testcase not found."}, HTTPStatus.NOT_FOUND)
+
+    ensure_incentive_tables()
+    purchase_filter = (
+        StudentTestcaseInputPurchases.UserId == scope["user_id"],
+        StudentTestcaseInputPurchases.ClassId == scope["class_id"],
+        StudentTestcaseInputPurchases.ProjectId == scope["project_id"],
+        StudentTestcaseInputPurchases.CheckpointId == scope["checkpoint_id"],
+        StudentTestcaseInputPurchases.TestcaseId == testcase_id,
+    )
+    existing_purchase = StudentTestcaseInputPurchases.query.filter(*purchase_filter).first()
+    if existing_purchase is not None:
+        payload = serialize_testcase_input_store(scope)
+        payload["already_purchased"] = True
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    result_statuses = testcase_result_statuses_for_scope(
+        scope,
+        testcase_input_rows_for_scope(
+            scope["project_id"],
+            scope["checkpoint_id"],
+        ),
+    )
+    result_status = result_statuses.get(testcase_id, "unavailable")
+    if result_status != "failed":
+        if result_status == "passed":
+            message = "Passed testcase inputs cannot be purchased."
+        else:
+            message = "Only failing testcase inputs can be purchased."
+        return make_response({
+            "message": message,
+            "result_status": result_status,
+            "star_balance": get_star_balance(
+                scope["user_id"],
+                scope["class_id"],
+            ),
+        }, HTTPStatus.BAD_REQUEST)
+
+    # Lock the student row so simultaneous purchases cannot overspend the balance.
+    locked_user = Users.query.filter(
+        Users.Id == scope["user_id"]
+    ).with_for_update().first()
+    if locked_user is None:
+        db.session.rollback()
+        return make_response({"message": "User not found."}, HTTPStatus.NOT_FOUND)
+
+    existing_purchase = StudentTestcaseInputPurchases.query.filter(*purchase_filter).first()
+    if existing_purchase is not None:
+        payload = serialize_testcase_input_store(scope)
+        payload["already_purchased"] = True
+        db.session.commit()
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    cost = testcase_input_purchase_cost(scope["is_checkpoint"])
+    balance = get_star_balance(scope["user_id"], scope["class_id"])
+    star_label = "star" if cost == 1 else "stars"
+    if balance < cost:
+        db.session.rollback()
+        return make_response({
+            "message": f"You need {cost} {star_label} to reveal this testcase input.",
+            "star_balance": balance,
+            "required_stars": cost,
+        }, HTTPStatus.BAD_REQUEST)
+
+    db.session.add(StudentTestcaseInputPurchases(
+        UserId=scope["user_id"],
+        ClassId=scope["class_id"],
+        ProjectId=scope["project_id"],
+        CheckpointId=scope["checkpoint_id"],
+        TestcaseId=testcase_id,
+        SpentStars=cost,
+        CreatedAt=current_utc_datetime(),
+    ))
+    db.session.commit()
+
+    payload = serialize_testcase_input_store(scope)
+    payload["purchased_testcase_id"] = testcase_id
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 @submission_api.route('/codefinder', methods=['GET'])
 @jwt_required()

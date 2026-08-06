@@ -6,14 +6,17 @@ import '../../styling/CodeDiffView.scss'
 import { Highlight, themes, Prism } from 'prism-react-renderer'
 
 import {
+    FaArrowRight,
     FaRegCheckSquare,
     FaChevronDown,
+    FaEye,
     FaLock,
     FaBars,
     FaColumns,
     FaGripLines,
     FaAlignJustify,
     FaSearch,
+    FaStar,
 } from 'react-icons/fa'
 
 // Ensure Prism languages (like Java) are registered once per page load.
@@ -85,6 +88,25 @@ type DiffEntry = {
 type CodeFile = {
     name: string
     content: string
+}
+
+type TestcaseInputOption = {
+    testcase_id: number
+    name: string
+    order: number
+    purchased: boolean
+    result_status: 'passed' | 'failed' | 'skipped' | 'unavailable'
+    purchase_eligible: boolean
+    input: string | null
+}
+
+type TestcaseInputStore = {
+    project_id: number
+    checkpoint_id: number
+    is_checkpoint: boolean
+    input_cost: number
+    star_balance: number
+    testcases: TestcaseInputOption[]
 }
 
 type Seg = { text: string; changed: boolean }
@@ -255,6 +277,8 @@ type DiffViewProps = {
     // If false/undefined: keep hidden outputs hidden (student view).
     revealHiddenOutput?: boolean
 
+    // Student-only store shown once at the bottom of the complete testcase menu.
+    allowTestcaseInputPurchases?: boolean
 }
 
 export default function DiffView(props: DiffViewProps) {
@@ -276,6 +300,7 @@ export default function DiffView(props: DiffViewProps) {
         onActiveTestcaseChange,
         disableCopy = false,
         revealHiddenOutput = false,
+        allowTestcaseInputPurchases = false,
         isPractice = false,
         practiceProblemId = null,
     } = props
@@ -299,6 +324,12 @@ export default function DiffView(props: DiffViewProps) {
 
     const [testsLoaded, setTestsLoaded] = useState(false)
     const [payload, setPayload] = useState<AnyPayload>({ results: [] })
+    const [testcaseInputStore, setTestcaseInputStore] = useState<TestcaseInputStore | null>(null)
+    const [selectedTestcaseInputId, setSelectedTestcaseInputId] = useState<number | null>(null)
+    const [testcaseInputStoreLoaded, setTestcaseInputStoreLoaded] = useState(false)
+    const [testcaseInputPurchaseError, setTestcaseInputPurchaseError] = useState('')
+    const [inputPurchaseConfirmationOpen, setInputPurchaseConfirmationOpen] = useState(false)
+    const [isPurchasingTestcaseInput, setIsPurchasingTestcaseInput] = useState(false)
 
     // Force a rerender after Prism languages load so Highlight can use the grammar.
     const [, forcePrismRefresh] = useState(0)
@@ -464,6 +495,50 @@ export default function DiffView(props: DiffViewProps) {
                 setTestsLoaded(true)
             })
     }, [submissionId, classId, isPractice, practiceProblemId])
+
+    useEffect(() => {
+        setTestcaseInputStore(null)
+        setSelectedTestcaseInputId(null)
+        setTestcaseInputStoreLoaded(false)
+        setTestcaseInputPurchaseError('')
+        setInputPurchaseConfirmationOpen(false)
+
+        if (!allowTestcaseInputPurchases || submissionId <= 0 || classId <= 0) {
+            setTestcaseInputStoreLoaded(true)
+            return
+        }
+
+        axios
+            .get(
+                `${import.meta.env.VITE_API_URL}/submissions/testcase-inputs`,
+                {
+                    params: {
+                        id: submissionId,
+                        class_id: classId,
+                    },
+                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                }
+            )
+            .then((res) => {
+                const store = res.data as TestcaseInputStore
+                const testcases = Array.isArray(store?.testcases) ? store.testcases : []
+                const normalizedStore = { ...store, testcases }
+
+                const visibleTestcases = testcases.filter(
+                    (testcase) => testcase.purchased || testcase.purchase_eligible
+                )
+
+                setTestcaseInputStore(normalizedStore)
+                setSelectedTestcaseInputId(visibleTestcases[0]?.testcase_id ?? null)
+                setTestcaseInputStoreLoaded(true)
+            })
+            .catch((err) => {
+                setTestcaseInputPurchaseError(
+                    err?.response?.data?.message || 'Could not load testcase input options.'
+                )
+                setTestcaseInputStoreLoaded(true)
+            })
+    }, [allowTestcaseInputPurchases, submissionId, classId])
 
     // Baseline the toggles on mount per submission/class
     useEffect(() => {
@@ -639,6 +714,101 @@ export default function DiffView(props: DiffViewProps) {
         () => diffFilesAll.find((f) => f.id === selectedDiffId) || null,
         [diffFilesAll, selectedDiffId]
     )
+
+    const visibleTestcaseInputOptions = useMemo(
+        () =>
+            (testcaseInputStore?.testcases ?? []).filter(
+                (testcase) => testcase.purchased || testcase.purchase_eligible
+            ),
+        [testcaseInputStore]
+    )
+
+    const selectedTestcaseInput = useMemo(
+        () =>
+            visibleTestcaseInputOptions.find(
+                (testcase) => testcase.testcase_id === selectedTestcaseInputId
+            ) ?? null,
+        [visibleTestcaseInputOptions, selectedTestcaseInputId]
+    )
+
+    useEffect(() => {
+        if (
+            selectedTestcaseInputId !== null &&
+            visibleTestcaseInputOptions.some(
+                (testcase) => testcase.testcase_id === selectedTestcaseInputId
+            )
+        ) {
+            return
+        }
+
+        setSelectedTestcaseInputId(
+            visibleTestcaseInputOptions[0]?.testcase_id ?? null
+        )
+        setInputPurchaseConfirmationOpen(false)
+    }, [visibleTestcaseInputOptions, selectedTestcaseInputId])
+
+    const testcaseInputCost = Math.max(0, Number(testcaseInputStore?.input_cost ?? 0))
+    const testcaseInputStarBalance = Math.max(
+        0,
+        Number(testcaseInputStore?.star_balance ?? 0)
+    )
+    const testcaseInputStarLabel = testcaseInputCost === 1 ? 'star' : 'stars'
+
+    const formatStarCount = (value: number) =>
+        `${value} ${value === 1 ? 'star' : 'stars'}`
+
+    const purchaseSelectedTestcaseInput = () => {
+        if (
+            !selectedTestcaseInput ||
+            selectedTestcaseInput.purchased ||
+            !selectedTestcaseInput.purchase_eligible ||
+            isPurchasingTestcaseInput
+        ) {
+            return
+        }
+
+        setIsPurchasingTestcaseInput(true)
+        setTestcaseInputPurchaseError('')
+
+        axios
+            .post(
+                `${import.meta.env.VITE_API_URL}/submissions/testcase-inputs`,
+                {
+                    submission_id: submissionId,
+                    class_id: classId,
+                    testcase_id: selectedTestcaseInput.testcase_id,
+                },
+                {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                }
+            )
+            .then((res) => {
+                const store = res.data as TestcaseInputStore
+                setTestcaseInputStore({
+                    ...store,
+                    testcases: Array.isArray(store?.testcases) ? store.testcases : [],
+                })
+                setInputPurchaseConfirmationOpen(false)
+            })
+            .catch((err) => {
+                const nextBalance = Number(err?.response?.data?.star_balance)
+                if (Number.isFinite(nextBalance)) {
+                    setTestcaseInputStore((current) =>
+                        current
+                            ? { ...current, star_balance: Math.max(0, nextBalance) }
+                            : current
+                    )
+                }
+
+                setTestcaseInputPurchaseError(
+                    err?.response?.data?.message || 'Could not reveal this testcase input.'
+                )
+                setInputPurchaseConfirmationOpen(false)
+            })
+            .finally(() => {
+                setIsPurchasingTestcaseInput(false)
+            })
+    }
 
     useEffect(() => {
         if (!onActiveTestcaseChange) return
@@ -1123,6 +1293,101 @@ export default function DiffView(props: DiffViewProps) {
                             </li>
                         ))}
                     </ul>
+
+                    {allowTestcaseInputPurchases && (
+                        <div className="testcase-input-store">
+                            <div className="testcase-input-store__heading">
+                                <span>Reveal testcase input</span>
+                                {testcaseInputStore && (
+                                    <span className="testcase-input-store__balance">
+                                        <FaStar aria-hidden="true" />
+                                        {testcaseInputStarBalance}
+                                    </span>
+                                )}
+                            </div>
+
+                            {!testcaseInputStoreLoaded && (
+                                <div className="testcase-input-store__muted">Loading input options…</div>
+                            )}
+
+                            {testcaseInputStoreLoaded && visibleTestcaseInputOptions.length === 0 && (
+                                <div className="testcase-input-store__muted">
+                                    No failing or previously revealed testcase inputs are available.
+                                </div>
+                            )}
+
+                            {selectedTestcaseInput && (
+                                <>
+                                    <label
+                                        className="testcase-input-store__label"
+                                        htmlFor="testcase-input-select"
+                                    >
+                                        Testcase
+                                    </label>
+                                    <div className="testcase-input-store__select-wrap">
+                                        <select
+                                            id="testcase-input-select"
+                                            value={selectedTestcaseInputId ?? ''}
+                                            onChange={(event) => {
+                                                setSelectedTestcaseInputId(Number(event.target.value))
+                                                setTestcaseInputPurchaseError('')
+                                                setInputPurchaseConfirmationOpen(false)
+                                            }}
+                                        >
+                                            {visibleTestcaseInputOptions.map((testcase) => (
+                                                <option
+                                                    key={testcase.testcase_id}
+                                                    value={testcase.testcase_id}
+                                                >
+                                                    {testcase.order}. {testcase.name}
+                                                    {testcase.purchased ? ' — Revealed' : ''}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <FaChevronDown aria-hidden="true" />
+                                    </div>
+
+                                    {selectedTestcaseInput.purchased ? (
+                                        <div className="testcase-input-store__revealed">
+                                            <span>Exact input</span>
+                                            {selectedTestcaseInput.input === '' ? (
+                                                <div className="testcase-input-store__empty-input">
+                                                    This testcase has no input.
+                                                </div>
+                                            ) : (
+                                                <pre>{selectedTestcaseInput.input}</pre>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="testcase-input-store__purchase"
+                                            disabled={
+                                                !selectedTestcaseInput.purchase_eligible ||
+                                                testcaseInputStarBalance < testcaseInputCost ||
+                                                isPurchasingTestcaseInput
+                                            }
+                                            onClick={() => {
+                                                setTestcaseInputPurchaseError('')
+                                                setInputPurchaseConfirmationOpen(true)
+                                            }}
+                                        >
+                                            <FaEye aria-hidden="true" />
+                                            {testcaseInputStarBalance < testcaseInputCost
+                                                ? `Need ${testcaseInputCost} ${testcaseInputStarLabel}`
+                                                : `Reveal for ${testcaseInputCost} ${testcaseInputStarLabel}`}
+                                        </button>
+                                    )}
+                                </>
+                            )}
+
+                            {testcaseInputPurchaseError && (
+                                <div className="testcase-input-store__error" role="alert">
+                                    {testcaseInputPurchaseError}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </aside>
 
                 <div className="diff-pane">
@@ -1416,6 +1681,92 @@ export default function DiffView(props: DiffViewProps) {
                     {belowCode}
                 </>
             )}
+
+            {inputPurchaseConfirmationOpen &&
+                selectedTestcaseInput?.purchase_eligible &&
+                !selectedTestcaseInput.purchased ? (
+                <div
+                    className="skip-cooldown-confirmation"
+                    onMouseDown={(event) => {
+                        if (
+                            event.target === event.currentTarget &&
+                            !isPurchasingTestcaseInput
+                        ) {
+                            setInputPurchaseConfirmationOpen(false)
+                        }
+                    }}
+                >
+                    <div
+                        className="skip-cooldown-confirmation__dialog"
+                        role="alertdialog"
+                        aria-modal="true"
+                        aria-labelledby="testcase-input-confirmation-title"
+                        aria-describedby="testcase-input-confirmation-description"
+                        onKeyDown={(event) => {
+                            if (event.key === 'Escape' && !isPurchasingTestcaseInput) {
+                                setInputPurchaseConfirmationOpen(false)
+                            }
+                        }}
+                    >
+                        <span
+                            className="skip-cooldown-confirmation__icon"
+                            aria-hidden="true"
+                        >
+                            <FaStar />
+                        </span>
+                        <h2 id="testcase-input-confirmation-title">
+                            Spend {testcaseInputCost} {testcaseInputStarLabel}?
+                        </h2>
+                        <p id="testcase-input-confirmation-description">
+                            This will permanently reveal the exact input for Testcase{' '}
+                            {selectedTestcaseInput.order}: {selectedTestcaseInput.name}. This
+                            purchase cannot be undone.
+                        </p>
+
+                        <div className="skip-cooldown-confirmation__balance">
+                            <span>
+                                Current balance
+                                <strong>{formatStarCount(testcaseInputStarBalance)}</strong>
+                            </span>
+                            <FaArrowRight aria-hidden="true" />
+                            <span>
+                                Balance after
+                                <strong>
+                                    {formatStarCount(
+                                        Math.max(
+                                            0,
+                                            testcaseInputStarBalance - testcaseInputCost
+                                        )
+                                    )}
+                                </strong>
+                            </span>
+                        </div>
+
+                        <div className="skip-cooldown-confirmation__actions">
+                            <button
+                                type="button"
+                                className="skip-cooldown-confirmation__cancel"
+                                disabled={isPurchasingTestcaseInput}
+                                onClick={() => setInputPurchaseConfirmationOpen(false)}
+                                autoFocus
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="skip-cooldown-confirmation__confirm"
+                                disabled={isPurchasingTestcaseInput}
+                                onClick={purchaseSelectedTestcaseInput}
+                            >
+                                <FaEye aria-hidden="true" />
+                                {isPurchasingTestcaseInput
+                                    ? 'Spending...'
+                                    : `Confirm and spend ${testcaseInputCost} ${testcaseInputStarLabel}`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </>
     )
 }

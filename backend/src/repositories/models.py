@@ -400,12 +400,41 @@ class StudentCooldownSkips(db.Model):
     CreatedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
     UsedAt = Column(DateTime)
 
+class StudentTestcaseInputPurchases(db.Model):
+    """Testcase inputs purchased by a student."""
+
+    __tablename__ = "StudentTestcaseInputPurchases"
+
+    UserId = Column(
+        Integer,
+        ForeignKey("Users.Id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    ClassId = Column(
+        Integer,
+        ForeignKey("Classes.Id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    ProjectId = Column(
+        Integer,
+        ForeignKey("Assignments.Id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    CheckpointId = Column(Integer, primary_key=True, default=0)
+    TestcaseId = Column(
+        Integer,
+        ForeignKey("Testcases.Id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    SpentStars = Column(Integer, nullable=False)
+    CreatedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+
 class StudentStarAwards(db.Model):
     """
     Stars awarded for completing a main assignment or checkpoint.
 
-    A student's current balance is derived from these awards minus the two
-    skip-purchase tables. No separate balance or generic spending row is stored.
+    A student's current balance is derived from these awards minus the
+    star-purchase tables. No separate balance or generic spending row is stored.
     """
 
     __tablename__ = "StudentStarAwards"

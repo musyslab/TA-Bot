@@ -2,6 +2,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS `SubmissionAnnotations`;
 DROP TABLE IF EXISTS `StudentStarAwards`;
+DROP TABLE IF EXISTS `StudentTestcaseInputPurchases`;
 DROP TABLE IF EXISTS `StudentCooldownSkips`;
 DROP TABLE IF EXISTS `StudentCheckpointSkips`;
 DROP TABLE IF EXISTS `StudentUploadStates`;
@@ -336,6 +337,32 @@ CREATE TABLE `StudentCooldownSkips` (
     ON DELETE CASCADE,
   CONSTRAINT `fk_student_cooldown_skips_project`
     FOREIGN KEY (`ProjectId`) REFERENCES `Assignments` (`Id`)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `StudentTestcaseInputPurchases` (
+  `UserId` int NOT NULL,
+  `ClassId` int NOT NULL,
+  `ProjectId` int NOT NULL,
+  `CheckpointId` int NOT NULL DEFAULT 0,
+  `TestcaseId` int NOT NULL,
+  `SpentStars` int NOT NULL,
+  `CreatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`UserId`, `ClassId`, `ProjectId`, `CheckpointId`, `TestcaseId`),
+  KEY `idx_student_testcase_input_purchases_user_class`
+    (`UserId`, `ClassId`),
+  KEY `idx_student_testcase_input_purchases_testcase` (`TestcaseId`),
+  CONSTRAINT `fk_student_testcase_input_purchases_user`
+    FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_student_testcase_input_purchases_class`
+    FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_student_testcase_input_purchases_project`
+    FOREIGN KEY (`ProjectId`) REFERENCES `Assignments` (`Id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_student_testcase_input_purchases_testcase`
+    FOREIGN KEY (`TestcaseId`) REFERENCES `Testcases` (`Id`)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

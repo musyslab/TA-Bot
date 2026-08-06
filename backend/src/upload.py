@@ -26,6 +26,7 @@ from src.repositories.models import (
     StudentCheckpointSkips,
     StudentCooldownSkips,
     StudentStarAwards,
+    StudentTestcaseInputPurchases,
     Submissions,
     Users,
 )
@@ -58,7 +59,7 @@ EARLY_START_MULTIPLIER = 2
 
 
 def current_star_balance(user_id: int, class_id: int) -> int:
-    """Return awards minus checkpoint and cooldown skip purchases."""
+    """Return awards minus every star purchase made in the class."""
     user_id = int(user_id)
     class_id = int(class_id)
 
@@ -83,11 +84,19 @@ def current_star_balance(user_id: int, class_id: int) -> int:
         StudentCooldownSkips.ClassId == class_id,
     ).scalar()
 
+    testcase_input_spent = db.session.query(
+        func.coalesce(func.sum(StudentTestcaseInputPurchases.SpentStars), 0)
+    ).filter(
+        StudentTestcaseInputPurchases.UserId == user_id,
+        StudentTestcaseInputPurchases.ClassId == class_id,
+    ).scalar()
+
     return max(
         0,
         parse_int(awarded, 0)
         - parse_int(checkpoint_spent, 0)
-        - parse_int(cooldown_spent, 0),
+        - parse_int(cooldown_spent, 0)
+        - parse_int(testcase_input_spent, 0),
     )
 
 
