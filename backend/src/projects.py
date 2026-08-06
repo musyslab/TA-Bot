@@ -31,7 +31,10 @@ from src.repositories.models import (
     Modules,
     Checkpoints,
     Projects,
+    StudentCheckpointSkips,
+    StudentCooldownSkips,
     StudentHiddenModules,
+    StudentStarAwards,
     Submissions,
     Users,
 )
@@ -42,7 +45,21 @@ from src.repositories.user_repository import UserRepository
 projects_api = Blueprint('projects_api', __name__)
 
 ALLOWED_SOURCE_EXTS = {'.py', '.c', '.java', '.rkt'}
+ALLOWED_PRESENTATION_EXTS = {'.pdf', '.ppt', '.pptx'}
+PRESENTATION_MIME_TYPES = {
+    '.pdf': 'application/pdf',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
 TS_DIR_RE = re.compile(r"^\d{8}_\d{6}$")
+CHECKPOINT_COMPLETION_STARS = 1
+MAIN_PROJECT_COMPLETION_STARS = 3
+EARLY_START_MULTIPLIER = 2
+CHECKPOINT_SKIP_COST_STARS = 6
+CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 1
+MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
+INPUT_EVENT_PREFIX = "[[[MAAT_INPUT_B64:"
+
 
 
 def normalize_grader_language(language: str, solution_root: str = "") -> str:
@@ -86,11 +103,145 @@ def normalize_grader_language(language: str, solution_root: str = "") -> str:
 
     return raw or "py"
 
+
+def solution_source_uses_input(solution_root: str, language: str) -> bool:
+    """Best-effort check used to migrate legacy testcase output transcripts."""
+    if not solution_root or not os.path.exists(solution_root):
+        return False
+
+    normalized_language = normalize_grader_language(language, solution_root)
+    if normalized_language not in {"py", "java"}:
+        return False
+
+    expected_extension = ".py" if normalized_language == "py" else ".java"
+    if os.path.isdir(solution_root):
+        source_paths = [
+            os.path.join(base, filename)
+            for base, _, filenames in os.walk(solution_root)
+            for filename in filenames
+            if os.path.splitext(filename)[1].lower() == expected_extension
+        ]
+    else:
+        source_paths = [solution_root]
+
+    for source_path in source_paths:
+        try:
+            if os.path.getsize(source_path) > 2 * 1024 * 1024:
+                continue
+            with open(source_path, "r", encoding="utf-8", errors="replace") as source_file:
+                source = source_file.read()
+        except OSError:
+            continue
+
+        if normalized_language == "py" and re.search(r"\binput\s*\(", source):
+            return True
+        if normalized_language == "java" and (
+            re.search(r"\bScanner\b[\s\S]*?\.\s*next(?:Line|Boolean|Byte|Short|Int|Long|Float|Double|BigInteger|BigDecimal)?\s*\(", source)
+            or re.search(r"\bBufferedReader\b[\s\S]*?\.\s*readLine\s*\(", source)
+            or re.search(r"\bSystem\s*\.\s*console\s*\(\s*\)\s*\.\s*readLine\s*\(", source)
+        ):
+            return True
+
+    return False
+
 def parse_int(v, default: int = 0) -> int:
     try:
         return int(str(v).strip())
     except Exception:
         return default
+
+
+def get_star_balance(user_id: int, class_id: int) -> int:
+    """Return awards minus checkpoint and cooldown skip purchases."""
+    user_id = int(user_id)
+    class_id = int(class_id)
+
+    awarded = db.session.query(
+        func.coalesce(func.sum(StudentStarAwards.AwardedStars), 0)
+    ).filter(
+        StudentStarAwards.UserId == user_id,
+        StudentStarAwards.ClassId == class_id,
+    ).scalar()
+
+    checkpoint_spent = db.session.query(
+        func.coalesce(func.sum(StudentCheckpointSkips.SpentStars), 0)
+    ).filter(
+        StudentCheckpointSkips.UserId == user_id,
+        StudentCheckpointSkips.ClassId == class_id,
+    ).scalar()
+
+    cooldown_spent = db.session.query(
+        func.coalesce(func.sum(StudentCooldownSkips.SpentStars), 0)
+    ).filter(
+        StudentCooldownSkips.UserId == user_id,
+        StudentCooldownSkips.ClassId == class_id,
+    ).scalar()
+
+    return max(
+        0,
+        parse_int(awarded, 0)
+        - parse_int(checkpoint_spent, 0)
+        - parse_int(cooldown_spent, 0),
+    )
+
+
+def incentive_summary(user_id: int, class_id: int) -> dict:
+    return {
+        "stars": get_star_balance(user_id, class_id),
+        "star_balance": get_star_balance(user_id, class_id),
+        "checkpoint_completion_stars": CHECKPOINT_COMPLETION_STARS,
+        "main_project_completion_stars": MAIN_PROJECT_COMPLETION_STARS,
+        "early_start_multiplier": EARLY_START_MULTIPLIER,
+        "checkpoint_skip_cost": CHECKPOINT_SKIP_COST_STARS,
+        "checkpoint_cooldown_skip_cost": CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "main_project_cooldown_skip_cost": MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "cooldown_skip_cost": MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+    }
+
+
+def skipped_checkpoint_ids_for_project(user_id: int, project_id: int) -> set[int]:
+    rows = StudentCheckpointSkips.query.filter(
+        StudentCheckpointSkips.UserId == int(user_id),
+        StudentCheckpointSkips.ProjectId == int(project_id),
+    ).all()
+    return {parse_int(getattr(row, "CheckpointId", 0), 0) for row in rows}
+
+
+def checkpoint_awards_for_project(user_id: int, project_id: int) -> dict[int, dict]:
+    rows = StudentStarAwards.query.filter(
+        StudentStarAwards.UserId == int(user_id),
+        StudentStarAwards.ProjectId == int(project_id),
+        StudentStarAwards.AwardType == "checkpoint_completion",
+    ).all()
+
+    return {
+        parse_int(getattr(row, "CheckpointId", 0), 0): {
+            "stars": parse_int(getattr(row, "Stars", 0), 0),
+            "base_stars": parse_int(getattr(row, "BaseStars", 0), 0),
+            "multiplier": parse_int(getattr(row, "Multiplier", 1), 1),
+            "started_early": bool(getattr(row, "StartedEarly", False)),
+        }
+        for row in rows
+    }
+
+
+def main_award_for_project(user_id: int, project_id: int) -> dict | None:
+    row = StudentStarAwards.query.filter(
+        StudentStarAwards.UserId == int(user_id),
+        StudentStarAwards.ProjectId == int(project_id),
+        StudentStarAwards.CheckpointId == 0,
+        StudentStarAwards.AwardType == "main_completion",
+    ).first()
+
+    if row is None:
+        return None
+
+    return {
+        "stars": parse_int(getattr(row, "Stars", 0), 0),
+        "base_stars": parse_int(getattr(row, "BaseStars", 0), 0),
+        "multiplier": parse_int(getattr(row, "Multiplier", 1), 1),
+        "started_early": bool(getattr(row, "StartedEarly", False)),
+    }
 
 DEFAULT_CHECKPOINT_NAME_RE = re.compile(r"^(checkpoint)\s+\d+$", re.IGNORECASE)
 
@@ -346,6 +497,9 @@ def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) ->
         print(f"[student_checkpoint_rows] failed to list checkpoints for project {project_id}: {exc}", flush=True)
         return []
 
+    user_id = int(getattr(current_user, "Id", 0) or 0)
+    skipped_checkpoint_ids = skipped_checkpoint_ids_for_project(user_id, project_id)
+    checkpoint_awards = checkpoint_awards_for_project(user_id, project_id)
     passed_checkpoint_ids: set[int] = set()
     try:
         if hasattr(Submissions, "IsCheckpoint") and hasattr(Submissions, "CheckpointId"):
@@ -353,7 +507,7 @@ def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) ->
                 db.session.query(Submissions.CheckpointId)
                 .filter(
                     Submissions.Project == int(project_id),
-                    Submissions.User == int(current_user.Id),
+                    Submissions.User == user_id,
                     Submissions.IsCheckpoint == True,
                     Submissions.IsPassing == True,
                     Submissions.CheckpointId.isnot(None),
@@ -389,7 +543,10 @@ def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) ->
             checkpoint_id=checkpoint_id,
         )
         name = str(getattr(row, "Name", "") or default_checkpoint_name(index + 1))
-        solved = checkpoint_id in passed_checkpoint_ids
+        passed = checkpoint_id in passed_checkpoint_ids
+        skipped = checkpoint_id in skipped_checkpoint_ids
+        solved = passed or skipped
+        award = checkpoint_awards.get(checkpoint_id, {})
 
         out.append({
             "id": checkpoint_id,
@@ -404,10 +561,18 @@ def student_checkpoint_rows(project_repo: ProjectRepository, project_id: int) ->
             "Enabled": enabled,
             "solved": solved,
             "Solved": solved,
-            "passed": solved,
-            "Passed": solved,
-            "rewarded": solved,
-            "Rewarded": solved,
+            "passed": passed,
+            "Passed": passed,
+            "skipped": skipped,
+            "Skipped": skipped,
+            "rewarded": bool(award),
+            "Rewarded": bool(award),
+            "rewardStars": int(award.get("stars", 0) or 0),
+            "RewardStars": int(award.get("stars", 0) or 0),
+            "rewardMultiplier": int(award.get("multiplier", 1) or 1),
+            "RewardMultiplier": int(award.get("multiplier", 1) or 1),
+            "startedEarly": bool(award.get("started_early", False)),
+            "StartedEarly": bool(award.get("started_early", False)),
             "hasSolutionProgram": bool(status.get("HasSolutionProgram", False)),
             "HasSolutionProgram": bool(status.get("HasSolutionProgram", False)),
             "hasTestcases": bool(status.get("HasTestcases", False)),
@@ -787,6 +952,42 @@ def module_folder_name(module: Modules | None, fallback_name: str, timestamp_hin
     return f"{ts}_{first_name}"
 
 
+def teacher_module_dir(module: Modules) -> str:
+    return os.path.join(
+        teacher_root_for_class(int(module.ClassId)),
+        module_folder_name(module, getattr(module, "Name", "module")),
+    )
+
+
+def module_presentation_path(module: Modules | None) -> str | None:
+    if module is None:
+        return None
+
+    timestamp = str(getattr(module, "FileTimestamp", "") or "").strip()
+    first_name = str(getattr(module, "FirstName", "") or "").strip()
+    if not timestamp or not first_name:
+        return None
+
+    module_dir = os.path.join(
+        teacher_root_for_class(int(module.ClassId)),
+        f"{timestamp}_{path_segment(first_name, 'module')}",
+    )
+    try:
+        candidates = [
+            os.path.join(module_dir, name)
+            for name in os.listdir(module_dir)
+            if os.path.isfile(os.path.join(module_dir, name))
+            and os.path.splitext(name)[1].lower() in ALLOWED_PRESENTATION_EXTS
+        ]
+    except OSError:
+        return None
+
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda path: os.path.getmtime(path))
+
+
 def teacher_main_project_dir(project: Projects, timestamp_hint: str | None = None) -> str:
     module = project_module(project)
     module_folder = module_folder_name(module, getattr(project, "Name", "module"), timestamp_hint)
@@ -863,6 +1064,7 @@ def module_payload(
     total_submissions = 0
     checkpoint_total = 0
     main_completed = False
+    main_award = None
 
     if project:
         project_id = int(project.Id)
@@ -883,6 +1085,11 @@ def module_payload(
             checkpoint_total = 0
 
         try:
+            main_award = main_award_for_project(int(current_user.Id), project_id)
+        except Exception:
+            main_award = None
+
+        try:
             if main_completed_project_ids is not None:
                 main_completed = project_id in main_completed_project_ids
             else:
@@ -897,6 +1104,8 @@ def module_payload(
         except Exception:
             main_completed = False
 
+    presentation_path = module_presentation_path(module)
+
     return {
         "Id": module.Id,
         "ClassId": module.ClassId,
@@ -909,6 +1118,12 @@ def module_payload(
         "CheckpointTotalSubmissions": int(checkpoint_total),
         "CheckpointsEnabled": True,
         "MainCompleted": main_completed,
+        "MainRewarded": bool(main_award),
+        "MainRewardStars": int((main_award or {}).get("stars", 0) or 0),
+        "MainRewardMultiplier": int((main_award or {}).get("multiplier", 1) or 1),
+        "MainStartedEarly": bool((main_award or {}).get("started_early", False)),
+        "HasPresentation": bool(presentation_path),
+        "PresentationFileName": os.path.basename(presentation_path) if presentation_path else "",
     }
 
 
@@ -1020,7 +1235,12 @@ def analytics_submission_is_newer(candidate, current) -> bool:
 
 def analytics_dashboard_students(class_id: int):
     rows = (
-        db.session.query(Users, LectureSections.Name, Labs.Name, ClassAssignments.Role)
+        db.session.query(
+            Users,
+            LectureSections.Name,
+            Labs.Name,
+            ClassAssignments.Role,
+        )
         .join(ClassAssignments, ClassAssignments.UserId == Users.Id)
         .outerjoin(
             LectureSections,
@@ -1145,10 +1365,10 @@ def analytics_dashboard_progress(class_id: int, project_ids: list[int], checkpoi
                 latest_main[key] = submission
 
     main_grades = {
-        (int(row.Pid), int(row.Sid)): row.Grade
+        (int(row.ProjectId), int(row.UserId)): row.Grade
         for row in MainAssignmentGrades.query.filter(
-            MainAssignmentGrades.Pid.in_(project_ids),
-            MainAssignmentGrades.Sid.in_(student_ids),
+            MainAssignmentGrades.ProjectId.in_(project_ids),
+            MainAssignmentGrades.UserId.in_(student_ids),
         ).all()
     }
 
@@ -2214,7 +2434,7 @@ def run_solution_for_input(solution_root: str, language: str, input_text: str, p
         proc = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(solution_root) if os.path.isfile(solution_root) else solution_root)
     except Exception:
         return ""
-    out = (proc.stdout or "").strip()
+    out = (proc.stdout or "").replace("\r\n", "\n").replace("\r", "\n")
     err = (proc.stderr or "").strip()
     return (out or err)
 
@@ -2300,10 +2520,11 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
             add_path = getattr(proj_obj, "AdditionalFilePath", "") if proj_obj else ""
         try:
             name = vals[1] if len(vals) > 1 else ""
-            desc = vals[2] if len(vals) > 2 else ""
-            inp = vals[3] if len(vals) > 3 else ""
+            inp = vals[2] if len(vals) > 2 else ""
+            hidden = bool(vals[4]) if len(vals) > 4 else False
+            sort_order = int(vals[5]) if len(vals) > 5 else None
         except Exception:
-            name, desc, inp = "", "", "", False
+            name, inp, hidden, sort_order = "", "", False, None
 
         new_out = run_solution_for_input(solution_root, lang, inp, project_id, class_id, add_path)
         try:
@@ -2311,10 +2532,11 @@ def recompute_expected_outputs(project_repo, project_id, *, solution_override_pa
                 int(project_id),
                 int(tc_id),
                 name or "",
-                desc or "",
                 inp or "",
                 new_out,
                 int(class_id),
+                hidden,
+                sort_order,
                 checkpoint_id=checkpoint_id,
             )
         except Exception:
@@ -2439,8 +2661,43 @@ def get_testcases(project_repo: ProjectRepository = Provide[Container.project_re
         return access_denied_response(HTTPStatus.FORBIDDEN)
     ppid = opt_int(request.args.get("checkpoint_id", ""))
     testcases = project_repo.get_testcases(int(project_id), checkpoint_id=ppid)
+
+    # Older expected outputs predate terminal-style input events. Refresh them
+    # once when Project Manage first encounters an input-reading Python/Java
+    # solution so existing projects receive the same display as new projects.
+    has_input_event = any(
+        isinstance(values, (list, tuple))
+        and len(values) > 3
+        and INPUT_EVENT_PREFIX in str(values[3] or "")
+        for values in testcases.values()
+    )
+    if testcases and not has_input_event:
+        try:
+            solution_root = project_repo.get_project_path(int(project_id), checkpoint_id=ppid)
+            project = project_repo.get_selected_project(int(project_id))
+            if ppid:
+                checkpoint = project_repo.get_checkpoint(int(ppid))
+                language = (
+                    getattr(checkpoint, "Language", "")
+                    or getattr(project, "Language", "")
+                    or ""
+                )
+            else:
+                language = getattr(project, "Language", "") or ""
+
+            if solution_source_uses_input(solution_root, language):
+                recompute_expected_outputs(
+                    project_repo,
+                    int(project_id),
+                    solution_override_path=solution_root,
+                    language_override=language,
+                    checkpoint_id=ppid,
+                )
+                testcases = project_repo.get_testcases(int(project_id), checkpoint_id=ppid)
+        except Exception as exc:
+            print(f"[get_testcases] legacy input transcript refresh failed: {exc}", flush=True)
  
-    return make_response(json.dumps(testcases), HTTPStatus.OK)
+    return make_response(json.dumps(list(testcases.values())), HTTPStatus.OK)
 
 
 @projects_api.route('/count_testcases', methods=['GET'])
@@ -2492,16 +2749,74 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
         }
          return make_response(message, HTTPStatus.INTERNAL_SERVER_ERROR)
     else:
-        for testcase in json_obj:
+        if not isinstance(json_obj, list):
+            return make_response(
+                {'message': 'Testcase JSON must be an array'},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        ordered_testcases = sorted(
+            enumerate(json_obj),
+            key=lambda item: (
+                parse_int(item[1].get("order", item[0] + 1), item[0] + 1)
+                if isinstance(item[1], dict)
+                else item[0] + 1
+            ),
+        )
+        validated_testcases = []
+        for _, testcase in ordered_testcases:
+            if not isinstance(testcase, dict):
+                return make_response(
+                    {'message': 'Each testcase must be an object'},
+                    HTTPStatus.BAD_REQUEST,
+                )
+
+            name = str(testcase.get("name", "") or "").strip()
+            input_data = str(testcase.get("input", "") or "")
+            if not name or input_data == "":
+                return make_response(
+                    {'message': 'Each testcase requires a name and input'},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            validated_testcases.append({
+                "name": name,
+                "input": input_data,
+                "output": str(testcase.get("output", "") or ""),
+                "hidden": parse_bool(testcase.get("hidden", False)),
+            })
+
+        project = project_repo.get_selected_project(int(project_id))
+        language = str(getattr(project, "Language", "") or "")
+        if ppid:
+            checkpoint = project_repo.get_checkpoint(int(ppid))
+            additional_path = getattr(checkpoint, "AdditionalFilePath", "") if checkpoint else ""
+        else:
+            additional_path = getattr(project, "AdditionalFilePath", "") if project else ""
+
+        for testcase in validated_testcases:
+            testcase["output"] = run_solution_for_input(
+                sol,
+                language,
+                testcase["input"],
+                int(project_id),
+                int(class_id),
+                additional_path,
+            )
+
+        existing_count = project_repo.count_testcases(
+            int(project_id),
+            checkpoint_id=ppid,
+        )
+        for offset, testcase in enumerate(validated_testcases, start=1):
             project_repo.add_or_update_testcase(
                 int(project_id),
                 -1,
                 testcase["name"],
-                testcase["description"],
                 testcase["input"],
                 testcase["output"],
                 class_id,
-                bool(testcase.get("hidden", False)),
+                testcase["hidden"],
+                existing_count + offset,
                 checkpoint_id=ppid,
             )
 
@@ -2520,12 +2835,12 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
     input_data = request.form.get('input', '')
     output = request.form.get('output', '')
     project_id = request.form.get('project_id', '').strip()
-    description = request.form.get('description', '').strip()
     class_id = request.form.get('class_id', '').strip()
+    sort_order_raw = request.form.get('order', '').strip()
 
     ppid_raw = request.form.get('checkpoint_id', '').strip()
     
-    if id_val == '' or name == '' or input_data == '' or project_id == '' or description == '' or class_id == '':
+    if id_val == '' or name == '' or input_data == '' or project_id == '' or class_id == '':
         return make_response("Error in form", HTTPStatus.BAD_REQUEST)    
 
     # Coerce types with validation
@@ -2537,6 +2852,7 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         return make_response("Invalid numeric id", HTTPStatus.BAD_REQUEST)
 
     hidden = parse_bool(request.form.get("hidden", ""))
+    sort_order = int(sort_order_raw) if sort_order_raw.isdigit() and int(sort_order_raw) > 0 else None
     checkpoint_id = int(ppid_raw) if (ppid_raw or "").isdigit() else None
     if not user_can_access_project_id(project_id):
         return access_denied_response(HTTPStatus.FORBIDDEN)
@@ -2575,15 +2891,43 @@ def add_or_update_testcase(project_repo: ProjectRepository = Provide[Container.p
         project_id,
         id_val,
         name,
-        description,
         input_data,
         output,
         class_id_int,
         hidden,
+        sort_order,
         checkpoint_id=checkpoint_id,
     )
 
     return make_response("Testcase Added", HTTPStatus.OK)
+
+
+@projects_api.route('/reorder_testcases', methods=['POST'])
+@jwt_required()
+@inject
+def reorder_testcases(project_repo: ProjectRepository = Provide[Container.project_repo]):
+    if not is_staff_user():
+        return access_denied_response()
+
+    project_id = parse_int(request.form.get("project_id", ""), 0)
+    if project_id <= 0 or not user_can_access_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    checkpoint_id = opt_int(request.form.get("checkpoint_id", ""))
+    try:
+        testcase_ids = json.loads(request.form.get("testcase_ids", "[]"))
+        if not isinstance(testcase_ids, list):
+            raise ValueError("testcase_ids must be an array")
+        ordered_ids = [int(testcase_id) for testcase_id in testcase_ids]
+        project_repo.reorder_testcases(
+            project_id,
+            ordered_ids,
+            checkpoint_id=checkpoint_id,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        return make_response({"message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    return make_response("Testcase order updated", HTTPStatus.OK)
 
 @projects_api.route('/remove_testcase', methods=['POST'])
 @jwt_required()
@@ -2733,6 +3077,105 @@ def get_module_overview_student(project_repo: ProjectRepository = Provide[Contai
         "module": module_payload(module, project_repo, submission_repo),
         "checkpoints": checkpoint_rows,
         "practiceProblems": checkpoint_rows,
+        "incentives": incentive_summary(int(current_user.Id), int(module.ClassId)),
+    })
+
+
+@projects_api.route('/skip_checkpoint', methods=['POST'])
+@jwt_required()
+def skip_checkpoint():
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get("class_id", 0), 0)
+    project_id = parse_int(data.get("project_id", 0), 0)
+    checkpoint_id = parse_int(data.get("checkpoint_id", 0), 0)
+    user_id = int(getattr(current_user, "Id", 0) or 0)
+
+    if class_id <= 0 or project_id <= 0 or checkpoint_id <= 0:
+        return make_response({"message": "class_id, project_id, and checkpoint_id are required."}, HTTPStatus.BAD_REQUEST)
+
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None or parse_int(getattr(project, "ClassId", 0), 0) != class_id:
+        return make_response({"message": "Project not found."}, HTTPStatus.NOT_FOUND)
+
+    if not current_user_can_access_visible_project_id(project_id):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    checkpoint = Checkpoints.query.filter(
+        Checkpoints.Id == checkpoint_id,
+        Checkpoints.ProjectId == project_id,
+        Checkpoints.Enabled == True,
+    ).first()
+    if checkpoint is None:
+        return make_response({"message": "Checkpoint not found."}, HTTPStatus.NOT_FOUND)
+
+    checkpoint_rows = student_checkpoint_rows(ProjectRepository(), project_id)
+    target_index = next((i for i, row in enumerate(checkpoint_rows) if parse_int(row.get("id"), 0) == checkpoint_id), -1)
+
+    if target_index < 0:
+        return make_response({"message": "Checkpoint is not available."}, HTTPStatus.NOT_FOUND)
+
+    target_row = checkpoint_rows[target_index]
+    if bool(target_row.get("solved")):
+        return jsonify({
+            "message": "Checkpoint is already completed.",
+            "checkpoints": checkpoint_rows,
+            "incentives": incentive_summary(user_id, class_id),
+        })
+
+    earlier_incomplete = [
+        row for row in checkpoint_rows[:target_index]
+        if not bool(row.get("solved"))
+    ]
+    if earlier_incomplete:
+        return make_response({"message": "Complete or skip earlier checkpoints first."}, HTTPStatus.BAD_REQUEST)
+
+
+    # Lock the user row so simultaneous purchases cannot overspend a derived balance.
+    locked_user = Users.query.filter(Users.Id == user_id).with_for_update().first()
+    if locked_user is None:
+        db.session.rollback()
+        return make_response({"message": "User not found."}, HTTPStatus.NOT_FOUND)
+
+    existing_skip = StudentCheckpointSkips.query.filter(
+        StudentCheckpointSkips.UserId == user_id,
+        StudentCheckpointSkips.ClassId == class_id,
+        StudentCheckpointSkips.ProjectId == project_id,
+        StudentCheckpointSkips.CheckpointId == checkpoint_id,
+    ).first()
+    if existing_skip is not None:
+        db.session.rollback()
+        return jsonify({
+            "message": "Checkpoint already skipped.",
+            "checkpoints": student_checkpoint_rows(ProjectRepository(), project_id),
+            "incentives": incentive_summary(user_id, class_id),
+        })
+
+    balance = get_star_balance(user_id, class_id)
+    if balance < CHECKPOINT_SKIP_COST_STARS:
+        db.session.rollback()
+        return make_response({
+            "message": f"You need {CHECKPOINT_SKIP_COST_STARS} stars to skip a checkpoint.",
+            "stars": balance,
+            "required_stars": CHECKPOINT_SKIP_COST_STARS,
+        }, HTTPStatus.BAD_REQUEST)
+
+    db.session.add(StudentCheckpointSkips(
+        UserId=user_id,
+        ClassId=class_id,
+        ProjectId=project_id,
+        CheckpointId=checkpoint_id,
+        SpentStars=CHECKPOINT_SKIP_COST_STARS,
+        CreatedAt=datetime.now(),
+    ))
+    db.session.commit()
+
+    updated_rows = student_checkpoint_rows(ProjectRepository(), project_id)
+
+    return jsonify({
+        "message": "Checkpoint skipped.",
+        "checkpoints": updated_rows,
+        "practiceProblems": updated_rows,
+        "incentives": incentive_summary(user_id, class_id),
     })
 
 @projects_api.route('/update_module', methods=['POST'])
@@ -2764,6 +3207,131 @@ def update_module(project_repo: ProjectRepository = Provide[Container.project_re
         return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
 
     return jsonify({'message': 'Module updated'})
+
+
+def requested_presentation_module():
+    module_id = parse_int(
+        request.form.get('module_id')
+        if request.method == 'POST'
+        else request.args.get('module_id'),
+        0,
+    )
+    project_id = parse_int(
+        request.form.get('project_id')
+        if request.method == 'POST'
+        else request.args.get('project_id'),
+        0,
+    )
+
+    module = Modules.query.filter(Modules.Id == module_id).first() if module_id > 0 else None
+    if module is None and project_id > 0:
+        project = Projects.query.filter(Projects.Id == project_id).first()
+        resolved_module_id = parse_int(getattr(project, 'ModuleId', 0) if project else 0, 0)
+        module = (
+            Modules.query.filter(Modules.Id == resolved_module_id).first()
+            if resolved_module_id > 0
+            else None
+        )
+
+    return module
+
+
+@projects_api.route('/module_presentation', methods=['GET'])
+@jwt_required()
+def get_module_presentation():
+    module = requested_presentation_module()
+    if module is None:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+    if not current_user_can_access_visible_module_id(int(module.Id)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    presentation_path = module_presentation_path(module)
+    if not presentation_path:
+        return make_response(
+            {'message': 'No presentation has been saved for this module.'},
+            HTTPStatus.NOT_FOUND,
+        )
+
+    with open(presentation_path, 'rb') as presentation_file:
+        data = presentation_file.read()
+
+    filename = os.path.basename(presentation_path)
+    ext = os.path.splitext(filename)[1].lower()
+    return Response(
+        data,
+        content_type=PRESENTATION_MIME_TYPES.get(ext, 'application/octet-stream'),
+        headers={
+            'Content-Disposition': f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}",
+            'Content-Length': str(len(data)),
+            'X-Filename': filename,
+            'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type, X-Filename',
+        },
+    )
+
+
+@projects_api.route('/module_presentation', methods=['POST'])
+@jwt_required()
+def save_module_presentation():
+    if not is_staff_user():
+        return access_denied_response()
+
+    module = requested_presentation_module()
+    if module is None:
+        return make_response({'message': 'Module not found'}, HTTPStatus.NOT_FOUND)
+    if not user_can_access_module_id(int(module.Id)):
+        return access_denied_response(HTTPStatus.FORBIDDEN)
+
+    presentation = request.files.get('presentation')
+    if presentation is None or not presentation.filename:
+        return make_response(
+            {'message': 'Choose a presentation to save.'},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    filename = secure_filename(presentation.filename)
+    ext = os.path.splitext(filename)[1].lower()
+    if not filename or ext not in ALLOWED_PRESENTATION_EXTS:
+        return make_response(
+            {'message': 'Presentations must be PDF, PPT, or PPTX files.'},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    module_dir = teacher_module_dir(module)
+    os.makedirs(module_dir, exist_ok=True)
+    destination = os.path.join(module_dir, filename)
+    temporary_path = os.path.join(
+        module_dir,
+        f'.presentation-{datetime.now().strftime("%Y%m%d_%H%M%S_%f")}.upload',
+    )
+
+    try:
+        presentation.save(temporary_path)
+        os.replace(temporary_path, destination)
+
+        for name in os.listdir(module_dir):
+            existing_path = os.path.join(module_dir, name)
+            if (
+                existing_path != destination
+                and os.path.isfile(existing_path)
+                and os.path.splitext(name)[1].lower() in ALLOWED_PRESENTATION_EXTS
+            ):
+                os.remove(existing_path)
+    except OSError as exc:
+        try:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        except OSError:
+            pass
+        return make_response(
+            {'message': f'Could not save presentation: {exc}'},
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+        )
+
+    return jsonify({
+        'message': 'Module presentation saved.',
+        'file_name': filename,
+    })
+
 
 @projects_api.route('/get_module_overview', methods=['GET'])
 @jwt_required()

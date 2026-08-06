@@ -12,8 +12,11 @@ import axios from "axios";
 import { Helmet } from "react-helmet";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+    FaArrowRight,
+    FaBolt,
     FaCheck,
     FaFlagCheckered,
+    FaForward,
     FaLock,
     FaPlay,
     FaStar,
@@ -36,6 +39,10 @@ interface ModuleObject {
     CheckpointTotalSubmissions?: number;
     CheckpointsEnabled?: boolean;
     MainCompleted?: boolean;
+    MainRewarded?: boolean;
+    MainRewardStars?: number;
+    MainRewardMultiplier?: number;
+    MainStartedEarly?: boolean;
 }
 
 interface ClassAccessResponse {
@@ -52,6 +59,20 @@ interface Checkpoint {
     enabled: boolean;
     solved: boolean;
     rewarded: boolean;
+    skipped?: boolean;
+    rewardStars?: number;
+    rewardMultiplier?: number;
+    startedEarly?: boolean;
+}
+
+interface IncentiveSummary {
+    stars?: number;
+    star_balance?: number;
+    checkpoint_completion_stars?: number;
+    main_project_completion_stars?: number;
+    early_start_multiplier?: number;
+    checkpoint_skip_cost?: number;
+    cooldown_skip_cost?: number;
 }
 
 interface PathSegment {
@@ -64,6 +85,15 @@ interface PathSvgState {
     width: number;
     height: number;
     segments: PathSegment[];
+}
+
+interface RewardMath {
+    baseStars: number;
+    multiplier: number;
+    totalStars: number;
+    doubled: boolean;
+    skipped: boolean;
+    startedEarly: boolean;
 }
 
 const authHeader = () => ({
@@ -88,34 +118,100 @@ export default function StudentModuleDetails() {
     const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState("");
+    const [actionMessage, setActionMessage] = useState("");
+    const [actionError, setActionError] = useState("");
+    const [skipBusyCheckpointId, setSkipBusyCheckpointId] = useState<number | null>(null);
+    const [skipConfirmationCheckpointId, setSkipConfirmationCheckpointId] =
+        useState<number | null>(null);
+    const [incentives, setIncentives] = useState<IncentiveSummary | null>(null);
     const [pathSvgState, setPathSvgState] = useState<PathSvgState>({
         width: 0,
         height: 0,
         segments: [],
     });
+    const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
     const modulePathTrackRef = useRef<HTMLDivElement | null>(null);
 
     const mainProjectId = module?.MainProjectId || 0;
     const mainProjectName = module?.MainProjectName?.trim() || "Main Project";
 
+    const starBalance = Number(incentives?.star_balance ?? incentives?.stars ?? 0);
+    const checkpointSkipCost = Math.max(0, Number(incentives?.checkpoint_skip_cost ?? 6));
+    const checkpointSkipStarLabel = checkpointSkipCost === 1 ? "star" : "stars";
+    const cooldownSkipCost = Math.max(0, Number(incentives?.cooldown_skip_cost ?? 2));
+    const checkpointRewardBase = Math.max(0, Number(incentives?.checkpoint_completion_stars ?? 1));
+    const mainRewardBase = Math.max(0, Number(incentives?.main_project_completion_stars ?? 3));
+    const earlyStartMultiplier = Math.max(1, Number(incentives?.early_start_multiplier ?? 2));
+
+    const checkpointIsComplete = (problem: Checkpoint): boolean => {
+        return Boolean(problem.solved || problem.skipped);
+    };
+
+    const getCheckpointRewardStars = (problem: Checkpoint): number => {
+        return Math.max(0, Number(problem.rewardStars ?? (problem.rewarded ? checkpointRewardBase : 0)));
+    };
+
     const parseDate = (value: string): Date | null => {
         const d = new Date(value);
         return Number.isNaN(d.getTime()) ? null : d;
     };
 
-    const formatDate12h = (value: string): string => {
-        const d = parseDate(value);
-        if (!d) return value;
-
+    const formatDateObject12h = (d: Date): string => {
         return new Intl.DateTimeFormat("en-US", {
             year: "numeric",
             month: "short",
             day: "2-digit",
             hour: "numeric",
             minute: "2-digit",
+            second: "2-digit",
             hour12: true,
         }).format(d);
+    };
+
+    const formatDate12h = (value: string): string => {
+        const d = parseDate(value);
+        if (!d) return value;
+
+        return formatDateObject12h(d);
+    };
+
+    const formatStarValue = (value: number): string => {
+        if (!Number.isFinite(value)) return "0";
+        return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+    };
+
+    const formatStarCount = (value: number): string => {
+        return `${formatStarValue(value)} ${value === 1 ? "star" : "stars"}`;
+    };
+
+    const formatCountdown = (seconds: number): string => {
+        const safeSeconds = Math.max(0, Math.ceil(seconds));
+        const days = Math.floor(safeSeconds / 86400);
+        const hours = Math.floor((safeSeconds % 86400) / 3600);
+        const minutes = Math.floor((safeSeconds % 3600) / 60);
+        const secs = safeSeconds % 60;
+
+        if (days > 0) {
+            return `${days}d ${hours}h ${minutes}m ${secs}s`;
+        }
+
+        if (hours > 0) {
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
+
+        return `${minutes}m ${secs}s`;
+    };
+
+    const getEarlyStartCutoffDate = (currentModule: ModuleObject): Date | null => {
+        const start = parseDate(currentModule.Start);
+        const end = parseDate(currentModule.End);
+
+        if (!start || !end || end.getTime() <= start.getTime()) {
+            return null;
+        }
+
+        return new Date(start.getTime() + (end.getTime() - start.getTime()) / 2);
     };
 
     const getModuleStatus = (
@@ -126,13 +222,36 @@ export default function StudentModuleDetails() {
 
         if (Number.isNaN(startMs) || Number.isNaN(endMs)) return "upcoming";
 
-        const now = Date.now();
-
-        if (now >= startMs && now <= endMs) return "active";
-        return now < startMs ? "upcoming" : "ended";
+        if (nowMs >= startMs && nowMs <= endMs) return "active";
+        return nowMs < startMs ? "upcoming" : "ended";
     };
 
     const statusLabel = module ? getModuleStatus(module) : "upcoming";
+
+    const earlyStartCutoffDate = useMemo(() => {
+        return module ? getEarlyStartCutoffDate(module) : null;
+    }, [module]);
+
+    const earlyStartCutoffMs = earlyStartCutoffDate?.getTime() ?? 0;
+    const earlyStartWindowOpen = Boolean(earlyStartCutoffMs && nowMs <= earlyStartCutoffMs);
+    const earlyStartCountdownSeconds = earlyStartCutoffMs
+        ? Math.max(0, Math.ceil((earlyStartCutoffMs - nowMs) / 1000))
+        : 0;
+    const earlyStartDeadlineLabel = earlyStartCutoffDate
+        ? formatDateObject12h(earlyStartCutoffDate)
+        : "Unavailable";
+
+    const earlyBonusStatusText = earlyStartCutoffDate
+        ? earlyStartWindowOpen
+            ? `${formatCountdown(earlyStartCountdownSeconds)} remaining`
+            : "Bonus window closed"
+        : "Bonus window unavailable";
+
+    const earlyBonusActionText = earlyStartCutoffDate
+        ? earlyStartWindowOpen
+            ? `Complete before ${earlyStartDeadlineLabel} to double rewards.`
+            : `Doubling stopped after ${earlyStartDeadlineLabel}.`
+        : "Early bonus timing could not be calculated.";
 
     const sortedCheckpoints = useMemo(() => {
         return [...checkpoints].sort((a, b) => {
@@ -140,9 +259,12 @@ export default function StudentModuleDetails() {
             return a.id - b.id;
         });
     }, [checkpoints]);
+    const skipConfirmationCheckpoint = sortedCheckpoints.find(
+        (problem) => problem.id === skipConfirmationCheckpointId,
+    );
 
     const completedCheckpointCount = sortedCheckpoints.filter(
-        (problem) => problem.solved,
+        (problem) => checkpointIsComplete(problem),
     ).length;
     const totalCheckpointCount = sortedCheckpoints.length;
     const mainCompleted = Boolean(module?.MainCompleted);
@@ -153,7 +275,7 @@ export default function StudentModuleDetails() {
         totalCheckpointCount === 0 ||
         completedCheckpointCount === totalCheckpointCount;
     const firstUnsolvedIndex = sortedCheckpoints.findIndex(
-        (problem) => !problem.solved,
+        (problem) => !checkpointIsComplete(problem),
     );
     const activeCheckpointIndex =
         firstUnsolvedIndex === -1 ? totalCheckpointCount : firstUnsolvedIndex;
@@ -161,12 +283,141 @@ export default function StudentModuleDetails() {
         (completedAssignmentCount / totalAssignmentCount) * 100,
     );
 
+    const getRewardMath = (
+        baseStars: number,
+        rewarded: boolean,
+        awardedStars: number | undefined,
+        awardedMultiplier: number | undefined,
+        skipped = false,
+        startedEarly = false,
+    ): RewardMath => {
+        const safeBaseStars = Math.max(0, Number(baseStars || 0));
+        const storedMultiplier = Math.max(1, Number(awardedMultiplier || 1));
+
+        if (skipped) {
+            return {
+                baseStars: safeBaseStars,
+                multiplier: 0,
+                totalStars: 0,
+                doubled: false,
+                skipped: true,
+                startedEarly: false,
+            };
+        }
+
+        if (rewarded) {
+            const storedStars = Math.max(
+                0,
+                Number(awardedStars ?? safeBaseStars * storedMultiplier),
+            );
+            const derivedBaseStars =
+                storedMultiplier > 1 && storedStars > 0
+                    ? storedStars / storedMultiplier
+                    : safeBaseStars;
+
+            return {
+                baseStars: derivedBaseStars || safeBaseStars,
+                multiplier: storedMultiplier,
+                totalStars: storedStars || safeBaseStars * storedMultiplier,
+                doubled: storedMultiplier > 1,
+                skipped: false,
+                startedEarly: Boolean(startedEarly || storedMultiplier > 1),
+            };
+        }
+
+        const earlyBonusApplies = earlyStartWindowOpen || Boolean(startedEarly);
+        const currentMultiplier = earlyBonusApplies ? earlyStartMultiplier : 1;
+
+        return {
+            baseStars: safeBaseStars,
+            multiplier: currentMultiplier,
+            totalStars: safeBaseStars * currentMultiplier,
+            doubled: currentMultiplier > 1,
+            skipped: false,
+            startedEarly: Boolean(startedEarly),
+        };
+    };
+
+    const renderRewardMath = (
+        rewardMath: RewardMath,
+        rewardState: "earned" | "possible" | "skipped",
+    ) => {
+        if (rewardMath.skipped || rewardState === "skipped") {
+            return (
+                <div className="module-path-node-reward is-muted" aria-label="No reward because this checkpoint was skipped">
+                    <FaStar aria-hidden="true" />
+                    <span className="module-path-node-reward-total">+0</span>
+                    <span className="module-path-node-equation">skipped</span>
+                </div>
+            );
+        }
+
+        const stateLabel = rewardState === "earned" ? "earned" : "possible";
+        const bonusLabel = rewardMath.startedEarly && !earlyStartWindowOpen
+            ? `${rewardMath.multiplier}x locked in`
+            : `${rewardMath.multiplier}x early bonus`;
+
+        return (
+            <div
+                className={[
+                    "module-path-node-reward",
+                    rewardState === "possible" ? "is-potential" : "",
+                    rewardMath.doubled ? "is-doubled" : "",
+                ]
+                    .join(" ")
+                    .trim()}
+                aria-label={`${formatStarValue(rewardMath.totalStars)} stars ${stateLabel}`}
+                title={
+                    rewardMath.doubled
+                        ? `Early bonus: ${formatStarValue(rewardMath.baseStars)} normal stars becomes ${formatStarValue(rewardMath.totalStars)} stars.`
+                        : `${formatStarValue(rewardMath.totalStars)} normal stars ${stateLabel}.`
+                }
+            >
+                <FaStar aria-hidden="true" />
+                {rewardMath.doubled ? (
+                    <>
+                        <span
+                            className="module-path-node-pre-bonus"
+                            aria-label={`${formatStarValue(rewardMath.baseStars)} stars before bonus`}
+                        >
+                            +{formatStarValue(rewardMath.baseStars)}
+                        </span>
+                        <span className="module-path-node-reward-total">
+                            +{formatStarValue(rewardMath.totalStars)}
+                        </span>
+                        <span className="module-path-node-bonus-label">
+                            {bonusLabel}
+                        </span>
+                    </>
+                ) : (
+                    <>
+                        <span className="module-path-node-reward-total">
+                            +{formatStarValue(rewardMath.totalStars)}
+                        </span>
+                        <span className="module-path-node-equation">
+                            {rewardState === "earned" ? "earned" : "normal"}
+                        </span>
+                    </>
+                )}
+            </div>
+        );
+    };
+
     const pathCompletionStates = useMemo(() => {
         return [
-            ...sortedCheckpoints.map((problem) => problem.solved),
+            ...sortedCheckpoints.map((problem) => checkpointIsComplete(problem)),
             mainCompleted,
         ];
     }, [sortedCheckpoints, mainCompleted]);
+
+    const mainRewardMath = getRewardMath(
+        mainRewardBase,
+        Boolean(module?.MainRewarded),
+        Number(module?.MainRewardStars ?? 0),
+        Number(module?.MainRewardMultiplier ?? 1),
+        false,
+        Boolean(module?.MainStartedEarly),
+    );
 
     const recalculatePathConnectors = useCallback(() => {
         const trackElement = modulePathTrackRef.current;
@@ -295,6 +546,7 @@ export default function StudentModuleDetails() {
                 if (!selectedModule) {
                     setModule(null);
                     setCheckpoints([]);
+                    setIncentives(null);
                     setErrorMessage("Could not find this module.");
                     setIsLoading(false);
                     return;
@@ -302,12 +554,14 @@ export default function StudentModuleDetails() {
 
                 setModule(selectedModule);
                 setCheckpoints(res.data?.checkpoints || []);
+                setIncentives(res.data?.incentives || null);
                 setIsLoading(false);
             })
             .catch((err) => {
                 console.log(err);
                 setModule(null);
                 setCheckpoints([]);
+                setIncentives(null);
                 setErrorMessage("Could not load this module.");
                 setIsLoading(false);
             });
@@ -318,6 +572,14 @@ export default function StudentModuleDetails() {
         loadModuleDetails();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [schoolId, classId, moduleId]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            setNowMs(Date.now());
+        }, 1000);
+
+        return () => window.clearInterval(timer);
+    }, []);
 
     useLayoutEffect(() => {
         recalculatePathConnectors();
@@ -385,6 +647,40 @@ export default function StudentModuleDetails() {
         openCheckpoint(checkpointId);
     };
 
+    const skipCheckpoint = (checkpointId: number) => {
+        if (!mainProjectId || !classId || !moduleId || skipBusyCheckpointId !== null) return;
+
+        setActionMessage("");
+        setActionError("");
+        setSkipBusyCheckpointId(checkpointId);
+
+        axios
+            .post(
+                `${import.meta.env.VITE_API_URL}/projects/skip_checkpoint`,
+                {
+                    class_id: Number(classId),
+                    project_id: mainProjectId,
+                    checkpoint_id: checkpointId,
+                },
+                { headers: authHeader() },
+            )
+            .then((res) => {
+                setCheckpoints(res.data?.checkpoints || []);
+                setIncentives(res.data?.incentives || null);
+                setActionMessage(res.data?.message || "Checkpoint skipped.");
+            })
+            .catch((err) => {
+                setActionError(
+                    err.response?.data?.message ||
+                    "Could not skip this checkpoint. Please try again.",
+                );
+            })
+            .finally(() => {
+                setSkipBusyCheckpointId(null);
+                setSkipConfirmationCheckpointId(null);
+            });
+    };
+
     return (
         <div className="student-module-details-page">
             <Helmet>
@@ -442,22 +738,57 @@ export default function StudentModuleDetails() {
                                 </div>
                             </div>
 
-                            <div className="module-quest-progress-card">
-                                <div
-                                    className="module-quest-progress-ring"
-                                    style={
-                                        {
-                                            "--progress-percent": `${progressPercent}%`,
-                                        } as CSSProperties
-                                    }
-                                >
-                                    <span>{progressPercent}%</span>
+                            <div className="module-quest-side-cards">
+                                <div className="module-quest-progress-card">
+                                    <div
+                                        className="module-quest-progress-ring"
+                                        style={
+                                            {
+                                                "--progress-percent": `${progressPercent}%`,
+                                            } as CSSProperties
+                                        }
+                                    >
+                                        <span>{progressPercent}%</span>
+                                    </div>
+
+                                    <div>
+                                        <div className="module-quest-progress-title">
+                                            {completedAssignmentCount} / {totalAssignmentCount}{" "}
+                                            assignments completed
+                                        </div>
+                                    </div>
                                 </div>
 
-                                <div>
-                                    <div className="module-quest-progress-title">
-                                        {completedAssignmentCount} / {totalAssignmentCount}{" "}
-                                        assignments completed
+                                <div className="module-quest-star-card" aria-label="Star balance and star uses">
+                                    <div className="module-quest-star-card-header">
+                                        <FaStar aria-hidden="true" />
+                                        <div>
+                                            <div className="module-quest-star-count">
+                                                {formatStarValue(starBalance)}
+                                            </div>
+                                            <div className="module-quest-star-label">Stars available</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div
+                                    className={[
+                                        "module-quest-early-card",
+                                        earlyStartWindowOpen ? "is-open" : "is-closed",
+                                    ]
+                                        .join(" ")
+                                        .trim()}
+                                    aria-label="Early start bonus explanation"
+                                >
+                                    <div className="module-quest-early-badge">
+                                        <FaBolt aria-hidden="true" />
+                                        <span>{earlyStartMultiplier}x early bonus</span>
+                                    </div>
+                                    <div className="module-quest-early-action">
+                                        {earlyBonusActionText}
+                                    </div>
+                                    <div className="module-quest-early-countdown">
+                                        {earlyBonusStatusText}
                                     </div>
                                 </div>
                             </div>
@@ -470,9 +801,25 @@ export default function StudentModuleDetails() {
                             <div className="module-path-header">
                                 <div>
                                     <h2>Checkpoint Path</h2>
-                                    <p>Complete the checkpoints to unlock the main project.</p>
+                                    <p>
+                                        Work through checkpoints in order. Stars can be spent to skip the next 
+                                        available checkpoint for {" "}{checkpointSkipCost} stars, or spent on the 
+                                        upload page to bypass the submission cooldown for {cooldownSkipCost} stars.
+                                    </p>
                                 </div>
                             </div>
+
+                            {actionMessage ? (
+                                <div className="module-path-action-message" role="status">
+                                    {actionMessage}
+                                </div>
+                            ) : null}
+
+                            {actionError ? (
+                                <div className="module-path-action-message is-error" role="alert">
+                                    {actionError}
+                                </div>
+                            ) : null}
 
                             <div className="module-path-track" ref={modulePathTrackRef}>
                                 <svg
@@ -504,16 +851,32 @@ export default function StudentModuleDetails() {
                                 ) : null}
 
                                 {sortedCheckpoints.map((problem, index) => {
-                                    const locked =
-                                        !problem.solved && index > activeCheckpointIndex;
-                                    const available = !problem.solved && !locked;
-                                    const completed = problem.solved;
+                                    const completed = checkpointIsComplete(problem);
+                                    const skipped = Boolean(problem.skipped);
+                                    const locked = !completed && index > activeCheckpointIndex;
+                                    const available = !completed && !locked;
+                                    const canSkip =
+                                        available &&
+                                        !completed &&
+                                        checkpointSkipCost > 0 &&
+                                        starBalance >= checkpointSkipCost;
+                                    const rewardStars = getCheckpointRewardStars(problem);
+                                    const rewardMultiplier = Number(problem.rewardMultiplier ?? 1);
+                                    const rewardMath = getRewardMath(
+                                        checkpointRewardBase,
+                                        Boolean(problem.rewarded),
+                                        rewardStars,
+                                        rewardMultiplier,
+                                        skipped,
+                                        Boolean(problem.startedEarly),
+                                    );
 
                                     return (
                                         <article
                                             className={[
                                                 "module-path-node",
                                                 completed ? "is-complete" : "",
+                                                skipped ? "is-skipped" : "",
                                                 available ? "is-active" : "",
                                                 locked ? "is-locked" : "",
                                             ]
@@ -548,19 +911,45 @@ export default function StudentModuleDetails() {
                                                 <h3>{problem.name}</h3>
                                                 <p>
                                                     {completed
-                                                        ? "Cleared"
+                                                        ? skipped
+                                                            ? "Skipped with stars"
+                                                            : "Cleared"
                                                         : locked
                                                             ? "Locked until earlier checkpoints are cleared"
                                                             : "Ready to attempt"}
                                                 </p>
                                             </div>
 
-                                            {problem.rewarded ? (
-                                                <div className="module-path-node-reward">
-                                                    <FaStar aria-hidden="true" />
-                                                    +1
-                                                </div>
-                                            ) : null}
+                                            <div className="module-path-node-footer">
+                                                {renderRewardMath(
+                                                    rewardMath,
+                                                    skipped
+                                                        ? "skipped"
+                                                        : problem.rewarded
+                                                            ? "earned"
+                                                            : "possible",
+                                                )}
+
+                                                {!completed ? (
+                                                    <button
+                                                        type="button"
+                                                        className="module-path-skip-button"
+                                                        disabled={!canSkip || skipBusyCheckpointId !== null}
+                                                        onClick={(event) => {
+                                                            event.preventDefault();
+                                                            event.stopPropagation();
+                                                            if (canSkip) {
+                                                                setSkipConfirmationCheckpointId(problem.id);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <FaForward aria-hidden="true" />
+                                                        {skipBusyCheckpointId === problem.id
+                                                            ? "Skipping..."
+                                                            : `Skip for ${checkpointSkipCost} stars`}
+                                                    </button>
+                                                ) : null}
+                                            </div>
                                         </article>
                                     );
                                 })}
@@ -615,8 +1004,15 @@ export default function StudentModuleDetails() {
                                         </p>
                                     </div>
 
-                                    <div className="module-path-main-flag">
-                                        <FaFlagCheckered aria-hidden="true" />
+                                    <div className="module-path-node-footer">
+                                        {renderRewardMath(
+                                            mainRewardMath,
+                                            module.MainRewarded ? "earned" : "possible",
+                                        )}
+
+                                        <div className="module-path-main-flag">
+                                            <FaFlagCheckered aria-hidden="true" />
+                                        </div>
                                     </div>
                                 </article>
                             </div>
@@ -624,6 +1020,87 @@ export default function StudentModuleDetails() {
                     </>
                 ) : null}
             </div>
+
+            {skipConfirmationCheckpoint ? (
+                <div
+                    className="skip-cooldown-confirmation"
+                    onMouseDown={(event) => {
+                        if (
+                            event.target === event.currentTarget &&
+                            skipBusyCheckpointId === null
+                        ) {
+                            setSkipConfirmationCheckpointId(null);
+                        }
+                    }}
+                >
+                    <div
+                        className="skip-cooldown-confirmation__dialog"
+                        role="alertdialog"
+                        aria-modal="true"
+                        aria-labelledby="skip-cooldown-confirmation-title"
+                        aria-describedby="skip-cooldown-confirmation-description"
+                        onKeyDown={(event) => {
+                            if (event.key === "Escape" && skipBusyCheckpointId === null) {
+                                setSkipConfirmationCheckpointId(null);
+                            }
+                        }}
+                    >
+                        <span
+                            className="skip-cooldown-confirmation__icon"
+                            aria-hidden="true"
+                        >
+                            <FaStar />
+                        </span>
+                        <h2 id="skip-cooldown-confirmation-title">
+                            Spend {checkpointSkipCost} {checkpointSkipStarLabel}?
+                        </h2>
+                        <p id="skip-cooldown-confirmation-description">
+                            This will immediately skip Checkpoint{" "}
+                            {skipConfirmationCheckpoint.number}:{" "}
+                            {skipConfirmationCheckpoint.name}. This purchase cannot be undone.
+                        </p>
+
+                        <div className="skip-cooldown-confirmation__balance">
+                            <span>
+                                Current balance
+                                <strong>{formatStarCount(starBalance)}</strong>
+                            </span>
+                            <FaArrowRight aria-hidden="true" />
+                            <span>
+                                Balance after
+                                <strong>
+                                    {formatStarCount(
+                                        Math.max(0, starBalance - checkpointSkipCost),
+                                    )}
+                                </strong>
+                            </span>
+                        </div>
+
+                        <div className="skip-cooldown-confirmation__actions">
+                            <button
+                                type="button"
+                                className="skip-cooldown-confirmation__cancel"
+                                disabled={skipBusyCheckpointId !== null}
+                                onClick={() => setSkipConfirmationCheckpointId(null)}
+                                autoFocus
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="skip-cooldown-confirmation__confirm"
+                                disabled={skipBusyCheckpointId !== null}
+                                onClick={() => skipCheckpoint(skipConfirmationCheckpoint.id)}
+                            >
+                                <FaForward aria-hidden="true" />
+                                {skipBusyCheckpointId === skipConfirmationCheckpoint.id
+                                    ? "Spending..."
+                                    : `Confirm and spend ${checkpointSkipCost} ${checkpointSkipStarLabel}`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }

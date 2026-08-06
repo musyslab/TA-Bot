@@ -12,10 +12,12 @@ import { Link, useParams } from "react-router-dom";
 import {
     FaCheck,
     FaCheckCircle,
+    FaDownload,
     FaEdit,
     FaExclamationCircle,
     FaExclamationTriangle,
     FaEye,
+    FaFilePowerpoint,
     FaFlagCheckered,
     FaGripVertical,
     FaPlus,
@@ -24,6 +26,7 @@ import {
     FaTasks,
     FaTimes,
     FaTrash,
+    FaUpload,
     FaWrench,
 } from "react-icons/fa";
 
@@ -38,6 +41,8 @@ interface ModuleObject {
     Start: string;
     End: string;
     MainProjectId?: number;
+    HasPresentation?: boolean;
+    PresentationFileName?: string;
 }
 
 interface ClassAccessResponse {
@@ -100,6 +105,22 @@ const authHeader = () => ({
     Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
 });
 
+const downloadBlobResponse = (res: any, fallbackName: string) => {
+    const type =
+        (res.headers as any)["content-type"] || "application/octet-stream";
+    const blob = new Blob([res.data], { type });
+    const name = (res.headers as any)["x-filename"] || fallbackName;
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+};
+
 const getSetupMissingItems = (status: ProjectSetupStatus): string[] => {
     const missingItems: string[] = [];
 
@@ -159,6 +180,11 @@ export default function AdminModuleDetails() {
         PracticeProblemRow[]
     >([]);
     const [loading, setLoading] = useState(true);
+    const [presentationFile, setPresentationFile] = useState<File | null>(null);
+    const [switchingPresentation, setSwitchingPresentation] = useState(false);
+    const [savingPresentation, setSavingPresentation] = useState(false);
+    const [presentationMessage, setPresentationMessage] = useState("");
+    const presentationInputRef = useRef<HTMLInputElement | null>(null);
 
     const [mainProjectNameDraft, setMainProjectNameDraft] = useState("");
     const [practiceNameDrafts, setPracticeNameDrafts] = useState<
@@ -247,6 +273,12 @@ export default function AdminModuleDetails() {
         );
         setEditingMainProjectName(false);
         setEditingPracticeNames({});
+        setPresentationFile(null);
+        setSwitchingPresentation(false);
+        setPresentationMessage("");
+        if (presentationInputRef.current) {
+            presentationInputRef.current.value = "";
+        }
     };
 
     const loadClassName = async (): Promise<void> => {
@@ -320,6 +352,75 @@ export default function AdminModuleDetails() {
             if (showPageLoading) {
                 setLoading(false);
             }
+        }
+    };
+
+    const savePresentation = async (): Promise<void> => {
+        if (!module || !presentationFile || savingPresentation) return;
+
+        const formData = new FormData();
+        formData.append("module_id", String(module.Id));
+        formData.append("presentation", presentationFile, presentationFile.name);
+
+        try {
+            setSavingPresentation(true);
+            setPresentationMessage("");
+            const res = await axios.post(
+                `${import.meta.env.VITE_API_URL}/projects/module_presentation`,
+                formData,
+                { headers: authHeader() },
+            );
+            const savedFileName =
+                String(res.data?.file_name || presentationFile.name).trim() ||
+                presentationFile.name;
+
+            setModule((current) =>
+                current
+                    ? {
+                        ...current,
+                        HasPresentation: true,
+                        PresentationFileName: savedFileName,
+                    }
+                    : current,
+            );
+            setPresentationFile(null);
+            if (presentationInputRef.current) {
+                presentationInputRef.current.value = "";
+            }
+            setSwitchingPresentation(false);
+            setPresentationMessage("Presentation saved.");
+        } catch (err) {
+            const message = axios.isAxiosError<{ message?: string }>(err)
+                ? err.response?.data?.message
+                : "";
+            setPresentationMessage(
+                message || "The presentation could not be saved.",
+            );
+        } finally {
+            setSavingPresentation(false);
+        }
+    };
+
+    const downloadPresentation = async (): Promise<void> => {
+        if (!module?.HasPresentation) return;
+
+        try {
+            const res = await axios.get(
+                `${import.meta.env.VITE_API_URL}/projects/module_presentation`,
+                {
+                    headers: authHeader(),
+                    params: { module_id: module.Id },
+                    responseType: "blob",
+                },
+            );
+            downloadBlobResponse(
+                res,
+                module.PresentationFileName || "module_presentation",
+            );
+        } catch {
+            setPresentationMessage(
+                "The saved presentation could not be downloaded.",
+            );
         }
     };
 
@@ -980,6 +1081,127 @@ export default function AdminModuleDetails() {
                         {formatDate12h(module.Start)} to {formatDate12h(module.End)}
                     </div>
                 </div>
+
+                <section
+                    className="module-presentation-card"
+                    aria-labelledby="module-presentation-title"
+                >
+                    <div className="module-presentation-heading">
+                        <span className="module-presentation-icon" aria-hidden="true">
+                            <FaFilePowerpoint />
+                        </span>
+                        <div>
+                            <span className="module-presentation-eyebrow">
+                                Module Resource
+                            </span>
+                            <h2 id="module-presentation-title">Presentation</h2>
+                        </div>
+                    </div>
+
+                    <p className="module-presentation-current">
+                        {module.HasPresentation
+                            ? module.PresentationFileName || "Presentation saved"
+                            : "No presentation saved"}
+                    </p>
+
+                    {!module.HasPresentation || switchingPresentation ? (
+                        <div className="module-presentation-upload">
+                            <input
+                                ref={presentationInputRef}
+                                className="module-presentation-input"
+                                type="file"
+                                accept=".pdf,.ppt,.pptx"
+                                aria-label="Choose a module presentation"
+                                onChange={(event) => {
+                                    const selectedFile =
+                                        event.currentTarget.files?.[0] || null;
+
+                                    if (
+                                        selectedFile &&
+                                        !/\.(pdf|ppt|pptx)$/i.test(selectedFile.name)
+                                    ) {
+                                        setPresentationFile(null);
+                                        setPresentationMessage(
+                                            "Presentations must be PDF, PPT, or PPTX files.",
+                                        );
+                                        event.currentTarget.value = "";
+                                        return;
+                                    }
+
+                                    setPresentationFile(selectedFile);
+                                    setPresentationMessage("");
+                                }}
+                                disabled={savingPresentation}
+                            />
+
+                            <div className="module-presentation-actions">
+                                <button
+                                    type="button"
+                                    className="project-action project-action-primary"
+                                    onClick={savePresentation}
+                                    disabled={!presentationFile || savingPresentation}
+                                >
+                                    <FaUpload aria-hidden="true" />
+                                    {savingPresentation
+                                        ? "Saving..."
+                                        : module.HasPresentation
+                                            ? "Save New Presentation"
+                                            : "Save Presentation"}
+                                </button>
+
+                                {module.HasPresentation ? (
+                                    <button
+                                        type="button"
+                                        className="project-action project-action-secondary"
+                                        onClick={() => {
+                                            setPresentationFile(null);
+                                            setSwitchingPresentation(false);
+                                            setPresentationMessage("");
+                                            if (presentationInputRef.current) {
+                                                presentationInputRef.current.value = "";
+                                            }
+                                        }}
+                                        disabled={savingPresentation}
+                                    >
+                                        <FaTimes aria-hidden="true" />
+                                        Cancel
+                                    </button>
+                                ) : null}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="module-presentation-actions">
+                            <button
+                                type="button"
+                                className="project-action project-action-primary"
+                                onClick={() => {
+                                    setSwitchingPresentation(true);
+                                    setPresentationMessage("");
+                                }}
+                                disabled={savingPresentation}
+                            >
+                                <FaEdit aria-hidden="true" />
+                                Edit Presentation
+                            </button>
+
+                            <button
+                                type="button"
+                                className="project-action project-action-secondary"
+                                onClick={downloadPresentation}
+                                disabled={savingPresentation}
+                            >
+                                <FaDownload aria-hidden="true" />
+                                Download
+                            </button>
+                        </div>
+                    )}
+
+                    {presentationMessage ? (
+                        <div className="module-presentation-message" role="status">
+                            {presentationMessage}
+                        </div>
+                    ) : null}
+                </section>
             </div>
 
             <main className="project-workspace">

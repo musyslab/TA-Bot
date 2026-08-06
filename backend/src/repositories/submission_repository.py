@@ -2,43 +2,20 @@ from collections import defaultdict
 import json
 import os
 from src.repositories.database import db
-from .models import MainAssignmentGrades, StudentSuggestions, Submissions, Projects, Users, SubmissionManualErrors, CheckpointGrades
+from .models import (
+    CheckpointGrades,
+    MainAssignmentGrades,
+    Projects,
+    StudentSuggestions,
+    SubmissionAnnotations,
+    Submissions,
+    Users,
+)
 from sqlalchemy import desc, and_
-from sqlalchemy.exc import IntegrityError
-from typing import Dict, List, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, List
+from datetime import datetime
 
-class CheckpointBonusAwards(db.Model):
-    """
-    Idempotent record of checkpoint bonus awards.
-    One award per (UserId, CheckpointId).
-    """
-    __tablename__ = "CheckpointBonusAwards"
-    Id = db.Column(db.Integer, primary_key=True)
-    UserId = db.Column(db.Integer, nullable=False, index=True)
-    ClassId = db.Column(db.Integer, nullable=False)
-    ProjectId = db.Column(db.Integer, nullable=False)
-    CheckpointId = db.Column(db.Integer, nullable=False, index=True)
-    AwardedAt = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    SubmissionId = db.Column(db.Integer, nullable=True)
-
-    __table_args__ = (
-        db.UniqueConstraint("UserId", "CheckpointId", name="uq_checkpoint_bonus_user_pp"),
-    )
-
-class SubmissionRepository():
-
-    def get_submission_by_user_id(self, user_id: int) -> Submissions:
-        """Returns the latest submission made by a user with the given user_id.
-
-        Args:
-            user_id (int): The ID of the user whose submission is to be retrieved.
-
-        Returns:
-            Submissions: The latest submission made by the user with the given user_id.
-        """
-        submission = Submissions.query.filter(Submissions.User == user_id).order_by(desc("Time")).first()
-        return submission
+class SubmissionRepository:
 
     def get_submission_by_user_and_projectid(self, user_id:int, project_id: int)-> Submissions:
         """Returns the latest submission made by a user for a given project.
@@ -132,7 +109,6 @@ class SubmissionRepository():
         time: str,
         project_id: int,
         status: bool,
-        errorcount: int,
         testcase_results,
         is_checkpoint: bool = False,
         checkpoint_id: int = None,
@@ -220,20 +196,6 @@ class SubmissionRepository():
                 bucket[obj.User] = obj
         return bucket
 
-    def get_project_by_submission_id(self, submission_id: int) -> int:
-        """Returns the project ID associated with a given submission ID.
-
-        Args:
-            submission_id (int): The ID of the submission.
-
-        Returns:
-            int: The ID of the project associated with the submission.
-        """
-        submission = Submissions.query.filter(Submissions.Id == submission_id).first()
-        if submission is None:
-            return -1
-        return int(getattr(submission, "Project", -1) or -1)
-
     def submission_view_verification(self, user_id, submission_id) -> bool:
         submission = Submissions.query.filter(and_(Submissions.Id==submission_id,Submissions.User==user_id)).first()
         return submission is not None
@@ -261,31 +223,6 @@ class SubmissionRepository():
             else:
                 submission_counter_dict[sub.User] = 1
         return submission_counter_dict
-
-    def Submit_Student_OH_question(self, question, user_id, project_id):
-        raise RuntimeError("Legacy office-hours queue has been removed in the checkpoint system")
-
-    def Submit_OH_ruling(self, question_id, ruling):
-        raise RuntimeError("Legacy office-hours queue has been removed in the checkpoint system")
-
-    def Submit_OH_dismiss(self, question_id):
-        raise RuntimeError("Legacy office-hours queue has been removed in the checkpoint system")
-
-    def Get_all_OH_questions(self, include_dismissed: bool = False):
-        return []
-
-    def Get_active_OH_questions_for_project(self, project_id: int):
-        return []
-
-    def get_active_question(self, user_id, accepted_only: bool = False):
-        return -1
-
-    def get_accepted_oh_for_class(self, user_id, class_id):
-        return -1
-
-    def check_timeout(self, user_id, project_id):
-        return [1, "None"]
-
 
     def get_all_submissions_for_project(self, project_id):
         submissions = Submissions.query.filter(Submissions.Project == project_id).all()
@@ -418,82 +355,20 @@ class SubmissionRepository():
         submissions = Submissions.query.filter(Submissions.User == user_id).all()
         return submissions
     def get_project_scores(self, project_id):
-        scores = MainAssignmentGrades.query.filter(MainAssignmentGrades.Pid == project_id).all()
+        scores = MainAssignmentGrades.query.filter(MainAssignmentGrades.ProjectId == project_id).all()
         student_list = []
         for score in scores:
-            student_list.append([score.Sid, score.Grade])
+            student_list.append([score.UserId, score.Grade])
         return student_list
     def submitSuggestion(self, user_id, suggestion):
-        dt_string = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        suggestion = StudentSuggestions(UserId=user_id, StudentSuggestionscol=suggestion, TimeSubmitted=dt_string)
-        db.session.add(suggestion)
+        suggestion_row = StudentSuggestions(
+            UserId=int(user_id),
+            Suggestion=str(suggestion or ""),
+            SubmittedAt=datetime.now(),
+        )
+        db.session.add(suggestion_row)
         db.session.commit()
         return "ok"
-    def get_charges(self, user_id, class_id, project_id):
-        # Submission charges were removed with the checkpoint system.
-        return [0, 0]
-
-    def get_time_until_recharge(self, user_id, class_id, project_id):
-        return timedelta(seconds=0)
-
-    def consume_charge(self, user_id, class_id, project_id, submission_id):
-        # No-op: checkpoint system does not consume legacy charges.
-        return "ok"
-
-    def Charge_use_accounting(self, submission_id, charge_id):
-        return "ok"
-
-    def add_reward_charge(self, user_id, class_id, rewardAmount):
-        return None
-
-    def award_checkpoint_bonus(
-        self,
-        user_id: int,
-        class_id: int,
-        project_id: int,
-        checkpoint_id: int,
-        submission_id: int | None = None,
-    ) -> bool:
-        """Record once-per-checkpoint completion without awarding legacy FastPass charges."""
-        if not checkpoint_id:
-            return False
-
-        try:
-            CheckpointBonusAwards.__table__.create(db.engine, checkfirst=True)
-        except Exception:
-            return False
-
-        try:
-            exists = (
-                CheckpointBonusAwards.query
-                .filter(CheckpointBonusAwards.UserId == int(user_id))
-                .filter(CheckpointBonusAwards.CheckpointId == int(checkpoint_id))
-                .first()
-            )
-            if exists:
-                return False
-
-            row = CheckpointBonusAwards(
-                UserId=int(user_id),
-                ClassId=int(class_id),
-                ProjectId=int(project_id),
-                CheckpointId=int(checkpoint_id),
-                AwardedAt=datetime.utcnow(),
-                SubmissionId=(int(submission_id) if submission_id is not None else None),
-            )
-            db.session.add(row)
-            db.session.commit()
-            return True
-        except IntegrityError:
-            db.session.rollback()
-            return False
-        except Exception:
-            db.session.rollback()
-            return False
-
-    def consume_reward_charge(self, user_id, class_id, project):
-        return 0
-
     def save_manual_grading(self, submission_id, grade, scoring_mode, error_points, errors, error_defs, checkpoint=False, checkpoint_id=None):
         try:
             sub = Submissions.query.get(submission_id)
@@ -519,8 +394,8 @@ class SubmissionRepository():
             if is_checkpoint_submission:
                 grades = CheckpointGrades.query.get(int(submission_id))
                 if grades:
-                    grades.Sid = sid
-                    grades.Pid = pid
+                    grades.UserId = sid
+                    grades.ProjectId = pid
                     grades.Grade = int(grade) if grade is not None else grades.Grade
                     grades.ScoringMode = mode
                     grades.ErrorPointsJson = points_json
@@ -529,8 +404,8 @@ class SubmissionRepository():
                 else:
                     db.session.add(CheckpointGrades(
                         SubmissionId=int(submission_id),
-                        Sid=sid,
-                        Pid=pid,
+                        UserId=sid,
+                        ProjectId=pid,
                         Grade=int(grade) if grade is not None else 0,
                         ScoringMode=mode,
                         ErrorPointsJson=points_json,
@@ -539,8 +414,8 @@ class SubmissionRepository():
                     ))
             else:
                 grades = (MainAssignmentGrades.query
-                    .filter(MainAssignmentGrades.Sid == sid)
-                    .filter(MainAssignmentGrades.Pid == pid)
+                    .filter(MainAssignmentGrades.UserId == sid)
+                    .filter(MainAssignmentGrades.ProjectId == pid)
                     .first())
 
                 if grades:
@@ -552,8 +427,8 @@ class SubmissionRepository():
                     grades.UpdatedAt = datetime.utcnow()
                 else:
                     db.session.add(MainAssignmentGrades(
-                        Sid=sid,
-                        Pid=pid,
+                        UserId=sid,
+                        ProjectId=pid,
                         Grade=int(grade) if grade is not None else 0,
                         SubmissionId=int(submission_id),
                         ScoringMode=mode,
@@ -563,10 +438,10 @@ class SubmissionRepository():
                     ))
 
             # Replace error rows for this exact submission.
-            SubmissionManualErrors.query.filter_by(SubmissionId=submission_id).delete()
+            SubmissionAnnotations.query.filter_by(SubmissionId=submission_id).delete()
 
             for error in (errors or []):
-                db.session.add(SubmissionManualErrors(
+                db.session.add(SubmissionAnnotations(
                     SubmissionId=int(submission_id),
                     StartLine=int(error.get('startLine')),
                     EndLine=int(error.get('endLine')),
@@ -584,7 +459,7 @@ class SubmissionRepository():
     def get_manual_errors(self, submission_id):
 
         # fetch all errors for this submission
-        errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId == submission_id).all()
+        errors = SubmissionAnnotations.query.filter(SubmissionAnnotations.SubmissionId == submission_id).all()
 
         # convert to list of dicts
         return [
@@ -615,15 +490,15 @@ class SubmissionRepository():
             sid = sub.User
             pid = sub.Project
             row = (MainAssignmentGrades.query
-                .filter(MainAssignmentGrades.Sid == sid)
-                .filter(MainAssignmentGrades.Pid == pid)
+                .filter(MainAssignmentGrades.UserId == sid)
+                .filter(MainAssignmentGrades.ProjectId == pid)
                 .filter(MainAssignmentGrades.SubmissionId == int(submission_id))
                 .first())
 
             if row is None:
                 row = (MainAssignmentGrades.query
-                    .filter(MainAssignmentGrades.Sid == sid)
-                    .filter(MainAssignmentGrades.Pid == pid)
+                    .filter(MainAssignmentGrades.UserId == sid)
+                    .filter(MainAssignmentGrades.ProjectId == pid)
                     .first())
 
         if row is None:
@@ -646,9 +521,6 @@ class SubmissionRepository():
             defs = {}
 
         return {"grade": getattr(row, "Grade", None), "scoringMode": mode, "errorPoints": pts, "errorDefs": defs}
-
-    def get_oh_visits_by_projectId(self, project_id):
-        return []
 
     def _grade_payload_from_row(self, row):
         raw_pts = getattr(row, "ErrorPointsJson", None) or "{}"
@@ -680,14 +552,14 @@ class SubmissionRepository():
             row = CheckpointGrades.query.get(int(submission_id))
         else:
             row = (MainAssignmentGrades.query
-                .filter(MainAssignmentGrades.Sid == sub.User)
-                .filter(MainAssignmentGrades.Pid == sub.Project)
+                .filter(MainAssignmentGrades.UserId == sub.User)
+                .filter(MainAssignmentGrades.ProjectId == sub.Project)
                 .filter(MainAssignmentGrades.SubmissionId == int(submission_id))
                 .first())
             if row is None:
                 row = (MainAssignmentGrades.query
-                    .filter(MainAssignmentGrades.Sid == sub.User)
-                    .filter(MainAssignmentGrades.Pid == sub.Project)
+                    .filter(MainAssignmentGrades.UserId == sub.User)
+                    .filter(MainAssignmentGrades.ProjectId == sub.Project)
                     .first())
 
         if row is None:
@@ -729,10 +601,10 @@ class SubmissionRepository():
                 payload['submission_id'] = int(sub.Id)
                 grades_by_student[sid] = payload
         else:
-            grade_rows = MainAssignmentGrades.query.filter(MainAssignmentGrades.Pid == project_id).all()
+            grade_rows = MainAssignmentGrades.query.filter(MainAssignmentGrades.ProjectId == project_id).all()
             grades_by_student = {}
             for g in grade_rows:
-                grades_by_student[g.Sid] = self._grade_payload_from_row(g)
+                grades_by_student[g.UserId] = self._grade_payload_from_row(g)
 
         database_ids = list(grades_by_student.keys())
         student_numbers = Users.query.filter(Users.Id.in_(database_ids)).all() if database_ids else []
@@ -741,7 +613,7 @@ class SubmissionRepository():
             numbers_by_student[num.Id] = num.StudentNumber
 
         submission_ids = [v['submission_id'] for v in grades_by_student.values() if v.get('submission_id') is not None]
-        errors = SubmissionManualErrors.query.filter(SubmissionManualErrors.SubmissionId.in_(submission_ids)).all() if submission_ids else []
+        errors = SubmissionAnnotations.query.filter(SubmissionAnnotations.SubmissionId.in_(submission_ids)).all() if submission_ids else []
         errors_by_submission = defaultdict(list)
         for e in errors:
             errors_by_submission[e.SubmissionId].append(e)

@@ -9,16 +9,27 @@ from flask_jwt_extended import current_user
 from flask import Blueprint
 from flask import request
 from flask import make_response
-from flask import current_app
 from http import HTTPStatus
-from datetime import datetime
+from datetime import datetime, timezone
 from math import ceil
 from dependency_injector.wiring import inject, Provide
+from sqlalchemy import func
 
 from container import Container
 from src.constants import ADMIN_ROLE, STUDENT_ROLE, TEACHER_ROLE
 from src.repositories.class_repository import ClassRepository
-from src.repositories.models import Checkpoints, Classes, ClassAssignments, Projects, Submissions, Users
+from src.repositories.models import (
+    Checkpoints,
+    Classes,
+    ClassAssignments,
+    Projects,
+    StudentCheckpointSkips,
+    StudentCooldownSkips,
+    StudentStarAwards,
+    StudentTestcaseInputPurchases,
+    Submissions,
+    Users,
+)
 from src.repositories.project_repository import ProjectRepository
 from src.repositories.database import db
 from src.repositories.submission_repository import SubmissionRepository
@@ -38,7 +49,203 @@ ALLOWED_EXTENSIONS_BY_LANGUAGE = {
 }
 
 ALLOWED_SOURCE_EXTENSIONS = {".py", ".java", ".c", ".rkt"}
-SUBMISSION_COOLDOWN_SECONDS = 120
+CHECKPOINT_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 60, 3: 120, 4: 300}
+CHECKPOINT_SUBMISSION_COOLDOWN_MAX_SECONDS = 300
+MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
+MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
+CHECKPOINT_COMPLETION_STARS = 1
+MAIN_PROJECT_COMPLETION_STARS = 3
+EARLY_START_MULTIPLIER = 2
+
+
+def current_star_balance(user_id: int, class_id: int) -> int:
+    """Return awards minus every star purchase made in the class."""
+    user_id = int(user_id)
+    class_id = int(class_id)
+
+    awarded = db.session.query(
+        func.coalesce(func.sum(StudentStarAwards.AwardedStars), 0)
+    ).filter(
+        StudentStarAwards.UserId == user_id,
+        StudentStarAwards.ClassId == class_id,
+    ).scalar()
+
+    checkpoint_spent = db.session.query(
+        func.coalesce(func.sum(StudentCheckpointSkips.SpentStars), 0)
+    ).filter(
+        StudentCheckpointSkips.UserId == user_id,
+        StudentCheckpointSkips.ClassId == class_id,
+    ).scalar()
+
+    cooldown_spent = db.session.query(
+        func.coalesce(func.sum(StudentCooldownSkips.SpentStars), 0)
+    ).filter(
+        StudentCooldownSkips.UserId == user_id,
+        StudentCooldownSkips.ClassId == class_id,
+    ).scalar()
+
+    testcase_input_spent = db.session.query(
+        func.coalesce(func.sum(StudentTestcaseInputPurchases.SpentStars), 0)
+    ).filter(
+        StudentTestcaseInputPurchases.UserId == user_id,
+        StudentTestcaseInputPurchases.ClassId == class_id,
+    ).scalar()
+
+    return max(
+        0,
+        parse_int(awarded, 0)
+        - parse_int(checkpoint_spent, 0)
+        - parse_int(cooldown_spent, 0)
+        - parse_int(testcase_input_spent, 0),
+    )
+
+
+def project_window(project):
+    module = getattr(project, "Module", None)
+    if module is None:
+        module_id = parse_int(getattr(project, "ModuleId", 0), 0)
+        if module_id > 0:
+            try:
+                from src.repositories.models import Modules
+
+                module = Modules.query.filter(Modules.Id == module_id).first()
+            except Exception:
+                module = None
+
+    start = getattr(module, "Start", None) if module else None
+    end = getattr(module, "End", None) if module else None
+
+    return start, end
+
+
+def assignment_started_early(user_id: int, project, is_checkpoint: bool, checkpoint_id: int | None) -> bool:
+    start, end = project_window(project)
+    if not isinstance(start, datetime) or not isinstance(end, datetime) or end <= start:
+        return False
+
+    query = Submissions.query.filter(
+        Submissions.User == int(user_id),
+        Submissions.Project == int(project.Id),
+        Submissions.IsCheckpoint == bool(is_checkpoint),
+    )
+
+    if is_checkpoint:
+        query = query.filter(Submissions.CheckpointId == int(checkpoint_id or 0))
+    else:
+        query = query.filter(Submissions.CheckpointId.is_(None))
+
+    rows = query.order_by(Submissions.Time.asc()).all()
+    first_started_at = None
+
+    for row in rows:
+        parsed = parse_submission_datetime(getattr(row, "Time", None))
+        if parsed is None:
+            continue
+        if first_started_at is None or parsed < first_started_at:
+            first_started_at = parsed
+
+    if first_started_at is None:
+        return False
+
+    midpoint = start + ((end - start) / 2)
+    return first_started_at <= midpoint
+
+
+def award_completion_stars(
+    user_id: int,
+    class_id: int,
+    project,
+    is_checkpoint: bool,
+    checkpoint_id: int | None,
+    submission_id: int,
+) -> dict | None:
+
+    if project is None or submission_id is None:
+        return None
+
+    checkpoint_key = int(checkpoint_id or 0) if is_checkpoint else 0
+    award_type = "checkpoint_completion" if is_checkpoint else "main_completion"
+
+    existing = StudentStarAwards.query.filter(
+        StudentStarAwards.UserId == int(user_id),
+        StudentStarAwards.ClassId == int(class_id),
+        StudentStarAwards.ProjectId == int(project.Id),
+        StudentStarAwards.CheckpointId == checkpoint_key,
+        StudentStarAwards.AwardType == award_type,
+    ).first()
+
+    if existing is not None:
+        return {
+            "awarded": False,
+            "stars": 0,
+            "balance": current_star_balance(user_id, class_id),
+            "reason": "already_awarded",
+        }
+
+    base_stars = CHECKPOINT_COMPLETION_STARS if is_checkpoint else MAIN_PROJECT_COMPLETION_STARS
+    started_early = assignment_started_early(user_id, project, is_checkpoint, checkpoint_id)
+    multiplier = EARLY_START_MULTIPLIER if started_early else 1
+    stars = base_stars * multiplier
+
+    row = StudentStarAwards(
+        UserId=int(user_id),
+        ClassId=int(class_id),
+        ProjectId=int(project.Id),
+        CheckpointId=checkpoint_key,
+        AwardType=award_type,
+        AwardedStars=int(stars),
+        BaseAwardStars=int(base_stars),
+        Multiplier=int(multiplier),
+        StartedEarly=bool(started_early),
+        SubmissionId=int(submission_id),
+        AwardedAt=datetime.now(),
+    )
+    db.session.add(row)
+    db.session.commit()
+
+    balance = current_star_balance(user_id, class_id)
+
+    return {
+        "awarded": True,
+        "stars": int(stars),
+        "base_stars": int(base_stars),
+        "multiplier": int(multiplier),
+        "started_early": bool(started_early),
+        "balance": int(balance),
+        "award_type": award_type,
+    }
+
+
+def consume_pending_cooldown_skip(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint_id: int,
+    latest_submission_time: datetime | None,
+) -> bool:
+    query = StudentCooldownSkips.query.filter(
+        StudentCooldownSkips.UserId == int(user_id),
+        StudentCooldownSkips.ClassId == int(class_id),
+        StudentCooldownSkips.ProjectId == int(project_id),
+        StudentCooldownSkips.CheckpointId == int(checkpoint_id or 0),
+        StudentCooldownSkips.UsedAt.is_(None),
+    )
+
+    if latest_submission_time is not None:
+        submission_time_utc = (
+            latest_submission_time.astimezone(timezone.utc).replace(tzinfo=None)
+            if latest_submission_time.tzinfo is not None
+            else latest_submission_time.astimezone().astimezone(timezone.utc).replace(tzinfo=None)
+        )
+        query = query.filter(StudentCooldownSkips.CreatedAt >= submission_time_utc)
+
+    row = query.order_by(StudentCooldownSkips.CreatedAt.asc()).first()
+    if row is None:
+        return False
+
+    row.UsedAt = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.session.commit()
+    return True
 
 
 def parse_int(v, default: int = 0) -> int:
@@ -418,49 +625,237 @@ def parse_submission_datetime(value) -> datetime | None:
     return None
 
 
-def get_latest_student_submission_in_class(user_id: int, class_id: int):
-    try:
-        return (
-            db.session.query(Submissions)
-            .join(Projects, Submissions.Project == Projects.Id)
-            .filter(
-                Submissions.User == int(user_id),
-                Projects.ClassId == int(class_id),
-            )
-            .order_by(Submissions.Time.desc())
-            .first()
-        )
-    except Exception:
+def submission_cooldown_seconds_for_attempt_count(
+    completed_attempts: int,
+    is_checkpoint: bool,
+) -> int:
+    completed_attempts = max(0, int(completed_attempts or 0))
+
+    if completed_attempts <= 0:
+        return 0
+
+    schedule = (
+        CHECKPOINT_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+        if is_checkpoint
+        else MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+    )
+    max_seconds = (
+        CHECKPOINT_SUBMISSION_COOLDOWN_MAX_SECONDS
+        if is_checkpoint
+        else MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS
+    )
+
+    return schedule.get(completed_attempts, max_seconds)
+
+
+def student_submission_scope_query(
+    user_id: int,
+    project_id: int,
+    is_checkpoint: bool,
+    checkpoint_id: int,
+):
+    query = Submissions.query.filter(
+        Submissions.User == int(user_id),
+        Submissions.Project == int(project_id),
+        Submissions.IsCheckpoint == bool(is_checkpoint),
+    )
+
+    if is_checkpoint:
+        return query.filter(Submissions.CheckpointId == int(checkpoint_id or 0))
+
+    return query.filter(Submissions.CheckpointId.is_(None))
+
+
+def student_submission_cooldown_response(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    is_checkpoint: bool,
+    checkpoint_id: int,
+):
+    scope_query = student_submission_scope_query(
+        user_id,
+        project_id,
+        is_checkpoint,
+        checkpoint_id,
+    )
+    completed_attempts = scope_query.count()
+
+    if completed_attempts <= 0:
         return None
 
-
-def student_submission_cooldown_response(user_id: int, class_id: int):
-    latest = get_latest_student_submission_in_class(user_id, class_id)
-
-    if latest is None:
-        return None
-
+    latest = scope_query.order_by(Submissions.Time.desc(), Submissions.Id.desc()).first()
     submitted_at = parse_submission_datetime(getattr(latest, "Time", None))
 
     if submitted_at is None:
         return None
 
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(
+        completed_attempts,
+        is_checkpoint,
+    )
     elapsed_seconds = (datetime.now() - submitted_at).total_seconds()
-    remaining_seconds = int(ceil(SUBMISSION_COOLDOWN_SECONDS - elapsed_seconds))
+    remaining_seconds = int(ceil(cooldown_seconds - elapsed_seconds))
 
     if remaining_seconds <= 0:
         return None
 
+    if consume_pending_cooldown_skip(
+        user_id,
+        class_id,
+        project_id,
+        checkpoint_id if is_checkpoint else 0,
+        submitted_at,
+    ):
+        return None
+
+    next_attempt = completed_attempts + 1
     response = make_response(
         {
-            "message": f"Please wait {remaining_seconds} seconds before submitting again.",
+            "message": (
+                f"Submission cooldown active. Attempt {next_attempt} is available in "
+                f"{remaining_seconds} seconds. Test your code in your local deployment "
+                "before submitting again."
+            ),
             "retry_after_seconds": remaining_seconds,
-            "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+            "cooldown_seconds": cooldown_seconds,
+            "submission_attempt_count": completed_attempts,
+            "next_attempt_number": next_attempt,
         },
         HTTPStatus.TOO_MANY_REQUESTS,
     )
     response.headers["Retry-After"] = str(remaining_seconds)
     return response
+
+
+def student_upload_targets(
+    project_repo: ProjectRepository,
+    user_id: int,
+    project_id: int,
+) -> dict:
+    """
+    Return the assignment targets that are open to a student.
+
+    This mirrors StudentModuleDetails: completed checkpoints stay open, the
+    first incomplete checkpoint is open, later checkpoints are locked, and the
+    main problem opens only after every enabled checkpoint is passed or skipped.
+    """
+    checkpoint_rows = project_repo.list_checkpoints(int(project_id))
+    checkpoint_ids = [
+        int(getattr(checkpoint, "Id", 0) or 0)
+        for checkpoint in checkpoint_rows
+        if int(getattr(checkpoint, "Id", 0) or 0) > 0
+    ]
+
+    passed_checkpoint_ids: set[int] = set()
+    if checkpoint_ids:
+        passed_rows = (
+            db.session.query(Submissions.CheckpointId)
+            .filter(
+                Submissions.User == int(user_id),
+                Submissions.Project == int(project_id),
+                Submissions.IsCheckpoint == True,
+                Submissions.IsPassing == True,
+                Submissions.CheckpointId.in_(checkpoint_ids),
+            )
+            .distinct()
+            .all()
+        )
+        passed_checkpoint_ids = {
+            int(row[0])
+            for row in passed_rows
+            if row and row[0] is not None
+        }
+
+    skipped_rows = StudentCheckpointSkips.query.filter(
+        StudentCheckpointSkips.UserId == int(user_id),
+        StudentCheckpointSkips.ProjectId == int(project_id),
+    ).all()
+    skipped_checkpoint_ids = {
+        int(getattr(row, "CheckpointId", 0) or 0)
+        for row in skipped_rows
+    }
+
+    completed_checkpoint_ids = passed_checkpoint_ids | skipped_checkpoint_ids
+    first_incomplete_index = next(
+        (
+            index
+            for index, checkpoint_id in enumerate(checkpoint_ids)
+            if checkpoint_id not in completed_checkpoint_ids
+        ),
+        None,
+    )
+
+    targets = []
+    for index, checkpoint in enumerate(checkpoint_rows):
+        checkpoint_id = int(getattr(checkpoint, "Id", 0) or 0)
+        completed = checkpoint_id in completed_checkpoint_ids
+        available = completed or index == first_incomplete_index
+
+        targets.append(
+            {
+                "id": checkpoint_id,
+                "number": index + 1,
+                "name": str(
+                    getattr(checkpoint, "Name", "")
+                    or f"Checkpoint {index + 1}"
+                ),
+                "enabled": bool(getattr(checkpoint, "Enabled", True)),
+                "completed": completed,
+                "available": available,
+            }
+        )
+
+    return {
+        "checkpoints": targets,
+        "mainAvailable": first_incomplete_index is None,
+    }
+
+
+def upload_target_order_error(
+    project_repo: ProjectRepository,
+    user_id: int,
+    project_id: int,
+    is_checkpoint: bool,
+    checkpoint_id: int,
+):
+    targets = student_upload_targets(project_repo, user_id, project_id)
+
+    if not is_checkpoint:
+        if bool(targets.get("mainAvailable")):
+            return None
+
+        return make_response(
+            {
+                "message": (
+                    "The main problem is locked for this student. "
+                    "Complete or skip all checkpoints first."
+                )
+            },
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    checkpoint_target = next(
+        (
+            row
+            for row in targets.get("checkpoints", [])
+            if int(row.get("id", 0) or 0) == int(checkpoint_id)
+        ),
+        None,
+    )
+
+    if checkpoint_target is not None and bool(checkpoint_target.get("available")):
+        return None
+
+    return make_response(
+        {
+            "message": (
+                "This checkpoint is locked for this student. "
+                "Complete or skip earlier checkpoints first."
+            )
+        },
+        HTTPStatus.BAD_REQUEST,
+    )
 
 
 @upload_api.route("/total_students_by_cid", methods=["GET"])
@@ -499,6 +894,44 @@ def total_students(user_repo: UserRepository = Provide[Container.user_repo]):
         )
 
     return jsonify(list_of_user_info)
+
+
+@upload_api.route("/available_targets", methods=["GET"])
+@jwt_required()
+@inject
+def available_targets(
+    project_repo: ProjectRepository = Provide[Container.project_repo],
+):
+    class_id = parse_int(request.args.get("class_id"), 0)
+    project_id = parse_int(request.args.get("project_id"), 0)
+    student_id = parse_int(request.args.get("student_id"), 0)
+
+    if class_id <= 0 or project_id <= 0 or student_id <= 0:
+        return make_response(
+            {"message": "class_id, project_id, and student_id are required"},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    if not user_can_access_class_id(class_id):
+        return make_response({"message": "Access Denied"}, HTTPStatus.FORBIDDEN)
+
+    if not user_id_is_enrolled_in_class(student_id, class_id):
+        return make_response(
+            {"message": "Student is not enrolled in this class"},
+            HTTPStatus.FORBIDDEN,
+        )
+
+    project = project_repo.get_selected_project(project_id)
+    if (
+        project is None
+        or int(getattr(project, "ClassId", 0) or 0) != class_id
+    ):
+        return make_response(
+            {"message": "Project does not belong to this class"},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    return jsonify(student_upload_targets(project_repo, student_id, project_id))
 
 
 @upload_api.route("/", methods=["POST"])
@@ -540,7 +973,7 @@ def file_upload(
                 HTTPStatus.BAD_REQUEST,
             )
 
-        user_lookup = user_repository.get_user_by_id(student_id)
+        user_lookup = user_repository.get_user(student_id)
         username = getattr(user_lookup, "Username", user_lookup)
 
         if not username:
@@ -624,8 +1057,24 @@ def file_upload(
                 HTTPStatus.FORBIDDEN,
             )
 
+    order_error = upload_target_order_error(
+        project_repo,
+        user_id,
+        int(project.Id),
+        is_checkpoint,
+        checkpoint_id,
+    )
+    if order_error is not None:
+        return order_error
+
     if not is_staff_upload:
-        cooldown_response = student_submission_cooldown_response(user_id, class_id_int)
+        cooldown_response = student_submission_cooldown_response(
+            user_id,
+            class_id_int,
+            int(project.Id),
+            is_checkpoint,
+            checkpoint_id,
+        )
 
         if cooldown_response is not None:
             return cooldown_response
@@ -737,8 +1186,6 @@ def file_upload(
                 HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
             )
 
-    class_repo.get_class_name_withId(class_id)
-
     ts_now = datetime.now()
     ts_stamp = ts_now.strftime("%Y%m%d_%H%M%S")
     dt_string = ts_now.strftime("%Y/%m/%d %H:%M:%S")
@@ -814,20 +1261,43 @@ def file_upload(
         time=dt_string,
         project_id=project.Id,
         status=status,
-        errorcount=0,
         testcase_results=testcase_results,
         is_checkpoint=is_checkpoint,
         checkpoint_id=(checkpoint_id if is_checkpoint else None),
     )
 
-    if not is_staff_upload and not is_checkpoint:
-        submission_repo.consume_charge(user_id, class_id, project.Id, submission_id)
+    star_award = None
+
+    if not is_staff_upload and status:
+        star_award = award_completion_stars(
+            user_id=user_id,
+            class_id=class_id_int,
+            project=project,
+            is_checkpoint=is_checkpoint,
+            checkpoint_id=(checkpoint_id if is_checkpoint else None),
+            submission_id=submission_id,
+        )
+
+    completed_attempts = student_submission_scope_query(
+        user_id,
+        int(project.Id),
+        is_checkpoint,
+        checkpoint_id,
+    ).count()
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(
+        completed_attempts,
+        is_checkpoint,
+    )
 
     message = {
         "message": "Success",
-        "remainder": 10,
+        "remainder": 5,
         "sid": submission_id,
-        "cooldown_seconds": SUBMISSION_COOLDOWN_SECONDS,
+        "cooldown_seconds": cooldown_seconds,
+        "submission_attempt_count": completed_attempts,
+        "next_attempt_number": completed_attempts + 1,
+        "star_award": star_award,
+        "stars": current_star_balance(user_id, class_id_int),
     }
 
     return make_response(message, HTTPStatus.OK)

@@ -70,6 +70,110 @@
         line-height: 1.45;
     }
 
+    .module-presentation-card {
+        width: min(460px, 42vw);
+        padding: 1rem;
+        border: 1px solid #dbe4f0;
+        border-radius: 22px;
+        background: #f8fafc;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.7rem;
+    }
+
+    .module-presentation-heading {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+
+        h2 {
+            margin: 0.12rem 0 0;
+            color: #0f172a;
+            font-size: 1.05rem;
+            font-weight: 950;
+        }
+    }
+
+    .module-presentation-icon {
+        width: 42px;
+        height: 42px;
+        flex: 0 0 auto;
+        border-radius: 14px;
+        display: grid;
+        place-items: center;
+        background: #fff7ed;
+        color: #c2410c;
+        font-size: 1.25rem;
+    }
+
+    .module-presentation-eyebrow {
+        display: block;
+        color: #64748b;
+        font-size: 0.7rem;
+        font-weight: 950;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .module-presentation-current {
+        margin: 0;
+        color: #475569;
+        font-size: 0.86rem;
+        font-weight: 750;
+        overflow-wrap: anywhere;
+    }
+
+    .module-presentation-input {
+        width: 100%;
+        min-width: 0;
+        padding: 0.55rem;
+        border: 1px solid #cbd5e1;
+        border-radius: 12px;
+        background: #ffffff;
+        color: #334155;
+        font: inherit;
+        font-size: 0.82rem;
+        font-weight: 700;
+
+        &::file-selector-button {
+            margin-right: 0.65rem;
+            padding: 0.45rem 0.65rem;
+            border: 0;
+            border-radius: 9px;
+            background: #e2e8f0;
+            color: #1e293b;
+            font: inherit;
+            font-weight: 850;
+            cursor: pointer;
+        }
+    }
+
+    .module-presentation-upload {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+    }
+
+    .module-presentation-actions {
+        display: flex;
+        align-items: stretch;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+
+        .project-action {
+            flex: 1 1 auto;
+            justify-content: center;
+        }
+    }
+
+    .module-presentation-message {
+        color: #475569;
+        font-size: 0.8rem;
+        font-weight: 800;
+        line-height: 1.35;
+    }
+
     .badge-module-status {
         display: inline-flex;
         align-items: center;
@@ -938,6 +1042,10 @@
         .project-detail-hero {
             grid-template-columns: 1fr;
         }
+
+        .module-presentation-card {
+            width: 100%;
+        }
     }
 }
 
@@ -963,6 +1071,10 @@
 
         .manage-practice-link {
             width: 100%;
+        }
+
+        .module-presentation-actions {
+            flex-direction: column;
         }
 
         .checkpoint-path-track {

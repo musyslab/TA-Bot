@@ -5,6 +5,7 @@ from src.repositories.models import Schools, Classes, ClassAssignments
 from src.constants import STUDENT_ROLE, ADMIN_ROLE
 
 school_api = Blueprint("school_api", __name__)
+SUPPORTED_AUTH_PROVIDERS = {"google", "microsoft"}
 
 
 def parse_optional_int(value):
@@ -126,6 +127,24 @@ def serialize_school(school):
         "id": school.Id,
         "name": school.Name,
     }
+
+
+def serialize_login_school(school):
+    return {
+        **serialize_school(school),
+        "auth_provider": str(school.AuthProvider or "").strip().lower(),
+    }
+
+
+@school_api.route("/login-options", methods=["GET"])
+def get_school_login_options():
+    schools = Schools.query.order_by(Schools.Name.asc()).all()
+    configured_schools = [
+        school
+        for school in schools
+        if str(school.AuthProvider or "").strip().lower() in SUPPORTED_AUTH_PROVIDERS
+    ]
+    return jsonify([serialize_login_school(school) for school in configured_schools])
 
 
 @school_api.route("/all", methods=["GET"])

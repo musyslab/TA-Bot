@@ -5,6 +5,7 @@ import axios from 'axios';
 import LoginPage from './pages/public/Login';
 import HomePage from './pages/public/HomePage';
 import NotFound from './pages/public/NotFound';
+import SchoolLoginSelect from './pages/public/SchoolLoginSelect';
 import SchoolSelect from './pages/public/SchoolSelect';
 
 import StudentUpload from './pages/student/StudentUpload';
@@ -44,7 +45,7 @@ const configureAxiosInterceptors = () => {
         function (error) {
             if (error.response && (error.response.status === 401 || error.response.status === 422 || error.response.status === 419)) {
                 localStorage.removeItem("AUTOTA_AUTH_TOKEN");
-                window.location.href = "/login";
+                window.location.href = "/school-login";
             }
             return Promise.reject(error);
         });
@@ -57,6 +58,7 @@ class App extends Component {
         return (
             <BrowserRouter>
                 <Routes>
+                    <Route path="/school-login" element={<SchoolLoginSelect />} />
                     <Route path="/login" element={<LoginPage />} />
 
                     <Route path="/" element={<HomePage />} />

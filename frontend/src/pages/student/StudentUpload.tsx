@@ -11,7 +11,9 @@ import "../../styling/FileUploadCommon.scss";
 
 import {
   FaAlignJustify,
+  FaArrowRight,
   FaBan,
+  FaBolt,
   FaCloudUploadAlt,
   FaCode,
   FaClock,
@@ -23,7 +25,10 @@ import {
   FaCheckCircle,
   FaEye,
   FaFilePowerpoint,
+  FaForward,
   FaInfoCircle,
+  FaLock,
+  FaStar,
 } from "react-icons/fa";
 
 type CheckpointLite = {
@@ -47,6 +52,8 @@ type ModuleObjectLite = {
   Start: string;
   End: string;
   MainProjectId?: number;
+  HasPresentation?: boolean;
+  PresentationFileName?: string;
 };
 
 type PastSubmissionMain = {
@@ -85,12 +92,48 @@ type ApiPastSubmissionsProject = {
   practices?: PastSubmissionCheckpoint[];
 };
 
-type UploadStatePatch = {
-  cooldown_seconds?: number;
-  cooldown_lifted_at?: string | null;
+type LatestPastSubmission = {
+  submissionId: number | string;
+  passed: boolean;
 };
 
-const SUBMISSION_COOLDOWN_SECONDS = 120;
+type IncentiveState = {
+  stars?: number;
+  star_balance?: number;
+  cooldown_skip_cost?: number;
+  checkpoint_cooldown_skip_cost?: number;
+  main_project_cooldown_skip_cost?: number;
+  submission_cooldown_seconds?: number;
+  cooldown_remaining_seconds?: number;
+  submission_attempt_count?: number;
+  next_attempt_number?: number;
+  checkpoint_completion_stars?: number;
+  main_project_completion_stars?: number;
+  early_start_multiplier?: number;
+  early_start_deadline?: string | null;
+  early_start_remaining_seconds?: number;
+  early_start_window_open?: boolean;
+  reward_base_stars?: number;
+  reward_multiplier?: number;
+  reward_total_stars?: number;
+  reward_already_awarded?: boolean;
+  reward_started_early?: boolean;
+};
+
+const CHECKPOINT_SCHEDULE = [
+  { attempt: 1, label: "Attempt 1", value: "No wait" },
+  { attempt: 2, label: "Attempt 2", value: "1 minute" },
+  { attempt: 3, label: "Attempt 3", value: "2 minutes" },
+  { attempt: 4, label: "Attempt 4+", value: "5 minutes" },
+];
+
+const MAIN_SCHEDULE = [
+  { attempt: 1, label: "Attempt 1", value: "No wait" },
+  { attempt: 2, label: "Attempt 2", value: "2 minutes" },
+  { attempt: 3, label: "Attempt 3", value: "5 minutes" },
+  { attempt: 4, label: "Attempt 4", value: "10 minutes" },
+  { attempt: 5, label: "Attempt 5+", value: "20 minutes" },
+];
 
 const authHeader = () => ({
   Authorization: `Bearer ${localStorage.getItem("AUTOTA_AUTH_TOKEN")}`,
@@ -148,19 +191,45 @@ const getPayloadSubmissionId = (payload: any): number | string | null => {
   return normalizePositiveSubmissionId(found);
 };
 
+const isPassedValue = (value: unknown): boolean => {
+  if (value === true || value === 1) return true;
+  if (typeof value !== "string") return false;
+
+  return ["true", "1", "pass", "passed", "ok"].includes(
+    value.trim().toLowerCase(),
+  );
+};
+
+const isPassedTestcase = (result: any): boolean => {
+  return isPassedValue(
+    result?.passed ??
+    result?.ok ??
+    result?.State ??
+    result?.state ??
+    result?.status,
+  );
+};
+
 const getPastProjectId = (row: ApiPastSubmissionsProject): number => {
   return Number(row?.projectId ?? row?.project_id ?? row?.id ?? row?.Id ?? 0);
 };
 
-const getPastMainSubmissionId = (
+const getPastMainSubmission = (
   row: ApiPastSubmissionsProject,
-): number | string | null => {
+): LatestPastSubmission | null => {
   const main = row?.main;
   if (!main) return null;
 
-  return normalizePositiveSubmissionId(
+  const submissionId = normalizePositiveSubmissionId(
     main.submissionId ?? main.submission_id ?? main.id ?? main.Id,
   );
+
+  return submissionId === null
+    ? null
+    : {
+      submissionId,
+      passed: isPassedValue(main.passed),
+    };
 };
 
 const getPastCheckpointId = (row: PastSubmissionCheckpoint): number => {
@@ -175,12 +244,19 @@ const getPastCheckpointId = (row: PastSubmissionCheckpoint): number => {
   );
 };
 
-const getPastCheckpointSubmissionId = (
+const getPastCheckpointSubmission = (
   row: PastSubmissionCheckpoint,
-): number | string | null => {
-  return normalizePositiveSubmissionId(
+): LatestPastSubmission | null => {
+  const submissionId = normalizePositiveSubmissionId(
     row?.submissionId ?? row?.submission_id,
   );
+
+  return submissionId === null
+    ? null
+    : {
+      submissionId,
+      passed: isPassedValue(row?.passed),
+    };
 };
 
 const downloadBlobResponse = (res: any, fallbackName: string) => {
@@ -251,8 +327,17 @@ const StudentUpload = () => {
   const [previousSubmissionId, setPreviousSubmissionId] = useState<number | string | null>(null);
   const [cooldownLiftedAtMs, setCooldownLiftedAtMs] = useState<number>(0);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [incentives, setIncentives] = useState<IncentiveState | null>(null);
+  const [isSkippingCooldown, setIsSkippingCooldown] = useState<boolean>(false);
+  const [isSkipConfirmationOpen, setIsSkipConfirmationOpen] =
+    useState<boolean>(false);
+  const [isCooldownStateLoading, setIsCooldownStateLoading] = useState<boolean>(true);
 
   const [moduleName, setModuleName] = useState<string>("");
+  const [hasModulePresentation, setHasModulePresentation] =
+    useState<boolean>(false);
+  const [modulePresentationFileName, setModulePresentationFileName] =
+    useState<string>("");
   const [checkpointLabel, setCheckpointLabel] = useState<string>("");
   const [hideClassSelectionCrumb, setHideClassSelectionCrumb] =
     useState<boolean>(false);
@@ -262,6 +347,56 @@ const StudentUpload = () => {
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   };
+
+  const loadModulePresentationStatus = useCallback(
+    (targetProjectId: number) => {
+      if (!Number.isFinite(cid) || cid <= 0 || targetProjectId <= 0) {
+        setHasModulePresentation(false);
+        setModulePresentationFileName("");
+        return;
+      }
+
+      setHasModulePresentation(false);
+      setModulePresentationFileName("");
+
+      axios
+        .get(
+          `${import.meta.env.VITE_API_URL}/projects/get_modules_by_class_id_student?id=${cid}`,
+          {
+            headers: authHeader(),
+          },
+        )
+        .then((res) => {
+          const modules: ModuleObjectLite[] = Array.isArray(res.data)
+            ? res.data.map((item: unknown) =>
+              normalizeMaybeJson<ModuleObjectLite>(item),
+            )
+            : [];
+          const selectedModule =
+            (moduleId
+              ? modules.find((item) => Number(item.Id) === Number(moduleId))
+              : null) ||
+            modules.find(
+              (item) => Number(item.MainProjectId) === Number(targetProjectId),
+            ) ||
+            null;
+
+          setModuleName(selectedModule?.Name || "");
+          setHasModulePresentation(Boolean(selectedModule?.HasPresentation));
+          setModulePresentationFileName(
+            selectedModule?.PresentationFileName || "",
+          );
+        })
+        .catch(() => {
+          setHasModulePresentation(false);
+          setModulePresentationFileName("");
+          if (hasModuleRoute) {
+            setModuleName("");
+          }
+        });
+    },
+    [cid, hasModuleRoute, moduleId],
+  );
 
   const testcaseProgress = useMemo(() => {
     const total = Math.max(0, testcasesTotalCount);
@@ -275,13 +410,112 @@ const StudentUpload = () => {
   }, [cooldownLiftedAtMs, nowMs]);
 
   const isCoolingDown = cooldownRemainingSeconds > 0;
-  const canSubmit = !passedAllTests && !isCoolingDown;
+  const starBalance = Number(incentives?.star_balance ?? incentives?.stars ?? 0);
+  const cooldownSkipCost = Math.max(
+    0,
+    Number(
+      incentives?.cooldown_skip_cost ??
+      (isCheckpoint
+        ? incentives?.checkpoint_cooldown_skip_cost ?? 1
+        : incentives?.main_project_cooldown_skip_cost ?? 2),
+    ),
+  );
+  const cooldownSkipStarLabel = cooldownSkipCost === 1 ? "star" : "stars";
+  const submissionAttemptCount = Math.max(
+    0,
+    Number(incentives?.submission_attempt_count ?? 0),
+  );
+  const nextAttemptNumber = Math.max(
+    1,
+    Number(incentives?.next_attempt_number ?? submissionAttemptCount + 1),
+  );
+  const submissionTypeLabel = isCheckpoint
+    ? "Checkpoint submission"
+    : "Main submission";
+  const submissionTypeShortLabel = isCheckpoint ? "Checkpoint" : "Main";
+  const canSkipCooldown = isCoolingDown && cooldownSkipCost > 0 && starBalance >= cooldownSkipCost;
+  const canSubmit = !passedAllTests && !isCoolingDown && !isCooldownStateLoading;
 
   const formatCooldown = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
+
+  const formatDuration = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.ceil(seconds));
+    const days = Math.floor(safeSeconds / 86400);
+    const hours = Math.floor((safeSeconds % 86400) / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const secs = safeSeconds % 60;
+
+    if (days > 0) {
+      return `${days}d ${hours}h ${minutes}m ${secs}s`;
+    }
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${secs}s`;
+    }
+
+    return `${minutes}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const formatStarValue = (value: number): string => {
+    if (!Number.isFinite(value)) return "0";
+    return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+  };
+
+  const formatStarCount = (value: number): string => {
+    return `${formatStarValue(value)} ${value === 1 ? "star" : "stars"}`;
+  };
+
+  const earlyStartDeadlineMs = useMemo(() => {
+    const rawDeadline = incentives?.early_start_deadline;
+    if (!rawDeadline) return 0;
+
+    const parsed = Date.parse(rawDeadline);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, [incentives?.early_start_deadline]);
+
+  const earlyBonusRemainingSeconds = earlyStartDeadlineMs
+    ? Math.max(0, Math.ceil((earlyStartDeadlineMs - nowMs) / 1000))
+    : Math.max(0, Number(incentives?.early_start_remaining_seconds ?? 0));
+  const earlyStartMultiplier = Math.max(1, Number(incentives?.early_start_multiplier ?? 2));
+  const earlyBonusWindowOpen = earlyStartDeadlineMs
+    ? nowMs <= earlyStartDeadlineMs
+    : Boolean(incentives?.early_start_window_open && earlyBonusRemainingSeconds > 0);
+  const rewardBaseStars = Math.max(
+    0,
+    Number(
+      incentives?.reward_base_stars ??
+      (isCheckpoint
+        ? incentives?.checkpoint_completion_stars ?? 1
+        : incentives?.main_project_completion_stars ?? 3),
+    ),
+  );
+  const rewardAlreadyAwarded = Boolean(incentives?.reward_already_awarded || passedAllTests);
+  const rewardStartedEarly = Boolean(incentives?.reward_started_early);
+  const rewardMultiplier = rewardAlreadyAwarded
+    ? Math.max(1, Number(incentives?.reward_multiplier ?? 1))
+    : earlyBonusWindowOpen || rewardStartedEarly
+      ? earlyStartMultiplier
+      : 1;
+  const rewardTotalStars = rewardAlreadyAwarded
+    ? 0
+    : rewardBaseStars * rewardMultiplier;
+  const rewardIsDoubled = !rewardAlreadyAwarded && rewardMultiplier > 1;
+  const rewardSummaryText = rewardAlreadyAwarded
+    ? "Reward already earned for this assignment."
+    : rewardIsDoubled
+      ? `Earn ${formatStarValue(rewardTotalStars)} stars when all tests pass.`
+      : `Earn ${formatStarValue(rewardTotalStars)} stars when all tests pass.`;
+  const earlyBonusTimerText = earlyStartDeadlineMs
+    ? earlyBonusWindowOpen
+      ? `${formatDuration(earlyBonusRemainingSeconds)} until early bonus ends.`
+      : rewardStartedEarly
+        ? `${earlyStartMultiplier}x early bonus is locked in for this assignment.`
+        : "Early bonus window closed."
+    : "Early bonus timer unavailable.";
 
   const cooldownLiftedAtToMs = (
     cooldownLiftedAt: unknown,
@@ -315,34 +549,6 @@ const StudentUpload = () => {
     };
   }, [cid, project_id, isCheckpoint, checkpointId]);
 
-  const saveStudentUploadState = useCallback(
-    (patch: UploadStatePatch) => {
-      const scope = buildUploadStateScope();
-      const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
-
-      if (!scope || !token) {
-        return;
-      }
-
-      axios
-        .post(
-          `${import.meta.env.VITE_API_URL}/submissions/student-upload-state`,
-          {
-            ...scope,
-            ...patch,
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
-        )
-        .catch(() => {
-          // The upload API remains the source of truth. This state endpoint only
-          // keeps the UI in sync across page refreshes.
-        });
-    },
-    [buildUploadStateScope],
-  );
-
   const loadStudentUploadState = useCallback(() => {
     const scope = buildUploadStateScope();
     const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
@@ -368,19 +574,102 @@ const StudentUpload = () => {
 
         setPreviousSubmissionId(latestSubmission);
         setCooldownLiftedAtMs(cooldownUntil);
+        setIncentives((previous) => ({
+          ...(previous || {}),
+          submission_attempt_count: Number(res?.data?.submission_attempt_count ?? 0),
+          next_attempt_number: Number(res?.data?.next_attempt_number ?? 1),
+          submission_cooldown_seconds: Number(res?.data?.submission_cooldown_seconds ?? 0),
+          cooldown_remaining_seconds: Number(res?.data?.cooldown_remaining_seconds ?? 0),
+        }));
       })
       .catch(() => {
-        setCooldownLiftedAtMs(0);
+        // incentive-state independently loads the authoritative cooldown timer.
       });
   }, [buildUploadStateScope]);
 
-  const startSubmissionCooldown = (seconds = SUBMISSION_COOLDOWN_SECONDS) => {
-    const safeSeconds = Math.max(1, Math.ceil(seconds));
-    const until = Date.now() + safeSeconds * 1000;
 
-    setCooldownLiftedAtMs(until);
+  const loadIncentiveState = useCallback(() => {
+    const scope = buildUploadStateScope();
+    const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+    if (!scope || !token) {
+      setIncentives(null);
+      setCooldownLiftedAtMs(0);
+      setIsCooldownStateLoading(false);
+      return;
+    }
+
+    setCooldownLiftedAtMs(0);
+    setIsCooldownStateLoading(true);
+
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/submissions/incentive-state`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: scope,
+      })
+      .then((res) => {
+        const state = res.data || null;
+        setIncentives(state);
+        setCooldownLiftedAtMs(
+          cooldownLiftedAtToMs(
+            state?.cooldown_lifted_at,
+            state?.cooldown_remaining_seconds,
+          ),
+        );
+      })
+      .catch(() => {
+        setIncentives(null);
+        setCooldownLiftedAtMs(0);
+      })
+      .finally(() => {
+        setIsCooldownStateLoading(false);
+      });
+  }, [buildUploadStateScope]);
+
+  const skipSubmissionCooldown = () => {
+    const scope = buildUploadStateScope();
+    const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+    if (!scope || !token || !isCoolingDown || isSkippingCooldown) {
+      setIsSkipConfirmationOpen(false);
+      return;
+    }
+
+    setIsSkippingCooldown(true);
+    setIsErrorMessageHidden(true);
+    setError_Message("");
+
+    axios
+      .post(
+        `${import.meta.env.VITE_API_URL}/submissions/skip-submission-cooldown`,
+        scope,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      .then((res) => {
+        setCooldownLiftedAtMs(0);
+        setNowMs(Date.now());
+        setIncentives(res.data || null);
+      })
+      .catch((err) => {
+        setError_Message(
+          err.response?.data?.message ||
+          "Could not skip the submission timer. Please try again.",
+        );
+        setIsErrorMessageHidden(false);
+      })
+      .finally(() => {
+        setIsSkippingCooldown(false);
+        setIsSkipConfirmationOpen(false);
+      });
+  };
+
+  const startSubmissionCooldown = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.ceil(seconds));
+
+    setCooldownLiftedAtMs(
+      safeSeconds > 0 ? Date.now() + safeSeconds * 1000 : 0,
+    );
     setNowMs(Date.now());
-    saveStudentUploadState({ cooldown_seconds: safeSeconds });
   };
 
   const ALLOWED_EXTS = [".py", ".java", ".c", ".rkt"];
@@ -408,7 +697,7 @@ const StudentUpload = () => {
 
   const resolveLatestSubmissionFromPastSubmissions = (
     rows: ApiPastSubmissionsProject[],
-  ): number | string | null => {
+  ): LatestPastSubmission | null => {
     if (!project_id || project_id <= 0 || project_id === -1) {
       return null;
     }
@@ -433,10 +722,12 @@ const StudentUpload = () => {
         (row) => getPastCheckpointId(row) === checkpointId,
       );
 
-      return getPastCheckpointSubmissionId(checkpointRow as PastSubmissionCheckpoint);
+      return checkpointRow
+        ? getPastCheckpointSubmission(checkpointRow)
+        : null;
     }
 
-    return getPastMainSubmissionId(projectRow);
+    return getPastMainSubmission(projectRow);
   };
 
   const fetchLatestSubmissionFromPastSubmissions = () => {
@@ -462,17 +753,25 @@ const StudentUpload = () => {
         const rows: ApiPastSubmissionsProject[] =
           typeof res.data === "string" ? JSON.parse(res.data) : (res.data ?? []);
 
-        const latestSubmissionId = resolveLatestSubmissionFromPastSubmissions(rows);
+        const latestSubmission = resolveLatestSubmissionFromPastSubmissions(rows);
 
-        if (latestSubmissionId !== null) {
-          rememberPreviousSubmissionId(latestSubmissionId);
+        if (latestSubmission !== null) {
+          rememberPreviousSubmissionId(latestSubmission.submissionId);
+          setPassedAllTests(latestSubmission.passed);
           return;
         }
 
         clearPreviousSubmissionId();
+        setPassedAllTests(false);
+        setTestcasesPassedCount(0);
+        setTestcasesTotalCount(0);
+        setCheckedPassedAll(true);
       })
       .catch(() => {
         clearPreviousSubmissionId();
+        setTestcasesPassedCount(0);
+        setTestcasesTotalCount(0);
+        setCheckedPassedAll(true);
       });
   };
 
@@ -546,13 +845,41 @@ const StudentUpload = () => {
   }, [loadStudentUploadState]);
 
   useEffect(() => {
-    if (!isCoolingDown) return;
+    loadIncentiveState();
+  }, [loadIncentiveState]);
+
+  useEffect(() => {
+    const refreshCooldownState = () => {
+      if (document.visibilityState !== "visible") return;
+      loadStudentUploadState();
+      loadIncentiveState();
+    };
+
+    window.addEventListener("focus", refreshCooldownState);
+    document.addEventListener("visibilitychange", refreshCooldownState);
+
+    return () => {
+      window.removeEventListener("focus", refreshCooldownState);
+      document.removeEventListener("visibilitychange", refreshCooldownState);
+    };
+  }, [loadStudentUploadState, loadIncentiveState]);
+
+  useEffect(() => {
+    if (!isCoolingDown && !earlyBonusWindowOpen) return;
 
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
     }, 1000);
 
     return () => window.clearInterval(timer);
+  }, [isCoolingDown, earlyBonusWindowOpen]);
+
+  useEffect(() => {
+    if (isCoolingDown) {
+      setFiles([]);
+    } else {
+      setIsSkipConfirmationOpen(false);
+    }
   }, [isCoolingDown]);
 
   useEffect(() => {
@@ -605,6 +932,14 @@ const StudentUpload = () => {
       return;
     }
 
+    if (previousSubmissionId === null) {
+      setCheckedPassedAll(false);
+      setTestcasesPassedCount(0);
+      setTestcasesTotalCount(0);
+      return;
+    }
+
+    let cancelled = false;
     setCheckedPassedAll(false);
 
     const qs =
@@ -614,10 +949,12 @@ const StudentUpload = () => {
 
     axios
       .get(
-        `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?class_id=${cid}&id=${project_id}${qs}`,
+        `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?class_id=${cid}&id=${encodeURIComponent(String(previousSubmissionId))}${qs}`,
         { headers: authHeader() },
       )
       .then((res) => {
+        if (cancelled) return;
+
         let payload: any = res?.data;
 
         if (typeof payload === "string") {
@@ -629,15 +966,12 @@ const StudentUpload = () => {
         }
 
         const results = Array.isArray(payload?.results) ? payload.results : [];
-        const passedCount = results.filter((r: any) => {
-          const v = r?.passed ?? r?.ok ?? r?.State;
-          return v === true;
-        }).length;
+        const passedCount = results.filter(isPassedTestcase).length;
         const allPassed = results.length > 0 && passedCount === results.length;
 
         setTestcasesPassedCount(passedCount);
         setTestcasesTotalCount(results.length);
-        setPassedAllTests(allPassed);
+        setPassedAllTests((current) => current || allPassed);
         setCheckedPassedAll(true);
 
         const payloadSubmissionId = getPayloadSubmissionId(payload);
@@ -646,13 +980,18 @@ const StudentUpload = () => {
         }
       })
       .catch(() => {
+        if (cancelled) return;
+
         setTestcasesPassedCount(0);
         setTestcasesTotalCount(0);
-        setPassedAllTests(false);
         setCheckedPassedAll(true);
       });
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project_id, isCheckpoint, checkpointId, cid]);
+  }, [previousSubmissionId, project_id, isCheckpoint, checkpointId, cid]);
 
   useEffect(() => {
     fetchLatestSubmissionFromPastSubmissions();
@@ -743,37 +1082,14 @@ const StudentUpload = () => {
     if (!Number.isFinite(cid) || cid <= 0) {
       setProject_name("");
       setProject_id(-1);
+      setHasModulePresentation(false);
+      setModulePresentationFileName("");
       return;
     }
 
     if (hasModuleRoute && routeProjectId) {
       setProject_id(routeProjectId);
-
-      axios
-        .get(
-          `${import.meta.env.VITE_API_URL}/projects/get_modules_by_class_id_student?id=${cid}`,
-          {
-            headers: authHeader(),
-          },
-        )
-        .then((res) => {
-          const modules: ModuleObjectLite[] = Array.isArray(res.data)
-            ? res.data.map((item: unknown) =>
-              normalizeMaybeJson<ModuleObjectLite>(item),
-            )
-            : [];
-
-          const selectedModule =
-            modules.find((item) => Number(item.Id) === Number(moduleId)) ||
-            null;
-
-          if (selectedModule) {
-            setModuleName(selectedModule.Name || "");
-          }
-        })
-        .catch(() => {
-          setModuleName("");
-        });
+      loadModulePresentationStatus(routeProjectId);
 
       axios
         .get(
@@ -810,13 +1126,17 @@ const StudentUpload = () => {
         },
       )
       .then((res) => {
+        const activeProjectId = Number(res.data[5] || 0);
         setProject_name(res.data[3]);
         setDueDate(res.data[4]);
-        setProject_id(Number(res.data[5] || 0));
+        setProject_id(activeProjectId);
+        loadModulePresentationStatus(activeProjectId);
       })
       .catch(() => {
         setProject_name("");
         setProject_id(-1);
+        setHasModulePresentation(false);
+        setModulePresentationFileName("");
       });
   }
 
@@ -836,6 +1156,34 @@ const StudentUpload = () => {
       )
       .then((res) => downloadBlobResponse(res, "assignment_description"))
       .catch((err) => console.error("Download failed:", err));
+  };
+
+  const downloadModulePresentation = () => {
+    const params = moduleId
+      ? { module_id: moduleId }
+      : { project_id };
+
+    if ((!moduleId && project_id <= 0) || !hasModulePresentation) return;
+
+    axios
+      .get(
+        `${import.meta.env.VITE_API_URL}/projects/module_presentation`,
+        {
+          headers: authHeader(),
+          params,
+          responseType: "blob",
+        },
+      )
+      .then((res) =>
+        downloadBlobResponse(
+          res,
+          modulePresentationFileName || "module_presentation",
+        ),
+      )
+      .catch(() => {
+        setError_Message("The module presentation could not be downloaded.");
+        setIsErrorMessageHidden(false);
+      });
   };
 
   function submitSuggestions() {
@@ -889,7 +1237,9 @@ const StudentUpload = () => {
 
     if (isCoolingDown) {
       setError_Message(
-        `Please wait ${formatCooldown(cooldownRemainingSeconds)} before submitting again.`,
+        canSkipCooldown
+          ? `Please wait ${formatCooldown(cooldownRemainingSeconds)} or skip the timer for ${cooldownSkipCost} stars. Test your code in your local deployment before submitting again.`
+          : `Please wait ${formatCooldown(cooldownRemainingSeconds)} before submitting again. Test your code in your local deployment first.`,
       );
       setIsErrorMessageHidden(false);
       return;
@@ -957,7 +1307,21 @@ const StudentUpload = () => {
         headers: authHeader(),
       })
       .then((res) => {
-        startSubmissionCooldown(Number(res?.data?.cooldown_seconds) || SUBMISSION_COOLDOWN_SECONDS);
+        startSubmissionCooldown(Number(res?.data?.cooldown_seconds ?? 0));
+        setIncentives((previous) => ({
+          ...(previous || {}),
+          stars: Number(res?.data?.stars ?? previous?.stars ?? 0),
+          star_balance: Number(res?.data?.stars ?? previous?.star_balance ?? 0),
+          submission_attempt_count: Number(
+            res?.data?.submission_attempt_count ??
+            previous?.submission_attempt_count ??
+            0,
+          ),
+          next_attempt_number: Number(
+            res?.data?.next_attempt_number ?? previous?.next_attempt_number ?? 1,
+          ),
+          submission_cooldown_seconds: Number(res?.data?.cooldown_seconds ?? 0),
+        }));
 
         const sid = getPayloadSubmissionId(res?.data);
 
@@ -977,6 +1341,24 @@ const StudentUpload = () => {
 
         if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
           startSubmissionCooldown(retryAfterSeconds);
+          setIncentives((previous) => ({
+            ...(previous || {}),
+            submission_attempt_count: Number(
+              err.response?.data?.submission_attempt_count ??
+              previous?.submission_attempt_count ??
+              0,
+            ),
+            next_attempt_number: Number(
+              err.response?.data?.next_attempt_number ??
+              previous?.next_attempt_number ??
+              1,
+            ),
+            submission_cooldown_seconds: Number(
+              err.response?.data?.cooldown_seconds ??
+              previous?.submission_cooldown_seconds ??
+              retryAfterSeconds,
+            ),
+          }));
         }
 
         setError_Message(err.response?.data?.message || "Upload failed.");
@@ -1100,7 +1482,10 @@ const StudentUpload = () => {
       <div className="pageTitle">Student Upload</div>
 
       <div className="student-upload-shell">
-        <section className="panel panel-upload" aria-label="Upload Assignment">
+        <section
+          className="panel panel-upload"
+          aria-label={passedAllTests ? "Assignment Complete" : "Upload Assignment"}
+        >
           <header className="panel-header assignment-quest-hero">
             <div className="assignment-quest-copy">
               <h1 className="panel-title panel-title--project">
@@ -1122,10 +1507,19 @@ const StudentUpload = () => {
                 <button
                   type="button"
                   className="presentation-download"
-                  disabled
-                  aria-disabled="true"
-                  aria-label="Download presentation unavailable"
-                  title="Download presentation unavailable"
+                  onClick={downloadModulePresentation}
+                  disabled={!hasModulePresentation}
+                  aria-disabled={!hasModulePresentation}
+                  aria-label={
+                    hasModulePresentation
+                      ? "Download module presentation"
+                      : "Module presentation unavailable"
+                  }
+                  title={
+                    hasModulePresentation
+                      ? `Download ${modulePresentationFileName || "module presentation"}`
+                      : "No presentation has been saved for this module"
+                  }
                 >
                   <FaFilePowerpoint aria-hidden="true" />
                   <span>Download Presentation</span>
@@ -1150,6 +1544,27 @@ const StudentUpload = () => {
                   {checkedPassedAll
                     ? `${testcaseProgress.passed} / ${testcaseProgress.total} testcases passed`
                     : "Checking testcases..."}
+                </div>
+              </div>
+
+              <div className="student-stars-card" aria-label="Student stars and possible reward">
+                <FaStar aria-hidden="true" />
+                <div className="student-stars-card__body">
+                  <div className="student-stars-card__topline">
+                    <div>
+                      <div className="student-stars-card__count">
+                        {formatStarValue(starBalance)}
+                      </div>
+                      <div className="student-stars-card__label">Stars available</div>
+                    </div>
+                  </div>
+
+                  <div className="student-stars-card__reward">
+                    {rewardSummaryText}
+                  </div>
+                  <div className="student-stars-card__timer">
+                    {earlyBonusTimerText}
+                  </div>
                 </div>
               </div>
 
@@ -1183,18 +1598,67 @@ const StudentUpload = () => {
             </div>
           </header>
 
-          <form
-            className={`upload-form ${isLoading ? "is-loading" : ""}`}
-            onSubmit={handleSubmit}
-          >
+          {passedAllTests ? (
+            <section
+              className="assignment-complete-screen"
+              role="status"
+              aria-live="polite"
+              aria-labelledby="assignment-complete-title"
+            >
+              <div className="assignment-complete-screen__content">
+                <span
+                  className="assignment-complete-screen__icon"
+                  aria-hidden="true"
+                >
+                  <FaCheckCircle />
+                </span>
+                <p className="assignment-complete-screen__eyebrow">
+                  Submission complete
+                </p>
+                <h2 id="assignment-complete-title">
+                  You passed all testcases!
+                </h2>
+                <p>
+                  You&apos;re finished
+                  {isCheckpoint
+                    ? " with this checkpoint"
+                    : " with this assignment"}
+                  . Additional submissions are disabled.
+                </p>
+
+                {previousSubmissionId ? (
+                  <Link
+                    to={latestSubmissionHref}
+                    className="assignment-complete-screen__link"
+                  >
+                    <FaEye aria-hidden="true" />
+                    <span>View previous testcases</span>
+                    <FaExternalLinkAlt aria-hidden="true" />
+                  </Link>
+                ) : (
+                  <span className="assignment-complete-screen__link is-disabled">
+                    Previous testcases unavailable
+                  </span>
+                )}
+              </div>
+            </section>
+          ) : (
+            <form
+              className={`upload-form ${isLoading ? "is-loading" : ""}`}
+              onSubmit={handleSubmit}
+            >
             <div className="dropzone">
               <div
-                className="file-drop-area"
-                onDragOver={(e) => e.preventDefault()}
+                className={`file-drop-area ${isCoolingDown ? "is-cooldown-locked" : ""}`}
+                aria-disabled={isCoolingDown}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (isCoolingDown) e.dataTransfer.dropEffect = "none";
+                }}
                 onDrop={(e) => {
                   e.preventDefault();
 
-                  if (passedAllTests) return;
+                  if (passedAllTests || isCoolingDown) return;
 
                   const dropped = Array.from(e.dataTransfer.files || []);
                   const valid = dropped.filter((f) =>
@@ -1230,44 +1694,14 @@ const StudentUpload = () => {
                   setFiles(valid);
                 }}
               >
-                {passedAllTests ? (
-                  <div
-                    className="complete-message"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <FaCheckCircle
-                      className="complete-icon"
-                      aria-hidden="true"
-                    />
-                    <h2 className="complete-title">All tests passed!</h2>
-                    <p className="complete-text">
-                      You&apos;re finished
-                      {isCheckpoint
-                        ? " with this checkpoint"
-                        : " with this assignment"}
-                      . Further submissions are disabled.
-                    </p>
-
-                    {previousSubmissionId ? (
-                      <Link to={latestSubmissionHref} className="complete-link">
-                        View your latest results{" "}
-                        <FaExternalLinkAlt aria-hidden="true" />
-                      </Link>
-                    ) : (
-                      <span className="complete-link is-disabled">
-                        Latest results unavailable
-                      </span>
-                    )}
-                  </div>
-                ) : !files.length ? (
+                {!files.length ? (
                   <>
                     <input
                       type="file"
                       className="file-input"
                       accept=".py,.java,.c,.rkt"
                       multiple
-                      disabled={passedAllTests}
+                      disabled={passedAllTests || isCoolingDown}
                       onChange={handleFileChange}
                     />
 
@@ -1293,6 +1727,7 @@ const StudentUpload = () => {
                       aria-label="Clear selected files"
                       title="Clear selected files"
                       onClick={() => setFiles([])}
+                      disabled={isCoolingDown}
                     >
                       <FaExchangeAlt aria-hidden="true" />
                     </button>
@@ -1327,6 +1762,62 @@ const StudentUpload = () => {
                 )}
               </div>
 
+              {isCooldownStateLoading && !passedAllTests ? (
+                <div
+                  className="submission-cooldown-lock is-checking"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="submission-cooldown-lock__content">
+                    <FaClock aria-hidden="true" />
+                    <h2>Checking submission cooldown</h2>
+                    <p>Verifying whether this project is ready for another submission.</p>
+                  </div>
+                </div>
+              ) : isCoolingDown && !passedAllTests ? (
+                <div
+                  className="submission-cooldown-lock"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="submission-cooldown-lock__content">
+                    <FaLock aria-hidden="true" />
+                    <h2>{submissionTypeLabel} cooldown active</h2>
+                    <p className="submission-cooldown-lock__timer">
+                      Attempt {nextAttemptNumber} unlocks in{" "}
+                      {formatCooldown(cooldownRemainingSeconds)}
+                    </p>
+                    <p>
+                      Test your code in your local deployment before submitting it again.
+                    </p>
+                    <Link
+                      to={latestSubmissionHref || getResultsHref()}
+                      className="previous-submission-button submission-cooldown-view-button"
+                      aria-label="View latest submission"
+                    >
+                      <FaEye aria-hidden="true" />
+                      <span>View Submission</span>
+                    </Link>
+                    <button
+                      type="button"
+                      className={`skip-cooldown-button ${!canSkipCooldown || isSkippingCooldown ? "disabled" : ""}`}
+                      disabled={!canSkipCooldown || isSkippingCooldown}
+                      onClick={() => setIsSkipConfirmationOpen(true)}
+                      title={
+                        canSkipCooldown
+                          ? `Spend ${cooldownSkipCost} ${cooldownSkipStarLabel} to skip the timer`
+                          : `You need ${cooldownSkipCost} ${cooldownSkipStarLabel} to skip the timer`
+                      }
+                    >
+                      <FaForward aria-hidden="true" />
+                      {isSkippingCooldown
+                        ? "Skipping..."
+                        : `Skip Timer (${cooldownSkipCost} ${cooldownSkipStarLabel})`}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {project_id === -1 && (
                 <div
                   className="no-active-project-overlay"
@@ -1347,43 +1838,130 @@ const StudentUpload = () => {
             </div>
 
             <div className="actions">
-              <div
-                className={`tbs-submission-status ${isCoolingDown ? "is-cooling" : "is-ready"}`}
-                role="status"
-                aria-live="polite"
-              >
-                <div className="tbs-submission-status__iconWrap" aria-hidden="true">
-                  {isCoolingDown ? (
-                    <FaClock className="tbs-submission-status__icon" />
-                  ) : (
-                    <FaInfoCircle className="tbs-submission-status__icon" />
-                  )}
-                </div>
-
-                <div className="tbs-submission-status__copy">
-                  <div className="tbs-submission-status__title">
-                    {isCoolingDown
-                      ? `Next submission available in ${formatCooldown(cooldownRemainingSeconds)}`
-                      : "Submission cooldown rule"}
-                  </div>
-
-                  <div className="tbs-submission-status__text">
-                    {isCoolingDown
-                      ? "A 2 minute cooldown applies after every submission"
-                      : "After each submission, you must wait 2 minutes before submitting again"}
-                  </div>
-                </div>
-              </div>
-
               <button
                 type="submit"
                 disabled={!is_allowed_to_submit || !canSubmit || passedAllTests || isLoading}
                 className={`primary ${!is_allowed_to_submit || !canSubmit || isLoading ? "disabled" : ""}`}
               >
-                {isCoolingDown ? "Cooling Down" : "Upload"}
+                {isCooldownStateLoading ? "Checking Cooldown" : isCoolingDown ? "Cooling Down" : "Upload"}
               </button>
             </div>
-          </form>
+
+            <section className="submission-cooldown-policy" aria-labelledby="submission-cooldown-title">
+              <div className="submission-cooldown-policy__header">
+                <div className="submission-cooldown-policy__heading">
+                  <span className="submission-cooldown-policy__icon" aria-hidden="true">
+                    <FaClock />
+                  </span>
+                  <div>
+                    <h2 id="submission-cooldown-title">
+                      {isCheckpoint ? "Checkpoint Cooldowns" : "Main Project Cooldowns"}
+                    </h2>
+                    <p>
+                      After each attempt, wait the time shown before submitting again.
+                    </p>
+                  </div>
+                </div>
+                <div
+                  className={[
+                    "submission-cooldown-policy__current",
+                    isCooldownStateLoading
+                      ? "is-loading"
+                      : isCoolingDown
+                        ? "is-active"
+                        : "is-ready",
+                  ].join(" ")}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {isCooldownStateLoading ? (
+                    <>
+                      <FaClock aria-hidden="true" />
+                      <span>Checking cooldown</span>
+                    </>
+                  ) : isCoolingDown ? (
+                    <>
+                      <FaClock aria-hidden="true" />
+                      <span>Cooldown ends in</span>
+                      <strong>{formatCooldown(cooldownRemainingSeconds)}</strong>
+                    </>
+                  ) : (
+                    <>
+                      <FaCheckCircle aria-hidden="true" />
+                      <span>Ready</span>
+                      <strong>Attempt {nextAttemptNumber}</strong>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <ol
+                className={`submission-cooldown-policy__grid ${isCheckpoint ? "is-checkpoint" : "is-main"}`}
+                aria-label={`${submissionTypeShortLabel} submission cooldown schedule`}
+              >
+                {(isCheckpoint ? CHECKPOINT_SCHEDULE : MAIN_SCHEDULE).map((item, index, arr) => {
+                  const isLast = index === arr.length - 1;
+                  const isCurrent =
+                    isCoolingDown &&
+                    (
+                      submissionAttemptCount === item.attempt ||
+                      (isLast && submissionAttemptCount >= item.attempt)
+                    );
+                  const isNext =
+                    !isCoolingDown &&
+                    (
+                      nextAttemptNumber === item.attempt ||
+                      (isLast && nextAttemptNumber >= item.attempt)
+                    );
+
+                  return (
+                    <li
+                      className={[
+                        "submission-cooldown-policy__step",
+                        isCurrent ? "is-current" : "",
+                        isNext ? "is-next" : "",
+                      ].filter(Boolean).join(" ")}
+                      key={item.attempt}
+                      aria-current={isCurrent ? "step" : undefined}
+                      aria-label={`${item.label}: ${item.value} cooldown afterward${isCurrent ? ", active cooldown" : isNext ? ", next cooldown" : ""}`}
+                    >
+                      <div className="submission-cooldown-policy__step-header">
+                        <span className="submission-cooldown-policy__attempt">
+                          {item.label}
+                        </span>
+                      </div>
+                      <span
+                        className="submission-cooldown-policy__connector"
+                        aria-hidden="true"
+                      >
+                        <span>After this attempt</span>
+                        <FaArrowRight aria-hidden="true" />
+                      </span>
+                      <div className="submission-cooldown-policy__value">
+                        {isCurrent ? (
+                          <span className="submission-cooldown-policy__state is-current">
+                            Active
+                          </span>
+                        ) : isNext ? (
+                          <span className="submission-cooldown-policy__state">
+                            Next cooldown
+                          </span>
+                        ) : null}
+                        <span className="submission-cooldown-policy__value-icon" aria-hidden="true">
+                          <FaClock />
+                        </span>
+                        <span className="submission-cooldown-policy__value-copy">
+                          <span>Cooldown</span>
+                          <strong>{item.value}</strong>
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+            </form>
+          )}
 
           <div className="below-upload">
             <ErrorMessage
@@ -1393,6 +1971,84 @@ const StudentUpload = () => {
           </div>
         </section>
       </div>
+
+      {isSkipConfirmationOpen ? (
+        <div
+          className="skip-cooldown-confirmation"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !isSkippingCooldown
+            ) {
+              setIsSkipConfirmationOpen(false);
+            }
+          }}
+        >
+          <div
+            className="skip-cooldown-confirmation__dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="skip-cooldown-confirmation-title"
+            aria-describedby="skip-cooldown-confirmation-description"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !isSkippingCooldown) {
+                setIsSkipConfirmationOpen(false);
+              }
+            }}
+          >
+            <span
+              className="skip-cooldown-confirmation__icon"
+              aria-hidden="true"
+            >
+              <FaStar />
+            </span>
+            <h2 id="skip-cooldown-confirmation-title">
+              Spend {cooldownSkipCost} {cooldownSkipStarLabel}?
+            </h2>
+            <p id="skip-cooldown-confirmation-description">
+              This will immediately end the {submissionTypeShortLabel.toLowerCase()}{" "}
+              submission cooldown. This purchase cannot be undone.
+            </p>
+
+            <div className="skip-cooldown-confirmation__balance">
+              <span>
+                Current balance
+                <strong>{formatStarCount(starBalance)}</strong>
+              </span>
+              <FaArrowRight aria-hidden="true" />
+              <span>
+                Balance after
+                <strong>
+                  {formatStarCount(Math.max(0, starBalance - cooldownSkipCost))}
+                </strong>
+              </span>
+            </div>
+
+            <div className="skip-cooldown-confirmation__actions">
+              <button
+                type="button"
+                className="skip-cooldown-confirmation__cancel"
+                disabled={isSkippingCooldown}
+                onClick={() => setIsSkipConfirmationOpen(false)}
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="skip-cooldown-confirmation__confirm"
+                disabled={isSkippingCooldown}
+                onClick={skipSubmissionCooldown}
+              >
+                <FaForward aria-hidden="true" />
+                {isSkippingCooldown
+                  ? "Spending..."
+                  : `Confirm and spend ${cooldownSkipCost} ${cooldownSkipStarLabel}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

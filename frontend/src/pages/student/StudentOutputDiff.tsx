@@ -441,6 +441,7 @@ export function StudentOutputDiff() {
                 disableCopy
                 isPractice={isPractice}
                 practiceProblemId={practiceProblemId}
+                allowTestcaseInputPurchases
             />
 
         </div>

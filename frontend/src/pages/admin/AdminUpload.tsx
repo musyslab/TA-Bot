@@ -40,6 +40,13 @@ interface CheckpointOption {
     number: number
     name: string
     enabled: boolean
+    completed: boolean
+    available: boolean
+}
+
+interface UploadTargetsResponse {
+    checkpoints?: CheckpointOption[]
+    mainAvailable?: boolean
 }
 
 interface ClassAccessResponse {
@@ -68,6 +75,9 @@ interface UploadPageState {
     moduleCheckpointsEnabledById: Record<number, boolean>
     checkpointsByProjectId: Record<number, CheckpointOption[]>
     selectedCheckpointId: number
+    mainTargetAvailable: boolean
+    targetAvailabilityLoaded: boolean
+    isTargetLoading: boolean
 }
 
 interface AdminUploadPageProps {
@@ -170,6 +180,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             moduleCheckpointsEnabledById: {},
             checkpointsByProjectId: {},
             selectedCheckpointId: 0,
+            mainTargetAvailable: false,
+            targetAvailabilityLoaded: false,
+            isTargetLoading: false,
             files: [],
             mainJavaFileName: '',
         }
@@ -214,6 +227,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             moduleCheckpointsEnabledById: {},
             checkpointsByProjectId: {},
             selectedCheckpointId: 0,
+            mainTargetAvailable: false,
+            targetAvailabilityLoaded: false,
+            isTargetLoading: false,
             files: [],
             mainJavaFileName: '',
             isUploading: false,
@@ -226,6 +242,9 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             module_id: 0,
             project_id: 0,
             selectedCheckpointId: 0,
+            mainTargetAvailable: false,
+            targetAvailabilityLoaded: false,
+            isTargetLoading: false,
             files: [],
             mainJavaFileName: '',
             isUploading: false,
@@ -345,37 +364,79 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
         }
     }
 
-    private async loadCheckpointsForProject(projectId: number) {
-        if (!(projectId > 0)) return
+    private async loadAvailableTargets(projectId: number, studentId: number) {
+        if (!(projectId > 0) || !(studentId > 0)) return
+
+        this.setState({
+            isTargetLoading: true,
+            targetAvailabilityLoaded: false,
+            mainTargetAvailable: false,
+        })
 
         try {
-            const res = await axios.get(
-                import.meta.env.VITE_API_URL + `/projects/list_checkpoints?project_id=${projectId}`,
-                { headers: this.authHeaders() }
+            const res = await axios.get<UploadTargetsResponse>(
+                import.meta.env.VITE_API_URL + `/upload/available_targets`,
+                {
+                    headers: this.authHeaders(),
+                    params: {
+                        class_id: this.state.class_id,
+                        project_id: projectId,
+                        student_id: studentId,
+                    },
+                }
             )
 
-            const problems = Array.isArray(res.data?.problems) ? res.data.problems : []
+            if (
+                this.state.project_id !== projectId ||
+                this.state.student_id !== studentId
+            ) {
+                return
+            }
 
+            const problems = Array.isArray(res.data?.checkpoints) ? res.data.checkpoints : []
             const rows: CheckpointOption[] = problems.map((checkpoint: any, idx: number) => ({
                 id: Number(checkpoint?.id),
                 number: Number(checkpoint?.number ?? idx + 1),
                 name: String(checkpoint?.name ?? `Checkpoint ${idx + 1}`),
                 enabled: checkpoint?.enabled !== false,
+                completed: checkpoint?.completed === true,
+                available: checkpoint?.available === true,
             }))
+
+            const nextIncomplete = rows.find(
+                (checkpoint) => checkpoint.available && !checkpoint.completed
+            )
+            const mainAvailable = res.data?.mainAvailable === true
 
             this.setState((prev) => ({
                 checkpointsByProjectId: {
                     ...prev.checkpointsByProjectId,
                     [projectId]: rows,
                 },
+                selectedCheckpointId: nextIncomplete?.id ?? 0,
+                mainTargetAvailable: mainAvailable,
+                targetAvailabilityLoaded: true,
+                isTargetLoading: false,
             }))
-        } catch {
+        } catch (err: any) {
+            if (
+                this.state.project_id !== projectId ||
+                this.state.student_id !== studentId
+            ) {
+                return
+            }
+
             this.setState((prev) => ({
                 checkpointsByProjectId: {
                     ...prev.checkpointsByProjectId,
                     [projectId]: [],
                 },
+                selectedCheckpointId: 0,
+                mainTargetAvailable: false,
+                targetAvailabilityLoaded: false,
+                isTargetLoading: false,
             }))
+            this.setError(err.response?.data?.message ?? 'Error loading available assignments')
         }
     }
 
@@ -431,15 +492,14 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                 module_id: nextModuleId,
                 project_id: nextProjectId,
                 selectedCheckpointId: 0,
+                mainTargetAvailable: false,
+                targetAvailabilityLoaded: false,
                 files: [],
                 mainJavaFileName: '',
             },
             () => {
-                if (
-                    nextProjectId > 0 &&
-                    this.state.moduleCheckpointsEnabledById[nextModuleId] !== false
-                ) {
-                    this.loadCheckpointsForProject(nextProjectId)
+                if (nextProjectId > 0 && this.state.student_id > 0) {
+                    this.loadAvailableTargets(nextProjectId, this.state.student_id)
                 }
             }
         )
@@ -492,12 +552,31 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
             !(this.state.class_id > 0) ||
             !(this.state.student_id > 0) ||
             !(this.state.module_id > 0) ||
-            !(this.state.project_id > 0)
+            !(this.state.project_id > 0) ||
+            !this.state.targetAvailabilityLoaded ||
+            this.state.isTargetLoading
 
         if (uploadDisabled) {
             this.setState({
                 isErrorMessageHidden: false,
-                error_message: 'Please select a student and module before uploading.',
+                error_message: 'Please select a student and an available assignment before uploading.',
+            })
+            return
+        }
+
+        const selectedCheckpoint = this.state.selectedCheckpointId > 0
+            ? (this.state.checkpointsByProjectId[this.state.project_id] ?? []).find(
+                (checkpoint) => checkpoint.id === this.state.selectedCheckpointId
+            )
+            : null
+        const selectedTargetAvailable = selectedCheckpoint
+            ? selectedCheckpoint.available
+            : this.state.mainTargetAvailable
+
+        if (!selectedTargetAvailable) {
+            this.setState({
+                isErrorMessageHidden: false,
+                error_message: 'That assignment is locked. Complete or skip the earlier checkpoints first.',
             })
             return
         }
@@ -577,16 +656,34 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
 
         const disableStudent = this.state.isLoading || this.state.studentList.length === 0
         const disableModule = !studentChosen || this.state.isLoading || this.state.modules.length === 0
-        const disableUpload = !moduleChosen || !projectChosen || !studentChosen || this.state.isLoading
+        const checkpointRows = projectChosen
+            ? this.state.checkpointsByProjectId[this.state.project_id] ?? []
+            : []
+
+        const selectedCheckpoint = this.state.selectedCheckpointId > 0
+            ? checkpointRows.find(
+                (checkpoint) => checkpoint.id === this.state.selectedCheckpointId
+            )
+            : null
+        const selectedTargetAvailable = selectedCheckpoint
+            ? selectedCheckpoint.available
+            : this.state.mainTargetAvailable
+
+        const disableUpload =
+            !moduleChosen ||
+            !projectChosen ||
+            !studentChosen ||
+            this.state.isLoading ||
+            this.state.isTargetLoading ||
+            !this.state.targetAvailabilityLoaded ||
+            !selectedTargetAvailable
 
         const checkpointsEnabledForModule =
             moduleChosen && this.state.moduleCheckpointsEnabledById[this.state.module_id] !== false
 
-        const checkpointRows = checkpointsEnabledForModule && projectChosen
-            ? this.state.checkpointsByProjectId[this.state.project_id] ?? []
+        const enabledCheckpointRows = checkpointsEnabledForModule
+            ? checkpointRows.filter((checkpoint) => !!checkpoint.enabled)
             : []
-
-        const enabledCheckpointRows = checkpointRows.filter((checkpoint) => !!checkpoint.enabled)
 
         return (
             <>
@@ -689,12 +786,30 @@ class AdminUploadPage extends Component<AdminUploadPageProps, UploadPageState> {
                                                 })
                                             }
                                         }}
-                                        disabled={this.state.isLoading}
+                                        disabled={
+                                            this.state.isLoading ||
+                                            this.state.isTargetLoading ||
+                                            !this.state.targetAvailabilityLoaded
+                                        }
                                     >
-                                        <option value="main">Main Problem</option>
+                                        <option value="main" disabled={!this.state.mainTargetAvailable}>
+                                            {this.state.mainTargetAvailable
+                                                ? 'Main Problem'
+                                                : 'Main Problem (locked)'}
+                                        </option>
                                         {enabledCheckpointRows.map((checkpoint) => (
-                                            <option key={checkpoint.id} value={`checkpoint:${checkpoint.id}`}>
-                                                {`Checkpoint ${checkpoint.number}: ${checkpoint.name}`}
+                                            <option
+                                                key={checkpoint.id}
+                                                value={`checkpoint:${checkpoint.id}`}
+                                                disabled={!checkpoint.available}
+                                            >
+                                                {`Checkpoint ${checkpoint.number}: ${checkpoint.name}${
+                                                    checkpoint.completed
+                                                        ? ' (completed)'
+                                                        : checkpoint.available
+                                                            ? ''
+                                                            : ' (locked)'
+                                                }`}
                                             </option>
                                         ))}
                                     </select>

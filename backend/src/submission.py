@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import os
+import re
 import threading
 import requests
 import urllib3
@@ -20,45 +21,45 @@ from io import BytesIO
 from tap.parser import Parser
 from flask import jsonify
 from dependency_injector.wiring import inject, Provide
+from sqlalchemy import func
 from container import Container
 from urllib.parse import unquote
 import csv
 from io import StringIO
-from src.ai_suggestions import ERROR_DEFS
-from src.repositories.models import Checkpoints, ClassAssignments, Classes, Projects, StudentUploadState, Submissions, Testcases
+from src.ai_suggestions import GRADING_DEFAULT_DEFS_MAP
+from src.repositories.models import (
+    Checkpoints,
+    ClassAssignments,
+    Classes,
+    Modules,
+    Projects,
+    StudentCheckpointSkips,
+    StudentCooldownSkips,
+    StudentStarAwards,
+    StudentTestcaseInputPurchases,
+    StudentUploadState,
+    Submissions,
+    Users,
+    Testcases,
+)
 from src.repositories.database import db
-
-# Default grading error definitions (must match AdminGrading.tsx BASE_ERROR_DEFS).
-# We store them here so exports can resolve default point values when ErrorPointsJson
-# only contains overrides (for DB efficiency).
-ADMIN_GRADING_ERROR_DEFS = [
-    {"id": "MISSPELL", "label": "Spelling or word substitution error", "description": "A word or short phrase is wrong compared to expected output (including valid English words used incorrectly, missing/extra letters, or wrong small words) when the rest of the line is otherwise correct.", "points": 10},
-    {"id": "FORMAT", "label": "Formatting mismatch", "description": "Correct content but incorrect formatting (spacing/newlines/case/spelling/precision).", "points": 5},
-    {"id": "CONTENT", "label": "Missing or extra required content", "description": "Required value/line is missing, or additional unexpected value/line is produced.", "points": 20},
-    {"id": "ORDER", "label": "Order mismatch", "description": "Reads inputs or prints outputs in the wrong order relative to the required sequence.", "points": 15},
-    {"id": "INIT_STATE", "label": "Incorrect initialization", "description": "Uses uninitialized values or starts with the wrong initial state.", "points": 20},
-    {"id": "STATE_MISUSE", "label": "Incorrect variable or state use", "description": "Wrong variable used, wrong type behavior (truncation), overwritten state, or flag not managed correctly.", "points": 15},
-    {"id": "COMPUTE", "label": "Incorrect computation", "description": "Wrong formula, precedence, numeric operation, or derived value.", "points": 20},
-    {"id": "CONDITION", "label": "Incorrect condition logic", "description": "Incorrect comparison, boundary, compound logic, or missing edge case handling.", "points": 15},
-    {"id": "BRANCHING", "label": "Incorrect branching structure", "description": "Wrong if/elif/else structure (misbound else), missing default case, or missing break in selection-like logic.", "points": 15},
-    {"id": "LOOP", "label": "Incorrect loop logic", "description": "Wrong bounds/termination, update/control error, off-by-one, wrong nesting, or accumulation error.", "points": 20},
-    {"id": "INDEXING", "label": "Incorrect indexing or collection setup", "description": "Out-of-bounds, wrong base/range, or incorrect array/string/list setup (size or contents).", "points": 20},
-    {"id": "FUNCTIONS", "label": "Incorrect function behavior or use", "description": "Wrong return behavior (missing/ignored/wrong type) or incorrect function use (scope/order/unnecessary re-calls).", "points": 15},
-    {"id": "COMPILE", "label": "Program did not compile", "description": "Code fails to compile or run due to syntax errors, missing imports/includes, or build/runtime errors that prevent execution.", "points": 40},
-]
-
-ADMIN_GRADING_DEFAULT_DEFS_MAP = {
-    e["id"]: {
-        "label": e.get("label", e["id"]),
-        "description": e.get("description", ""),
-        "points": int(e.get("points", 0) or 0),
-    }
-    for e in ADMIN_GRADING_ERROR_DEFS
-}
 
 ui_clicks_log = "/tabot-files/project-files/code_view_clicks.log"
 
 submission_api = Blueprint('submission_api', __name__)
+
+CHECKPOINT_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 60, 3: 120, 4: 300}
+CHECKPOINT_SUBMISSION_COOLDOWN_MAX_SECONDS = 300
+MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT = {1: 0, 2: 120, 3: 300, 4: 600}
+MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS = 1200
+CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 1
+MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
+CHECKPOINT_TESTCASE_INPUT_COST_STARS = 1
+MAIN_PROJECT_TESTCASE_INPUT_COST_STARS = 2
+CHECKPOINT_COMPLETION_STARS = 1
+MAIN_PROJECT_COMPLETION_STARS = 3
+EARLY_START_MULTIPLIER = 2
+
 
 def parse_int(v, default: int = -1) -> int:
     try:
@@ -71,6 +72,23 @@ def parse_bool(v) -> bool:
         return v
     s = str(v or "").strip().lower()
     return s in ("1", "true", "yes", "y", "on")
+
+
+def submission_cooldown_skip_cost(checkpoint: bool) -> int:
+    return (
+        CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS
+        if checkpoint
+        else MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS
+    )
+
+
+def testcase_input_purchase_cost(checkpoint: bool) -> int:
+    return (
+        CHECKPOINT_TESTCASE_INPUT_COST_STARS
+        if checkpoint
+        else MAIN_PROJECT_TESTCASE_INPUT_COST_STARS
+    )
+
 
 def role_from_row(role_row, default: int = STUDENT_ROLE) -> int:
     if hasattr(role_row, "Role"):
@@ -293,17 +311,399 @@ def seconds_until(value: datetime | None) -> int:
     return max(0, int((value - current_utc_datetime()).total_seconds() + 0.999))
 
 
-def cooldown_lifted_at_from_mapping(mapping) -> datetime | None:
-    if "cooldown_seconds" in mapping:
-        seconds = parse_int(mapping.get("cooldown_seconds", 0), 0)
-        if seconds <= 0:
-            return None
-        return current_utc_datetime() + timedelta(seconds=seconds)
+def ensure_incentive_tables():
+    for model in (
+        StudentStarAwards,
+        StudentCheckpointSkips,
+        StudentCooldownSkips,
+        StudentTestcaseInputPurchases,
+    ):
+        try:
+            model.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            pass
 
-    if "cooldown_lifted_at" in mapping:
-        return parse_cooldown_lifted_at(mapping.get("cooldown_lifted_at"))
+
+def get_star_balance(user_id: int, class_id: int) -> int:
+    """Return awards minus every star purchase made in the class."""
+    ensure_incentive_tables()
+    user_id = int(user_id)
+    class_id = int(class_id)
+
+    awarded = db.session.query(
+        func.coalesce(func.sum(StudentStarAwards.AwardedStars), 0)
+    ).filter(
+        StudentStarAwards.UserId == user_id,
+        StudentStarAwards.ClassId == class_id,
+    ).scalar()
+
+    checkpoint_spent = db.session.query(
+        func.coalesce(func.sum(StudentCheckpointSkips.SpentStars), 0)
+    ).filter(
+        StudentCheckpointSkips.UserId == user_id,
+        StudentCheckpointSkips.ClassId == class_id,
+    ).scalar()
+
+    cooldown_spent = db.session.query(
+        func.coalesce(func.sum(StudentCooldownSkips.SpentStars), 0)
+    ).filter(
+        StudentCooldownSkips.UserId == user_id,
+        StudentCooldownSkips.ClassId == class_id,
+    ).scalar()
+
+    testcase_input_spent = db.session.query(
+        func.coalesce(func.sum(StudentTestcaseInputPurchases.SpentStars), 0)
+    ).filter(
+        StudentTestcaseInputPurchases.UserId == user_id,
+        StudentTestcaseInputPurchases.ClassId == class_id,
+    ).scalar()
+
+    return max(
+        0,
+        parse_int(awarded, 0)
+        - parse_int(checkpoint_spent, 0)
+        - parse_int(cooldown_spent, 0)
+        - parse_int(testcase_input_spent, 0),
+    )
+
+
+def project_window(project) -> tuple[datetime | None, datetime | None]:
+    module = getattr(project, "Module", None)
+
+    if module is None:
+        module_id = parse_int(getattr(project, "ModuleId", 0), 0)
+        if module_id > 0:
+            try:
+                module = Modules.query.filter(Modules.Id == module_id).first()
+            except Exception:
+                module = None
+
+    if module is None:
+        return None, None
+
+    start = parse_cooldown_lifted_at(getattr(module, "Start", None))
+    end = parse_cooldown_lifted_at(getattr(module, "End", None))
+
+    return start, end
+
+
+def early_start_deadline_for_project(project) -> datetime | None:
+    start, end = project_window(project)
+
+    if start is None or end is None or end <= start:
+        return None
+
+    return start + ((end - start) / 2)
+
+
+def assignment_started_early(
+    user_id: int,
+    project,
+    checkpoint: bool,
+    checkpoint_id: int,
+    early_deadline: datetime | None,
+) -> bool:
+    if project is None or early_deadline is None:
+        return False
+
+    query = Submissions.query.filter(
+        Submissions.User == int(user_id),
+        Submissions.Project == int(project.Id),
+        Submissions.IsCheckpoint == bool(checkpoint),
+    )
+
+    if checkpoint:
+        query = query.filter(Submissions.CheckpointId == int(checkpoint_id or 0))
+    else:
+        query = query.filter(Submissions.CheckpointId.is_(None))
+
+    rows = query.order_by(Submissions.Time.asc()).all()
+    first_started_at = None
+
+    for row in rows:
+        parsed = parse_submission_datetime_for_cooldown(getattr(row, "Time", None))
+        if parsed is None:
+            continue
+        if first_started_at is None or parsed < first_started_at:
+            first_started_at = parsed
+
+    return first_started_at is not None and first_started_at <= early_deadline
+
+
+def existing_star_award_for_scope(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint: bool,
+    checkpoint_id: int,
+):
+    if project_id <= 0:
+        return None
+
+    ensure_incentive_tables()
+    award_type = "checkpoint_completion" if checkpoint else "main_completion"
+    checkpoint_key = int(checkpoint_id or 0) if checkpoint else 0
+
+    return StudentStarAwards.query.filter(
+        StudentStarAwards.UserId == int(user_id),
+        StudentStarAwards.ClassId == int(class_id),
+        StudentStarAwards.ProjectId == int(project_id),
+        StudentStarAwards.CheckpointId == checkpoint_key,
+        StudentStarAwards.AwardType == award_type,
+    ).first()
+
+
+def scoped_reward_payload(
+    user_id: int,
+    class_id: int,
+    project_id: int = 0,
+    checkpoint: bool = False,
+    checkpoint_id: int = 0,
+) -> dict:
+    base_stars = CHECKPOINT_COMPLETION_STARS if checkpoint else MAIN_PROJECT_COMPLETION_STARS
+    project = Projects.query.filter(Projects.Id == int(project_id)).first() if project_id > 0 else None
+    early_deadline = early_start_deadline_for_project(project) if project is not None else None
+    early_remaining_seconds = seconds_until(early_deadline)
+    early_window_open = early_deadline is not None and early_remaining_seconds > 0
+    started_early = early_window_open or assignment_started_early(
+        user_id,
+        project,
+        checkpoint,
+        checkpoint_id,
+        early_deadline,
+    )
+    existing_award = existing_star_award_for_scope(
+        user_id,
+        class_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
+
+    if existing_award is not None:
+        awarded_stars = max(0, parse_int(getattr(existing_award, "Stars", 0), 0))
+        awarded_base = max(0, parse_int(getattr(existing_award, "BaseStars", base_stars), base_stars))
+        awarded_multiplier = max(1, parse_int(getattr(existing_award, "Multiplier", 1), 1))
+
+        return {
+            "checkpoint_completion_stars": CHECKPOINT_COMPLETION_STARS,
+            "main_project_completion_stars": MAIN_PROJECT_COMPLETION_STARS,
+            "early_start_multiplier": EARLY_START_MULTIPLIER,
+            "early_start_deadline": serialize_cooldown_lifted_at(early_deadline),
+            "early_start_remaining_seconds": early_remaining_seconds,
+            "early_start_window_open": early_window_open,
+            "reward_base_stars": awarded_base,
+            "reward_multiplier": awarded_multiplier,
+            "reward_total_stars": awarded_stars,
+            "reward_already_awarded": True,
+            "reward_started_early": bool(getattr(existing_award, "StartedEarly", False)),
+        }
+
+    multiplier = EARLY_START_MULTIPLIER if started_early else 1
+
+    return {
+        "checkpoint_completion_stars": CHECKPOINT_COMPLETION_STARS,
+        "main_project_completion_stars": MAIN_PROJECT_COMPLETION_STARS,
+        "early_start_multiplier": EARLY_START_MULTIPLIER,
+        "early_start_deadline": serialize_cooldown_lifted_at(early_deadline),
+        "early_start_remaining_seconds": early_remaining_seconds,
+        "early_start_window_open": early_window_open,
+        "reward_base_stars": base_stars,
+        "reward_multiplier": multiplier,
+        "reward_total_stars": base_stars * multiplier,
+        "reward_already_awarded": False,
+        "reward_started_early": started_early,
+    }
+
+
+def incentive_payload(
+    user_id: int,
+    class_id: int,
+    project_id: int = 0,
+    checkpoint: bool = False,
+    checkpoint_id: int = 0,
+) -> dict:
+    balance = get_star_balance(user_id, class_id)
+    cooldown_skip_cost = submission_cooldown_skip_cost(checkpoint)
+    cooldown_state = submission_cooldown_state(
+        user_id,
+        class_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
+    payload = {
+        "stars": balance,
+        "star_balance": balance,
+        "checkpoint_cooldown_skip_cost": CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "main_project_cooldown_skip_cost": MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS,
+        "cooldown_skip_cost": cooldown_skip_cost,
+        **cooldown_state,
+    }
+    payload.update(scoped_reward_payload(user_id, class_id, project_id, checkpoint, checkpoint_id))
+    return payload
+
+
+def parse_submission_datetime_for_cooldown(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(raw)
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
+    except Exception:
+        pass
+
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%m/%d/%y %H:%M:%S"):
+        try:
+            return datetime.strptime(raw[:19], fmt)
+        except Exception:
+            pass
 
     return None
+
+
+def submission_cooldown_seconds_for_attempt_count(
+    completed_attempts: int,
+    is_checkpoint: bool,
+) -> int:
+    completed_attempts = max(0, int(completed_attempts or 0))
+
+    if completed_attempts <= 0:
+        return 0
+
+    schedule = (
+        CHECKPOINT_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+        if is_checkpoint
+        else MAIN_SUBMISSION_COOLDOWN_AFTER_ATTEMPT
+    )
+    max_seconds = (
+        CHECKPOINT_SUBMISSION_COOLDOWN_MAX_SECONDS
+        if is_checkpoint
+        else MAIN_SUBMISSION_COOLDOWN_MAX_SECONDS
+    )
+
+    return schedule.get(completed_attempts, max_seconds)
+
+
+def submission_scope_query(
+    user_id: int,
+    project_id: int,
+    checkpoint: bool,
+    checkpoint_id: int,
+):
+    query = Submissions.query.filter(
+        Submissions.User == int(user_id),
+        Submissions.Project == int(project_id),
+        Submissions.IsCheckpoint == bool(checkpoint),
+    )
+
+    if checkpoint:
+        return query.filter(Submissions.CheckpointId == int(checkpoint_id or 0))
+
+    return query.filter(Submissions.CheckpointId.is_(None))
+
+
+def pending_cooldown_skip_exists(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint_id: int,
+    submitted_at: datetime | None,
+) -> bool:
+    query = StudentCooldownSkips.query.filter(
+        StudentCooldownSkips.UserId == int(user_id),
+        StudentCooldownSkips.ClassId == int(class_id),
+        StudentCooldownSkips.ProjectId == int(project_id),
+        StudentCooldownSkips.CheckpointId == int(checkpoint_id or 0),
+        StudentCooldownSkips.UsedAt.is_(None),
+    )
+
+    if submitted_at is not None:
+        submitted_at_utc = (
+            submitted_at.astimezone(timezone.utc).replace(tzinfo=None)
+            if submitted_at.tzinfo is not None
+            else submitted_at.astimezone().astimezone(timezone.utc).replace(tzinfo=None)
+        )
+        query = query.filter(StudentCooldownSkips.CreatedAt >= submitted_at_utc)
+
+    return query.first() is not None
+
+
+def submission_cooldown_state(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint: bool,
+    checkpoint_id: int,
+) -> dict:
+    if project_id <= 0:
+        return {
+            "submission_attempt_count": 0,
+            "next_attempt_number": 1,
+            "submission_cooldown_seconds": 0,
+            "cooldown_remaining_seconds": 0,
+            "cooldown_lifted_at": None,
+        }
+
+    scope_query = submission_scope_query(
+        user_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
+    completed_attempts = scope_query.count()
+    next_attempt = completed_attempts + 1
+    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(
+        completed_attempts,
+        checkpoint,
+    )
+    latest = scope_query.order_by(Submissions.Time.desc(), Submissions.Id.desc()).first()
+    submitted_at = parse_submission_datetime_for_cooldown(
+        getattr(latest, "Time", None) if latest is not None else None
+    )
+
+    remaining_seconds = 0
+    cooldown_lifted_at = None
+
+    if submitted_at is not None and cooldown_seconds > 0:
+        # Submission timestamps are written with datetime.now() in upload.py and
+        # stored without timezone information. Compare them with the same
+        # server-local clock, then return a real UTC deadline to the browser.
+        elapsed_seconds = (datetime.now() - submitted_at).total_seconds()
+        remaining_seconds = max(
+            0,
+            int(cooldown_seconds - elapsed_seconds + 0.999),
+        )
+        if remaining_seconds > 0:
+            cooldown_lifted_at = current_utc_datetime() + timedelta(
+                seconds=remaining_seconds
+            )
+
+        if remaining_seconds > 0 and pending_cooldown_skip_exists(
+            user_id,
+            class_id,
+            project_id,
+            checkpoint_id if checkpoint else 0,
+            submitted_at,
+        ):
+            remaining_seconds = 0
+            cooldown_lifted_at = None
+
+    return {
+        "submission_attempt_count": completed_attempts,
+        "next_attempt_number": next_attempt,
+        "submission_cooldown_seconds": cooldown_seconds,
+        "cooldown_remaining_seconds": remaining_seconds,
+        "cooldown_lifted_at": serialize_cooldown_lifted_at(cooldown_lifted_at),
+    }
 
 
 def upload_state_scope_from_mapping(mapping) -> tuple[int, int, bool, int]:
@@ -395,8 +795,8 @@ def submission_matches_upload_state(submission, project_id: int, checkpoint: boo
 
 
 def serialize_student_upload_state(
-    row,
     submission_repo: SubmissionRepository,
+    class_id: int,
     project_id: int,
     checkpoint: bool,
     checkpoint_id: int,
@@ -412,20 +812,18 @@ def serialize_student_upload_state(
         if latest_submission is not None
         else None
     )
-
-    cooldown_lifted_at = getattr(row, "CooldownLiftedAt", None) if row else None
-
-    if cooldown_lifted_at is not None and cooldown_lifted_at <= current_utc_datetime():
-        if row is not None:
-            db.session.delete(row)
-            db.session.commit()
-        cooldown_lifted_at = None
+    cooldown_state = submission_cooldown_state(
+        int(current_user.Id),
+        class_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
 
     return {
         "last_submission_id": latest_submission_id,
         "previous_submission_id": latest_submission_id,
-        "cooldown_lifted_at": serialize_cooldown_lifted_at(cooldown_lifted_at),
-        "cooldown_remaining_seconds": seconds_until(cooldown_lifted_at),
+        **cooldown_state,
     }
 
 
@@ -541,15 +939,20 @@ def apply_hidden_flags_to_results(output_json: str, project_id: int, checkpoint_
             q = q.filter(Testcases.CheckpointId == int(checkpoint_id))
         else:
             q = q.filter(Testcases.CheckpointId.is_(None))
-        tcs = q.all()
-        hidden_by_name = {
-            (str(getattr(tc, "Name", "") or "").strip().lower()): bool(getattr(tc, "Hidden", False))
-            for tc in (tcs or [])
-        }
+        tcs = q.order_by(Testcases.SortOrder.asc(), Testcases.Id.asc()).all()
+        testcase_meta_by_name = {}
+        for index, tc in enumerate(tcs or [], start=1):
+            key = str(getattr(tc, "Name", "") or "").strip().lower()
+            testcase_meta_by_name.setdefault(key, []).append({
+                "hidden": bool(getattr(tc, "Hidden", False)),
+                "order": index,
+            })
 
-        for r in results:
+        name_occurrences = {}
+        for original_index, r in enumerate(results):
             if not isinstance(r, dict):
                 continue
+            r.pop("description", None)
             name = None
             if isinstance(r.get("name"), str):
                 name = r.get("name")
@@ -557,14 +960,267 @@ def apply_hidden_flags_to_results(output_json: str, project_id: int, checkpoint_
                 name = r["test"]["name"]
 
             key = (str(name or "").strip().lower())
-            is_hidden = hidden_by_name.get(key, False)
-            r["hidden"] = is_hidden
+            occurrence = int(name_occurrences.get(key, 0))
+            name_occurrences[key] = occurrence + 1
+            matches = testcase_meta_by_name.get(key, [])
+            metadata = matches[occurrence] if occurrence < len(matches) else None
+
+            r["hidden"] = bool(metadata["hidden"]) if metadata else False
+            if metadata:
+                r["order"] = int(metadata["order"])
+            elif not isinstance(r.get("order"), int):
+                r["order"] = len(tcs) + original_index + 1
+            r["_original_index"] = original_index
+
             if isinstance(r.get("test"), dict):
-                r["test"]["hidden"] = is_hidden
+                r["test"].pop("description", None)
+                r["test"]["hidden"] = r["hidden"]
+
+        results.sort(
+            key=lambda result: (
+                parse_int(result.get("order"), len(tcs) + len(results) + 1)
+                if isinstance(result, dict)
+                else len(tcs) + len(results) + 1,
+                parse_int(result.get("_original_index"), 0) if isinstance(result, dict) else 0,
+            )
+        )
+        for result in results:
+            if isinstance(result, dict):
+                result.pop("_original_index", None)
 
         return json.dumps(obj, sort_keys=True, indent=4)
     except Exception:
         return output_json
+
+
+def resolve_testcase_input_purchase_scope(
+    submission_repo: SubmissionRepository,
+    submission_id: int,
+    class_id: int,
+):
+    if submission_id <= 0 or class_id <= 0:
+        return None, "submission_id and class_id are required.", HTTPStatus.BAD_REQUEST
+
+    user_id = int(current_user.Id)
+    if not user_is_student_in_class_id(user_id, class_id):
+        return None, "Not Authorized", HTTPStatus.UNAUTHORIZED
+
+    submission = submission_repo.get_submission_by_submission_id(submission_id)
+    if submission is None:
+        return None, "Submission not found.", HTTPStatus.NOT_FOUND
+
+    if int(getattr(submission, "User", 0) or 0) != user_id:
+        return None, "Not Authorized", HTTPStatus.UNAUTHORIZED
+
+    project_id = int(getattr(submission, "Project", 0) or 0)
+    project = Projects.query.filter(Projects.Id == project_id).first()
+    if project is None:
+        return None, "Project not found.", HTTPStatus.NOT_FOUND
+
+    if int(getattr(project, "ClassId", 0) or 0) != class_id:
+        return None, "Not Authorized", HTTPStatus.UNAUTHORIZED
+
+    is_checkpoint = bool(getattr(submission, "IsCheckpoint", False))
+    checkpoint_id = (
+        int(getattr(submission, "CheckpointId", 0) or 0)
+        if is_checkpoint
+        else 0
+    )
+    if is_checkpoint and checkpoint_id <= 0:
+        return None, "Checkpoint not found.", HTTPStatus.NOT_FOUND
+
+    return {
+        "user_id": user_id,
+        "class_id": class_id,
+        "project_id": project_id,
+        "checkpoint_id": checkpoint_id,
+        "is_checkpoint": is_checkpoint,
+        "submission_id": int(getattr(submission, "Id", submission_id) or submission_id),
+        "submission_output_path": str(
+            getattr(submission, "OutputFilepath", "") or ""
+        ),
+    }, None, HTTPStatus.OK
+
+
+def testcase_input_rows_for_scope(project_id: int, checkpoint_id: int):
+    query = Testcases.query.filter(Testcases.ProjectId == int(project_id))
+    if checkpoint_id > 0:
+        query = query.filter(Testcases.CheckpointId == int(checkpoint_id))
+    else:
+        query = query.filter(Testcases.CheckpointId.is_(None))
+
+    return query.order_by(Testcases.SortOrder.asc(), Testcases.Id.asc()).all()
+
+
+INPUT_EVENT_PATTERN = re.compile(
+    r"\[\[\[MAAT_INPUT_B64:[A-Za-z0-9_-]*\]\]\]"
+)
+HIDDEN_INPUT_EVENT = "[[[MAAT_INPUT_HIDDEN]]]"
+
+
+def redact_input_events(value):
+    if isinstance(value, str):
+        return INPUT_EVENT_PATTERN.sub(HIDDEN_INPUT_EVENT, value)
+    if isinstance(value, list):
+        return [redact_input_events(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: redact_input_events(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def protect_unrevealed_testcase_inputs(
+    output_json,
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint_id: int,
+):
+    """Remove exact testcase values from student diff payloads until purchased."""
+    try:
+        ensure_incentive_tables()
+        testcase_rows = testcase_input_rows_for_scope(project_id, checkpoint_id)
+        purchased_ids = {
+            int(row.TestcaseId)
+            for row in StudentTestcaseInputPurchases.query.filter(
+                StudentTestcaseInputPurchases.UserId == int(user_id),
+                StudentTestcaseInputPurchases.ClassId == int(class_id),
+                StudentTestcaseInputPurchases.ProjectId == int(project_id),
+                StudentTestcaseInputPurchases.CheckpointId == int(checkpoint_id),
+            ).all()
+        }
+        revealed_orders = {
+            order
+            for order, testcase in enumerate(testcase_rows, start=1)
+            if int(testcase.Id) in purchased_ids
+        }
+
+        payload = json.loads(output_json) if isinstance(output_json, str) else (output_json or {})
+        results = payload.get("results", []) if isinstance(payload, dict) else []
+
+        for index, result in enumerate(results, start=1):
+            if not isinstance(result, dict):
+                results[index - 1] = redact_input_events(result)
+                continue
+
+            result_order = parse_int(
+                result.get("order", (result.get("test") or {}).get("order", index)),
+                index,
+            )
+            if result_order not in revealed_orders:
+                results[index - 1] = redact_input_events(result)
+
+        return json.dumps(payload, sort_keys=True, indent=4)
+    except Exception:
+        # Fail closed: a malformed or unexpected payload must not expose input.
+        return INPUT_EVENT_PATTERN.sub(HIDDEN_INPUT_EVENT, str(output_json or ""))
+
+
+def testcase_result_status(result: dict) -> str:
+    if parse_bool(result.get("skipped", False)):
+        return "skipped"
+
+    raw_passed = result.get("passed")
+    if isinstance(raw_passed, bool):
+        return "passed" if raw_passed else "failed"
+    if isinstance(raw_passed, (int, float)) and raw_passed in (0, 1):
+        return "passed" if raw_passed == 1 else "failed"
+    if isinstance(raw_passed, str):
+        normalized = raw_passed.strip().lower()
+        if normalized in ("1", "true", "yes", "y", "passed", "pass"):
+            return "passed"
+        if normalized in ("0", "false", "no", "n", "failed", "fail"):
+            return "failed"
+
+    return "unavailable"
+
+
+def testcase_result_statuses_for_scope(scope: dict, rows: list) -> dict:
+    statuses = {
+        int(testcase.Id): "unavailable"
+        for testcase in rows
+    }
+
+    try:
+        output = convert_tap_to_json(
+            scope["submission_output_path"],
+            current_user_effective_role(),
+            0,
+            False,
+        )
+        output = apply_hidden_flags_to_results(
+            output,
+            scope["project_id"],
+            scope["checkpoint_id"] if scope["checkpoint_id"] > 0 else None,
+        )
+        parsed = json.loads(output) if isinstance(output, str) else (output or {})
+        results = parsed.get("results", []) if isinstance(parsed, dict) else []
+        statuses_by_order = {}
+
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            order = parse_int(result.get("order"), 0)
+            if order > 0:
+                statuses_by_order[order] = testcase_result_status(result)
+
+        for index, testcase in enumerate(rows, start=1):
+            statuses[int(testcase.Id)] = statuses_by_order.get(
+                index,
+                "unavailable",
+            )
+    except Exception:
+        pass
+
+    return statuses
+
+
+def serialize_testcase_input_store(scope: dict) -> dict:
+    ensure_incentive_tables()
+    rows = testcase_input_rows_for_scope(
+        scope["project_id"],
+        scope["checkpoint_id"],
+    )
+    result_statuses = testcase_result_statuses_for_scope(scope, rows)
+    purchase_rows = StudentTestcaseInputPurchases.query.filter(
+        StudentTestcaseInputPurchases.UserId == scope["user_id"],
+        StudentTestcaseInputPurchases.ClassId == scope["class_id"],
+        StudentTestcaseInputPurchases.ProjectId == scope["project_id"],
+        StudentTestcaseInputPurchases.CheckpointId == scope["checkpoint_id"],
+    ).all()
+    purchased_ids = {int(row.TestcaseId) for row in purchase_rows}
+
+    return {
+        "project_id": scope["project_id"],
+        "checkpoint_id": scope["checkpoint_id"],
+        "is_checkpoint": scope["is_checkpoint"],
+        "input_cost": testcase_input_purchase_cost(scope["is_checkpoint"]),
+        "star_balance": get_star_balance(scope["user_id"], scope["class_id"]),
+        "testcases": [
+            {
+                "testcase_id": int(testcase.Id),
+                "name": str(getattr(testcase, "Name", "") or f"Testcase {index}"),
+                "order": index,
+                "purchased": int(testcase.Id) in purchased_ids,
+                "result_status": result_statuses.get(
+                    int(testcase.Id),
+                    "unavailable",
+                ),
+                "purchase_eligible": (
+                    result_statuses.get(int(testcase.Id)) == "failed"
+                ),
+                "input": (
+                    str(getattr(testcase, "input", "") or "")
+                    if int(testcase.Id) in purchased_ids
+                    else None
+                ),
+            }
+            for index, testcase in enumerate(rows, start=1)
+        ],
+    }
+
 
 def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
     # New grader may write JSON directly. Accept either:
@@ -604,6 +1260,7 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
 
     def sanitize_yaml_block(yaml_block: dict) -> dict:
         new_yaml = (yaml_block or {}).copy()
+        new_yaml.pop("description", None)
         return new_yaml
 
     def parse_suite(yaml_block: dict) -> int:
@@ -640,7 +1297,6 @@ def convert_tap_to_json(file_path, role, current_level, hasLVLSYSEnabled):
         else:
             locked_yaml = {
                 "name": yaml_clean.get("name", ""),
-                "description": yaml_clean.get("description", ""),
                 "suite": suite_req,
                 "locked": True
             }
@@ -678,7 +1334,145 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
     output = convert_tap_to_json(submission.OutputFilepath, current_user_effective_role(), 0, False)
     output = apply_hidden_flags_to_results(output, int(projectid), checkpoint_id)
 
+    project = Projects.query.filter(Projects.Id == int(projectid)).first()
+    submission_class_id = int(getattr(project, "ClassId", 0) or 0)
+
+    if current_user_class_role(submission_class_id) == STUDENT_ROLE:
+        output = protect_unrevealed_testcase_inputs(
+            output,
+            current_user_id(),
+            submission_class_id,
+            int(projectid),
+            int(checkpoint_id or 0),
+        )
+
     return make_response(output, HTTPStatus.OK)
+
+
+@submission_api.route('/testcase-inputs', methods=['GET', 'POST'])
+@jwt_required()
+@inject
+def testcase_inputs(
+    submission_repo: SubmissionRepository = Provide[Container.submission_repo],
+):
+    source = request.args if request.method == 'GET' else (request.get_json(silent=True) or {})
+    submission_id = parse_int(
+        source.get("id", source.get("submission_id", 0)),
+        0,
+    )
+    class_id = parse_int(source.get("class_id", 0), 0)
+
+    scope, error_message, error_status = resolve_testcase_input_purchase_scope(
+        submission_repo,
+        submission_id,
+        class_id,
+    )
+    if scope is None:
+        return make_response({"message": error_message}, error_status)
+
+    if request.method == 'GET':
+        response = jsonify(serialize_testcase_input_store(scope))
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    testcase_id = parse_int(source.get("testcase_id", 0), 0)
+    if testcase_id <= 0:
+        return make_response({"message": "testcase_id is required."}, HTTPStatus.BAD_REQUEST)
+
+    testcase = Testcases.query.filter(
+        Testcases.Id == testcase_id,
+        Testcases.ProjectId == scope["project_id"],
+    ).first()
+    if testcase is None:
+        return make_response({"message": "Testcase not found."}, HTTPStatus.NOT_FOUND)
+
+    testcase_checkpoint_id = int(getattr(testcase, "CheckpointId", 0) or 0)
+    if testcase_checkpoint_id != scope["checkpoint_id"]:
+        return make_response({"message": "Testcase not found."}, HTTPStatus.NOT_FOUND)
+
+    ensure_incentive_tables()
+    purchase_filter = (
+        StudentTestcaseInputPurchases.UserId == scope["user_id"],
+        StudentTestcaseInputPurchases.ClassId == scope["class_id"],
+        StudentTestcaseInputPurchases.ProjectId == scope["project_id"],
+        StudentTestcaseInputPurchases.CheckpointId == scope["checkpoint_id"],
+        StudentTestcaseInputPurchases.TestcaseId == testcase_id,
+    )
+    existing_purchase = StudentTestcaseInputPurchases.query.filter(*purchase_filter).first()
+    if existing_purchase is not None:
+        payload = serialize_testcase_input_store(scope)
+        payload["already_purchased"] = True
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    result_statuses = testcase_result_statuses_for_scope(
+        scope,
+        testcase_input_rows_for_scope(
+            scope["project_id"],
+            scope["checkpoint_id"],
+        ),
+    )
+    result_status = result_statuses.get(testcase_id, "unavailable")
+    if result_status != "failed":
+        if result_status == "passed":
+            message = "Passed testcase inputs cannot be purchased."
+        else:
+            message = "Only failing testcase inputs can be purchased."
+        return make_response({
+            "message": message,
+            "result_status": result_status,
+            "star_balance": get_star_balance(
+                scope["user_id"],
+                scope["class_id"],
+            ),
+        }, HTTPStatus.BAD_REQUEST)
+
+    # Lock the student row so simultaneous purchases cannot overspend the balance.
+    locked_user = Users.query.filter(
+        Users.Id == scope["user_id"]
+    ).with_for_update().first()
+    if locked_user is None:
+        db.session.rollback()
+        return make_response({"message": "User not found."}, HTTPStatus.NOT_FOUND)
+
+    existing_purchase = StudentTestcaseInputPurchases.query.filter(*purchase_filter).first()
+    if existing_purchase is not None:
+        payload = serialize_testcase_input_store(scope)
+        payload["already_purchased"] = True
+        db.session.commit()
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    cost = testcase_input_purchase_cost(scope["is_checkpoint"])
+    balance = get_star_balance(scope["user_id"], scope["class_id"])
+    star_label = "star" if cost == 1 else "stars"
+    if balance < cost:
+        db.session.rollback()
+        return make_response({
+            "message": f"You need {cost} {star_label} to reveal this testcase input.",
+            "star_balance": balance,
+            "required_stars": cost,
+        }, HTTPStatus.BAD_REQUEST)
+
+    db.session.add(StudentTestcaseInputPurchases(
+        UserId=scope["user_id"],
+        ClassId=scope["class_id"],
+        ProjectId=scope["project_id"],
+        CheckpointId=scope["checkpoint_id"],
+        TestcaseId=testcase_id,
+        SpentStars=cost,
+        CreatedAt=current_utc_datetime(),
+    ))
+    db.session.commit()
+
+    payload = serialize_testcase_input_store(scope)
+    payload["purchased_testcase_id"] = testcase_id
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 @submission_api.route('/codefinder', methods=['GET'])
 @jwt_required()
@@ -786,6 +1580,104 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
     resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
     return resp
 
+
+@submission_api.route('/incentive-state', methods=['GET'])
+@jwt_required()
+def incentive_state():
+    class_id = parse_int(request.args.get("class_id", 0), 0)
+    project_id = parse_int(request.args.get("project_id", 0), 0)
+    checkpoint = parse_bool(request.args.get("checkpoint", False))
+    checkpoint_id = parse_int(request.args.get("checkpoint_id", 0), 0) if checkpoint else 0
+
+    if class_id <= 0:
+        return make_response({"message": "class_id is required."}, HTTPStatus.BAD_REQUEST)
+
+    if project_id > 0 and not current_user_can_use_upload_state(class_id, project_id, checkpoint_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    response = jsonify(
+        incentive_payload(
+            int(current_user.Id),
+            class_id,
+            project_id,
+            checkpoint,
+            checkpoint_id,
+        )
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@submission_api.route('/skip-submission-cooldown', methods=['POST'])
+@jwt_required()
+def skip_submission_cooldown():
+    data = request.get_json(silent=True) or {}
+    class_id, project_id, checkpoint, checkpoint_id = upload_state_scope_from_mapping(data)
+
+    if class_id <= 0 or project_id <= 0:
+        return make_response({"message": "class_id and project_id are required."}, HTTPStatus.BAD_REQUEST)
+
+    if not current_user_can_use_upload_state(class_id, project_id, checkpoint_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    cooldown_state = submission_cooldown_state(
+        int(current_user.Id),
+        class_id,
+        project_id,
+        checkpoint,
+        checkpoint_id,
+    )
+    remaining_seconds = int(cooldown_state["cooldown_remaining_seconds"])
+    if remaining_seconds <= 0:
+        row = get_student_upload_state_row(class_id, project_id, checkpoint_id)
+        if row is not None:
+            db.session.delete(row)
+            db.session.commit()
+        payload = incentive_payload(int(current_user.Id), class_id, project_id, checkpoint, checkpoint_id)
+        payload["cooldown_remaining_seconds"] = 0
+        return jsonify(payload)
+
+    ensure_incentive_tables()
+
+    # Serialize purchases for this student while the balance is calculated.
+    locked_user = Users.query.filter(Users.Id == int(current_user.Id)).with_for_update().first()
+    if locked_user is None:
+        db.session.rollback()
+        return make_response({"message": "User not found."}, HTTPStatus.NOT_FOUND)
+
+    cooldown_skip_cost = submission_cooldown_skip_cost(checkpoint)
+    cooldown_skip_star_label = "star" if cooldown_skip_cost == 1 else "stars"
+    balance = get_star_balance(int(current_user.Id), class_id)
+    if balance < cooldown_skip_cost:
+        db.session.rollback()
+        return make_response({
+            "message": f"You need {cooldown_skip_cost} {cooldown_skip_star_label} to skip the submission timer.",
+            "stars": balance,
+            "required_stars": cooldown_skip_cost,
+            "cooldown_remaining_seconds": remaining_seconds,
+        }, HTTPStatus.BAD_REQUEST)
+
+    db.session.add(StudentCooldownSkips(
+        UserId=int(current_user.Id),
+        ClassId=int(class_id),
+        ProjectId=int(project_id),
+        CheckpointId=int(checkpoint_id or 0),
+        SpentStars=cooldown_skip_cost,
+        CreatedAt=current_utc_datetime(),
+        UsedAt=None,
+    ))
+
+    row = get_student_upload_state_row(class_id, project_id, checkpoint_id)
+    if row is not None:
+        db.session.delete(row)
+
+    db.session.commit()
+
+    payload = incentive_payload(int(current_user.Id), class_id, project_id, checkpoint, checkpoint_id)
+    payload["cooldown_remaining_seconds"] = 0
+    payload["skipped_cooldown"] = True
+    return jsonify(payload)
+
 @submission_api.route('/student-upload-state', methods=['GET', 'POST', 'DELETE'])
 @jwt_required()
 @inject
@@ -802,15 +1694,17 @@ def student_upload_state(submission_repo: SubmissionRepository = Provide[Contain
     row = get_student_upload_state_row(class_id, project_id, checkpoint_id)
 
     if request.method == 'GET':
-        return jsonify(
+        response = jsonify(
             serialize_student_upload_state(
-                row,
                 submission_repo,
+                class_id,
                 project_id,
                 checkpoint,
                 checkpoint_id,
             )
         )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     if request.method == 'DELETE':
         if row is not None:
@@ -824,39 +1718,14 @@ def student_upload_state(submission_repo: SubmissionRepository = Provide[Contain
             "cooldown_remaining_seconds": 0,
         })
 
-    cooldown_lifted_at = cooldown_lifted_at_from_mapping(source)
-
-    if cooldown_lifted_at is None or cooldown_lifted_at <= current_utc_datetime():
-        if row is not None:
-            db.session.delete(row)
-            db.session.commit()
-
-        return jsonify(
-            serialize_student_upload_state(
-                None,
-                submission_repo,
-                project_id,
-                checkpoint,
-                checkpoint_id,
-            )
-        )
-
-    if row is None:
-        row = StudentUploadState(
-            UserId=int(current_user.Id),
-            ClassId=int(class_id),
-            ProjectId=int(project_id),
-            CheckpointId=int(checkpoint_id or 0),
-        )
-        db.session.add(row)
-
-    row.CooldownLiftedAt = cooldown_lifted_at
-    db.session.commit()
+    if row is not None:
+        db.session.delete(row)
+        db.session.commit()
 
     return jsonify(
         serialize_student_upload_state(
-            row,
             submission_repo,
+            class_id,
             project_id,
             checkpoint,
             checkpoint_id,
@@ -1164,7 +2033,7 @@ def export_project_grades(submission_repo: SubmissionRepository = Provide[Contai
     writer.writerow(headers)
 
     # Create excel rows
-    base_defs_map = dict(ADMIN_GRADING_DEFAULT_DEFS_MAP)
+    base_defs_map = dict(GRADING_DEFAULT_DEFS_MAP)
 
     for row in grade_list:
         pts_dict = row['points'] or {}

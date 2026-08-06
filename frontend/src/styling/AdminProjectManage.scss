@@ -688,10 +688,51 @@
         margin: 0;
       }
 
-      // Description cell: slightly muted
-      td:nth-child(5) {
-        color: #505f7e;
-        font-size: 0.98em;
+      th:first-child,
+      td:first-child {
+        width: 8.5rem;
+        min-width: 8.5rem;
+      }
+
+      .testcase-order-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .testcase-order-number {
+        min-width: 1.5rem;
+        color: #334155;
+        font-weight: 700;
+        text-align: center;
+      }
+
+      .testcase-order-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        padding: 0;
+        color: #1d4ed8;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 5px;
+        cursor: pointer;
+
+        &:hover:not(:disabled),
+        &:focus-visible:not(:disabled) {
+          color: #fff;
+          background: #2563eb;
+          border-color: #2563eb;
+        }
+
+        &:disabled {
+          color: #94a3b8;
+          background: #f8fafc;
+          border-color: #e2e8f0;
+          cursor: not-allowed;
+        }
       }
 
       // Action button cell
@@ -1300,7 +1341,7 @@ body:has(.testcase-modal) {
         }
       }
 
-      /* Make input/description textareas start at the same height as the name input,
+      /* Make testcase textareas start at the same height as the name input,
          but allow users to grow them vertically if needed. */
       &.modal-textarea textarea,
       .modal-textarea {
@@ -1730,4 +1771,78 @@ body:has(.testcase-modal) {
 .wizard-secondary-button:hover {
   transform: translateY(-1px);
   box-shadow: 0 7px 16px rgba(15, 23, 42, 0.12);
+}
+
+.testcase-output-preview {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.7rem 0.85rem;
+  overflow-x: auto;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #dbe3ee;
+  border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.testcase-output-preview:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.admin-project-config-container .input-event,
+.testcase-modal .input-event {
+  display: inline-flex;
+  align-items: stretch;
+  vertical-align: baseline;
+  margin: 0 0.35rem;
+  overflow: hidden;
+  color: #0f3d7a;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(30, 64, 175, 0.12);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.admin-project-config-container .input-event__label,
+.admin-project-config-container .input-event__value,
+.testcase-modal .input-event__label,
+.testcase-modal .input-event__value {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.08rem 0.42rem;
+}
+
+.admin-project-config-container .input-event__label,
+.testcase-modal .input-event__label {
+  gap: 0.28rem;
+  color: #ffffff;
+  background: #2563eb;
+  text-transform: uppercase;
+  letter-spacing: 0.035em;
+}
+
+.admin-project-config-container .input-event__value,
+.testcase-modal .input-event__value {
+  color: #1e3a8a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre;
+}
+
+.admin-project-config-container .input-event__value.is-empty,
+.testcase-modal .input-event__value.is-empty {
+  color: #64748b;
+  font-family: inherit;
+  font-style: italic;
+  font-weight: 650;
 }

@@ -1,4 +1,4 @@
-# judge0-runner.py
+# judge0.py
 """
 Judge0 execution helpers.
 
@@ -22,8 +22,23 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-# Judge0 base URL. Override for self-hosted instances.
-JUDGE0_URL = "https://ce.judge0.com"
+# Judge0 base URL. This must always be provided through the JUDGE0_URL
+# environment variable; there is intentionally no hardcoded/default URL.
+def get_judge0_url() -> str:
+    raw_url = os.environ.get("JUDGE0_URL", "").strip()
+    if not raw_url:
+        raise RuntimeError(
+            "JUDGE0_URL environment variable is required. "
+            "Set it to the base URL of the Judge0 server."
+        )
+
+    url = raw_url.rstrip("/")
+    if not re.match(r"^https?://", url, flags=re.IGNORECASE):
+        raise RuntimeError(
+            "JUDGE0_URL must be an absolute HTTP or HTTPS URL, "
+            f"but received: {raw_url!r}"
+        )
+    return url
 
 # Judge0 "Multi-file program" language id (Judge0 CE v1.13.x).
 JUDGE0_MULTIFILE_LANGUAGE_ID = 89
@@ -35,6 +50,9 @@ JUDGE0_POLL_MAX_SECONDS = 20.0
 
 # If your Judge0 host disallows wait=true, we will fall back automatically.
 JUDGE0_TRY_WAIT = True
+
+INPUT_EVENT_PREFIX = "[[[MAAT_INPUT_B64:"
+INPUT_EVENT_SUFFIX = "]]]"
 
 BINARY_EXTENSIONS_DENYLIST = {
     ".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls",
@@ -63,6 +81,23 @@ def base64_decode_text(maybe_b64: Any) -> str:
     except Exception:
         # If it's not actually base64, return as-is.
         return maybe_b64
+
+
+def strip_input_events(text: str) -> str:
+    """
+    Return the program's original stdout while retaining a separate, annotated
+    transcript for display. Each tracer-owned newline is removed together with
+    its marker, so the clean output remains suitable for grading.
+    """
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    return re.sub(
+        re.escape(INPUT_EVENT_PREFIX)
+        + r"[A-Za-z0-9_-]*"
+        + re.escape(INPUT_EVENT_SUFFIX)
+        + r"(?:\n|$)",
+        "",
+        normalized,
+    )
 
 def strip_java_comments(src: str) -> str:
     """
@@ -159,7 +194,7 @@ def read_text_file(path: str) -> str:
 
 def bash_single_quote(s: str) -> str:
     """
-    Return a bash-safe single-quoted string 
+    Return a bash-safe single-quoted string
     Handles embedded single quotes by closing/opening quotes: 'foo'"'"'bar'
     """
     return "'" + (s or "").replace("'", "'\"'\"'") + "'"
@@ -220,16 +255,7 @@ def collect_additional_files(additional_files: Any, kind: str) -> List[Tuple[str
 
 def pick_python_entry(student_files: List[str], entry_override: str) -> str:
     if entry_override:
-        ov = entry_override.strip()
-        # If user supplied a simple class name, auto-qualify it if a package is present.
-        if "." not in ov:
-            for (_name, raw) in java_sources:
-                m = re.search(r"\bclass\s+([A-Za-z_]\w*)\b", raw or "")
-                cls = (m.group(1) if m else "").strip()
-                if cls and cls == ov:
-                    pkg = extract_java_package_name(raw)
-                    return (f"{pkg}.{ov}" if pkg else ov), None
-        return ov, None
+        return entry_override.strip()
     # Prefer main.py if present, otherwise first .py
     lowered = {p.lower(): p for p in student_files}
     if "main.py" in lowered:
@@ -269,6 +295,165 @@ def pick_java_main_class(java_sources: List[Tuple[str, str]], entry_override: st
         return os.path.splitext(name)[0], None
 
     return "Main", None
+
+
+def mask_java_non_code(source: str) -> str:
+    """Mask comments and string/character contents while preserving offsets."""
+    chars = list(source or "")
+    masked = list(source or "")
+    i = 0
+    state = "code"
+
+    while i < len(chars):
+        ch = chars[i]
+        nxt = chars[i + 1] if i + 1 < len(chars) else ""
+
+        if state == "code":
+            if ch == "/" and nxt == "/":
+                masked[i] = masked[i + 1] = " "
+                state = "line-comment"
+                i += 2
+                continue
+            if ch == "/" and nxt == "*":
+                masked[i] = masked[i + 1] = " "
+                state = "block-comment"
+                i += 2
+                continue
+            if ch == '"':
+                masked[i] = " "
+                state = "string"
+            elif ch == "'":
+                masked[i] = " "
+                state = "char"
+            i += 1
+            continue
+
+        if state == "line-comment":
+            if ch == "\n":
+                state = "code"
+            else:
+                masked[i] = " "
+            i += 1
+            continue
+
+        if state == "block-comment":
+            if ch == "*" and nxt == "/":
+                masked[i] = masked[i + 1] = " "
+                state = "code"
+                i += 2
+            else:
+                if ch != "\n":
+                    masked[i] = " "
+                i += 1
+            continue
+
+        masked[i] = " "
+        if ch == "\\" and i + 1 < len(chars):
+            if chars[i + 1] != "\n":
+                masked[i + 1] = " "
+            i += 2
+            continue
+        if (state == "string" and ch == '"') or (state == "char" and ch == "'"):
+            state = "code"
+        i += 1
+
+    return "".join(masked)
+
+
+def instrument_java_source(source: str) -> Tuple[str, bool, str]:
+    """
+    Wrap common Scanner, BufferedReader, and Console reads. Wrapping the
+    high-level call (instead of System.in) keeps the marker aligned with the
+    exact input request even when Scanner buffers ahead.
+    """
+    masked = mask_java_non_code(source)
+    scanner_vars = set(re.findall(r"\b(?:java\s*\.\s*util\s*\.\s*)?Scanner\s+([A-Za-z_]\w*)\b", masked))
+    reader_vars = set(re.findall(r"\b(?:java\s*\.\s*io\s*\.\s*)?BufferedReader\s+([A-Za-z_]\w*)\b", masked))
+    console_vars = set(re.findall(r"\b(?:java\s*\.\s*io\s*\.\s*)?Console\s+([A-Za-z_]\w*)\b", masked))
+
+    matches: List[Tuple[int, int]] = []
+    scanner_methods = (
+        r"next(?:Line|Boolean|Byte|Short|Int|Long|Float|Double|BigInteger|BigDecimal)?"
+    )
+
+    for variable in sorted(scanner_vars):
+        pattern = re.compile(
+            rf"\b{re.escape(variable)}\s*\.\s*{scanner_methods}\s*\([^()]*\)"
+        )
+        matches.extend((match.start(), match.end()) for match in pattern.finditer(masked))
+
+    for variable in sorted(reader_vars | console_vars):
+        pattern = re.compile(rf"\b{re.escape(variable)}\s*\.\s*readLine\s*\([^()]*\)")
+        matches.extend((match.start(), match.end()) for match in pattern.finditer(masked))
+
+    direct_console = re.compile(
+        r"\bSystem\s*\.\s*console\s*\(\s*\)\s*\.\s*readLine\s*\([^()]*\)"
+    )
+    matches.extend((match.start(), match.end()) for match in direct_console.finditer(masked))
+
+    if not matches:
+        return source, False, extract_java_package_name(source)
+
+    # Discard overlapping matches, then edit from right to left to preserve offsets.
+    unique_matches: List[Tuple[int, int]] = []
+    for start, end in sorted(set(matches)):
+        if unique_matches and start < unique_matches[-1][1]:
+            continue
+        unique_matches.append((start, end))
+
+    instrumented = source
+    for start, end in reversed(unique_matches):
+        original_call = instrumented[start:end]
+        instrumented = (
+            instrumented[:start]
+            + f"__MaatInputTrace.echo({original_call})"
+            + instrumented[end:]
+        )
+
+    return instrumented, True, extract_java_package_name(source)
+
+
+def python_input_tracer_source() -> str:
+    return f'''import base64
+import builtins
+import sys
+
+_MAAT_ORIGINAL_INPUT = builtins.input
+_MAAT_PREFIX = {INPUT_EVENT_PREFIX!r}
+_MAAT_SUFFIX = {INPUT_EVENT_SUFFIX!r}
+
+
+def _maat_traced_input(*args):
+    value = _MAAT_ORIGINAL_INPUT(*args)
+    encoded = base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
+    sys.stdout.write(_MAAT_PREFIX + encoded + _MAAT_SUFFIX + "\\n")
+    sys.stdout.flush()
+    return value
+
+
+builtins.input = _maat_traced_input
+'''
+
+
+def java_input_tracer_source(package_name: str) -> str:
+    package_line = f"package {package_name};\n\n" if package_name else ""
+    return f'''{package_line}final class __MaatInputTrace {{
+    private static final String PREFIX = {json.dumps(INPUT_EVENT_PREFIX)};
+    private static final String SUFFIX = {json.dumps(INPUT_EVENT_SUFFIX)};
+
+    private __MaatInputTrace() {{}}
+
+    static <T> T echo(T value) {{
+        String text = String.valueOf(value);
+        String encoded = java.util.Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        System.out.println(PREFIX + encoded + SUFFIX);
+        System.out.flush();
+        return value;
+    }}
+}}
+'''
 
 
 def build_compile_and_run_scripts(kind: str, student_relpaths: List[str], entry_class: str) -> Tuple[Optional[str], str, Optional[str]]:
@@ -326,6 +511,7 @@ def build_compile_and_run_scripts(kind: str, student_relpaths: List[str], entry_
         run_script = (
             "#!/usr/bin/env bash\n"
             "set -e\n"
+            "export PYTHONPATH=\".maat_runtime${PYTHONPATH:+:$PYTHONPATH}\"\n"
             "if command -v timeout >/dev/null 2>&1; then\n"
             f"  timeout 3s python3 -u {entry_q} || rc=$?\n"
             "  exit ${rc:-0}\n"
@@ -359,6 +545,17 @@ def build_multifile_zip_base64(
     """
     student_file_blobs = collect_student_files(student_path, kind)
     additional_file_blobs = collect_additional_files(additional_files, kind)
+    java_tracer_packages = set()
+
+    if kind == "java":
+        instrumented_blobs: List[Tuple[str, bytes]] = []
+        for relpath, blob in student_file_blobs:
+            source = blob.decode("utf-8", errors="replace")
+            instrumented, changed, package_name = instrument_java_source(source)
+            instrumented_blobs.append((relpath, instrumented.encode("utf-8")))
+            if changed:
+                java_tracer_packages.add(package_name)
+        student_file_blobs = instrumented_blobs
 
     # Build java_sources for main detection if needed
     java_sources: List[Tuple[str, str]] = []
@@ -404,6 +601,29 @@ def build_multifile_zip_base64(
         if compile_script:
             zip_write_file(zf, "compile", compile_script.encode("utf-8"), mode=0o755)
 
+        if kind == "python":
+            zip_write_file(
+                zf,
+                ".maat_runtime/sitecustomize.py",
+                python_input_tracer_source().encode("utf-8"),
+                mode=0o644,
+            )
+
+        if kind == "java":
+            for package_name in sorted(java_tracer_packages):
+                package_dir = package_name.replace(".", "/") if package_name else ""
+                helper_path = (
+                    f"{package_dir}/__MaatInputTrace.java"
+                    if package_dir
+                    else "__MaatInputTrace.java"
+                )
+                zip_write_file(
+                    zf,
+                    helper_path,
+                    java_input_tracer_source(package_name).encode("utf-8"),
+                    mode=0o644,
+                )
+
         # Student files
         seen = set()
         for rel, blob in student_file_blobs:
@@ -434,8 +654,16 @@ def judge0_create_submission(additional_files_b64: str, stdin_text: str) -> Dict
     }
 
     def post(wait: bool) -> requests.Response:
-        url = f"{JUDGE0_URL}/submissions?base64_encoded=true&wait={'true' if wait else 'false'}"
-        return requests.post(url, headers=build_request_headers(), data=json.dumps(payload), timeout=JUDGE0_TIMEOUT_SECONDS)
+        url = (
+            f"{get_judge0_url()}/submissions"
+            f"?base64_encoded=true&wait={'true' if wait else 'false'}"
+        )
+        return requests.post(
+            url,
+            headers=build_request_headers(),
+            data=json.dumps(payload),
+            timeout=JUDGE0_TIMEOUT_SECONDS,
+        )
 
     if JUDGE0_TRY_WAIT:
         r = post(wait=True)
@@ -451,7 +679,10 @@ def judge0_create_submission(additional_files_b64: str, stdin_text: str) -> Dict
 
 def judge0_get_submission(token: str) -> Dict[str, Any]:
     fields = "stdout,stderr,compile_output,message,status"
-    url = f"{JUDGE0_URL}/submissions/{token}?base64_encoded=true&fields={fields}"
+    url = (
+        f"{get_judge0_url()}/submissions/{token}"
+        f"?base64_encoded=true&fields={fields}"
+    )
     r = requests.get(url, headers=build_request_headers(), timeout=JUDGE0_TIMEOUT_SECONDS)
     r.raise_for_status()
     return r.json() if r.content else {}
@@ -481,7 +712,8 @@ def call_judge0_api(
     has_results = any(k in create_obj for k in ("stdout", "stderr", "compile_output", "status"))
 
     def normalize_result(obj: Dict[str, Any]) -> Dict[str, str]:
-        stdout = base64_decode_text(obj.get("stdout"))
+        stdout_transcript = base64_decode_text(obj.get("stdout"))
+        stdout = strip_input_events(stdout_transcript)
         stderr = base64_decode_text(obj.get("stderr"))
         compile_output = base64_decode_text(obj.get("compile_output"))
         message = base64_decode_text(obj.get("message"))
@@ -490,7 +722,12 @@ def call_judge0_api(
         if (not stdout) and (not stderr) and (not compile_output) and message:
             stderr = message
 
-        return {"stdout": stdout or "", "stderr": stderr or "", "compile_output": compile_output or ""}
+        return {
+            "stdout": stdout or "",
+            "stdout_transcript": stdout_transcript or "",
+            "stderr": stderr or "",
+            "compile_output": compile_output or "",
+        }
 
     if has_results and token:
         return normalize_result(create_obj)

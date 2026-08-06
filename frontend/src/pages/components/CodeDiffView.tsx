@@ -1,19 +1,23 @@
 // frontend/src/pages/components/CodeDiffView.tsx
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { diffChars } from 'diff'
 import '../../styling/CodeDiffView.scss'
 import { Highlight, themes, Prism } from 'prism-react-renderer'
 
 import {
+    FaArrowRight,
     FaRegCheckSquare,
     FaChevronDown,
+    FaEye,
     FaLock,
     FaBars,
     FaColumns,
     FaGripLines,
     FaAlignJustify,
+    FaKeyboard,
     FaSearch,
+    FaStar,
 } from 'react-icons/fa'
 
 // Ensure Prism languages (like Java) are registered once per page load.
@@ -41,7 +45,7 @@ type UiLogAction = 'Diff Finder' | 'Diff Mode' | 'Diff Layout'
 
 type NewJsonResult = {
     name: string
-    description?: string
+    order?: number
     passed: boolean
     hidden?: boolean
     shortDiff?: string
@@ -52,14 +56,15 @@ type NewJsonResult = {
 type LegacyJsonTest = {
     output?: Array<string>
     type?: number
-    description?: string
     name?: string
     hidden?: boolean
+    order?: number
 }
 
 type LegacyJsonResult = {
     skipped?: boolean
     passed?: boolean
+    order?: number
     test?: LegacyJsonTest
 }
 
@@ -70,8 +75,8 @@ type AnyPayload = {
 type DiffEntry = {
     id: string
     num: number
+    order: number
     test: string
-    description: string
     status: string
     passed: boolean
     skipped: boolean
@@ -84,6 +89,25 @@ type DiffEntry = {
 type CodeFile = {
     name: string
     content: string
+}
+
+type TestcaseInputOption = {
+    testcase_id: number
+    name: string
+    order: number
+    purchased: boolean
+    result_status: 'passed' | 'failed' | 'skipped' | 'unavailable'
+    purchase_eligible: boolean
+    input: string | null
+}
+
+type TestcaseInputStore = {
+    project_id: number
+    checkpoint_id: number
+    is_checkpoint: boolean
+    input_cost: number
+    star_balance: number
+    testcases: TestcaseInputOption[]
 }
 
 type Seg = { text: string; changed: boolean }
@@ -101,6 +125,70 @@ type SideBySideRow = {
 }
 
 const MAX_CHANGE_RATIO_FOR_INTRA = 0.7
+const SHARED_SIDE_SCROLLBAR_EPSILON_PX = 1
+const INPUT_EVENT_PATTERN = /\[\[\[MAAT_INPUT_(?:B64:([A-Za-z0-9_-]*)|HIDDEN)\]\]\]/g
+const HIDDEN_INPUT_EVENT = '[[[MAAT_INPUT_HIDDEN]]]'
+
+function decodeInputEvent(encoded: string) {
+    try {
+        const padded = encoded.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(encoded.length / 4) * 4, '=')
+        const binary = window.atob(padded)
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+        return new TextDecoder().decode(bytes)
+    } catch {
+        return 'Unreadable input'
+    }
+}
+
+function renderInputTranscript(text: string, keyPrefix: string): React.ReactNode {
+    if (!text || !text.includes('[[[MAAT_INPUT_')) return text || '\u00A0'
+
+    const parts: React.ReactNode[] = []
+    let cursor = 0
+    let eventIndex = 0
+
+    for (const match of text.matchAll(INPUT_EVENT_PATTERN)) {
+        const start = match.index ?? 0
+        if (start > cursor) parts.push(text.slice(cursor, start))
+
+        const inputIsHidden = match[1] === undefined
+        const value = inputIsHidden ? '' : decodeInputEvent(match[1] ?? '')
+        parts.push(
+            <span
+                key={`${keyPrefix}-input-${eventIndex}`}
+                className={`input-event ${inputIsHidden ? 'is-hidden' : ''}`}
+                aria-label={inputIsHidden ? 'Program input hidden' : `Program input: ${value || 'empty input'}`}
+                title={
+                    inputIsHidden
+                        ? 'Reveal this testcase input to see its value'
+                        : 'The program paused here and read one line of input'
+                }
+            >
+                <span className="input-event__label">
+                    <FaKeyboard aria-hidden="true" /> Input
+                </span>
+                <span className={`input-event__value ${!inputIsHidden && value === '' ? 'is-empty' : ''}`}>
+                    {inputIsHidden ? (
+                        <><FaLock aria-hidden="true" /> Hidden</>
+                    ) : value === '' ? (
+                        'empty input'
+                    ) : (
+                        value
+                    )}
+                </span>
+            </span>
+        )
+        cursor = start + match[0].length
+        eventIndex++
+    }
+
+    if (cursor < text.length) parts.push(text.slice(cursor))
+    return parts
+}
+
+function concealInputEvents(text: string) {
+    return (text ?? '').replace(INPUT_EVENT_PATTERN, HIDDEN_INPUT_EVENT)
+}
 
 function diffModeStateLabel(mode: DiffMode) {
     return mode === 'short' ? 'Short' : 'Long'
@@ -216,10 +304,10 @@ function renderSegs(segs: Seg[], cls: 'add-ch' | 'del-ch') {
     return segs.map((seg, idx) =>
         seg.changed ? (
             <span key={idx} className={`intra ${cls}`}>
-                {seg.text}
+                {renderInputTranscript(seg.text, `changed-${idx}`)}
             </span>
         ) : (
-            <span key={idx}>{seg.text}</span>
+            <span key={idx}>{renderInputTranscript(seg.text, `same-${idx}`)}</span>
         )
     )
 }
@@ -253,6 +341,8 @@ type DiffViewProps = {
     // If false/undefined: keep hidden outputs hidden (student view).
     revealHiddenOutput?: boolean
 
+    // Student-only store shown once at the bottom of the complete testcase menu.
+    allowTestcaseInputPurchases?: boolean
 }
 
 export default function DiffView(props: DiffViewProps) {
@@ -274,6 +364,7 @@ export default function DiffView(props: DiffViewProps) {
         onActiveTestcaseChange,
         disableCopy = false,
         revealHiddenOutput = false,
+        allowTestcaseInputPurchases = false,
         isPractice = false,
         practiceProblemId = null,
     } = props
@@ -284,6 +375,8 @@ export default function DiffView(props: DiffViewProps) {
     const sideBySideLeftRef = useRef<HTMLDivElement | null>(null)
     const sideBySideRightRef = useRef<HTMLDivElement | null>(null)
     const sideBySideBarRef = useRef<HTMLDivElement | null>(null)
+    const sideBySideLeftContentRef = useRef<HTMLDivElement | null>(null)
+    const sideBySideRightContentRef = useRef<HTMLDivElement | null>(null)
     const syncingSideScrollRef = useRef(false)
 
     const copyBlockHandlers = disableCopy
@@ -295,6 +388,12 @@ export default function DiffView(props: DiffViewProps) {
 
     const [testsLoaded, setTestsLoaded] = useState(false)
     const [payload, setPayload] = useState<AnyPayload>({ results: [] })
+    const [testcaseInputStore, setTestcaseInputStore] = useState<TestcaseInputStore | null>(null)
+    const [selectedTestcaseInputId, setSelectedTestcaseInputId] = useState<number | null>(null)
+    const [testcaseInputStoreLoaded, setTestcaseInputStoreLoaded] = useState(false)
+    const [testcaseInputPurchaseError, setTestcaseInputPurchaseError] = useState('')
+    const [inputPurchaseConfirmationOpen, setInputPurchaseConfirmationOpen] = useState(false)
+    const [isPurchasingTestcaseInput, setIsPurchasingTestcaseInput] = useState(false)
 
     // Force a rerender after Prism languages load so Highlight can use the grammar.
     const [, forcePrismRefresh] = useState(0)
@@ -370,6 +469,29 @@ export default function DiffView(props: DiffViewProps) {
         })
     }
 
+    const getSideBySideContentWidth = (
+        pane: HTMLDivElement | null,
+        content: HTMLDivElement | null
+    ) => {
+        if (!pane) return 0
+
+        const cellWidths = content
+            ? Array.from(content.querySelectorAll<HTMLElement>('.sbs-cell')).map((el) =>
+                Math.max(el.scrollWidth, el.offsetWidth, el.getBoundingClientRect().width)
+            )
+            : []
+
+        return Math.max(
+            pane.scrollWidth,
+            pane.offsetWidth,
+            pane.getBoundingClientRect().width,
+            content?.scrollWidth ?? 0,
+            content?.offsetWidth ?? 0,
+            content?.getBoundingClientRect().width ?? 0,
+            ...cellWidths
+        )
+    }
+
     const updateSharedSideScrollMetrics = () => {
         const left = sideBySideLeftRef.current
         const right = sideBySideRightRef.current
@@ -377,16 +499,54 @@ export default function DiffView(props: DiffViewProps) {
 
         if (!left || !right || !bar) return
 
-        const maxPaneScrollWidth = Math.max(left.scrollWidth, right.scrollWidth)
-        const paneClientWidth = Math.max(left.clientWidth, right.clientWidth)
+        const maxPaneScrollWidth = Math.max(
+            getSideBySideContentWidth(left, sideBySideLeftContentRef.current),
+            getSideBySideContentWidth(right, sideBySideRightContentRef.current)
+        )
+
+        const paneClientWidth = Math.min(
+            left.clientWidth || Number.POSITIVE_INFINITY,
+            right.clientWidth || Number.POSITIVE_INFINITY
+        )
         const barClientWidth = bar.clientWidth
-        const nextWidth = Math.max(barClientWidth, maxPaneScrollWidth - paneClientWidth + barClientWidth)
+
+        if (!Number.isFinite(paneClientWidth) || paneClientWidth <= 0 || barClientWidth <= 0) return
+
+        const scrollableDistance = Math.max(0, maxPaneScrollWidth - paneClientWidth)
+        const nextWidth = Math.max(
+            barClientWidth + SHARED_SIDE_SCROLLBAR_EPSILON_PX,
+            barClientWidth + scrollableDistance
+        )
 
         bar.style.setProperty('--side-by-side-bar-inner-width', `${nextWidth}px`)
+
+        const inner = bar.firstElementChild as HTMLDivElement | null
+        if (inner) inner.style.width = `${nextWidth}px`
+
+        const maxBarScrollLeft = Math.max(0, nextWidth - barClientWidth)
+        if (bar.scrollLeft > maxBarScrollLeft) bar.scrollLeft = maxBarScrollLeft
     }
+
+    const fetchTestcaseDiffPayload = useCallback(() =>
+        axios
+            .get(
+                `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?id=${submissionId}&class_id=${classId}` +
+                `&practice=${isPractice ? 1 : 0}` +
+                (practiceProblemId != null ? `&practice_problem_id=${practiceProblemId}` : ``),
+                {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                }
+            )
+            .then((res) => {
+                const maybe = safeJsonParse(res.data)
+                return (maybe && typeof maybe === 'object' ? maybe : { results: [] }) as AnyPayload
+            }),
+    [submissionId, classId, isPractice, practiceProblemId])
 
     useEffect(() => {
         setTestsLoaded(false)
+        setPayload({ results: [] })
+        setSelectedDiffId(null)
         setCodeFiles([])
         setSelectedCodeFile('')
 
@@ -396,17 +556,9 @@ export default function DiffView(props: DiffViewProps) {
             return
         }
 
-        axios
-            .get(
-                `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?id=${submissionId}&class_id=${classId}` +
-                `&practice=${isPractice ? 1 : 0}` +
-                (practiceProblemId != null ? `&practice_problem_id=${practiceProblemId}` : ``),
-                {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
-                })
-            .then((res) => {
-                const maybe = safeJsonParse(res.data)
-                setPayload((maybe && typeof maybe === 'object' ? maybe : { results: [] }) as AnyPayload)
+        fetchTestcaseDiffPayload()
+            .then((nextPayload) => {
+                setPayload(nextPayload)
                 setTestsLoaded(true)
             })
             .catch((err) => {
@@ -414,7 +566,51 @@ export default function DiffView(props: DiffViewProps) {
                 setPayload({ results: [] })
                 setTestsLoaded(true)
             })
-    }, [submissionId, classId])
+    }, [submissionId, classId, isPractice, practiceProblemId, fetchTestcaseDiffPayload])
+
+    useEffect(() => {
+        setTestcaseInputStore(null)
+        setSelectedTestcaseInputId(null)
+        setTestcaseInputStoreLoaded(false)
+        setTestcaseInputPurchaseError('')
+        setInputPurchaseConfirmationOpen(false)
+
+        if (!allowTestcaseInputPurchases || submissionId <= 0 || classId <= 0) {
+            setTestcaseInputStoreLoaded(true)
+            return
+        }
+
+        axios
+            .get(
+                `${import.meta.env.VITE_API_URL}/submissions/testcase-inputs`,
+                {
+                    params: {
+                        id: submissionId,
+                        class_id: classId,
+                    },
+                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                }
+            )
+            .then((res) => {
+                const store = res.data as TestcaseInputStore
+                const testcases = Array.isArray(store?.testcases) ? store.testcases : []
+                const normalizedStore = { ...store, testcases }
+
+                const visibleTestcases = testcases.filter(
+                    (testcase) => testcase.purchased || testcase.purchase_eligible
+                )
+
+                setTestcaseInputStore(normalizedStore)
+                setSelectedTestcaseInputId(visibleTestcases[0]?.testcase_id ?? null)
+                setTestcaseInputStoreLoaded(true)
+            })
+            .catch((err) => {
+                setTestcaseInputPurchaseError(
+                    err?.response?.data?.message || 'Could not load testcase input options.'
+                )
+                setTestcaseInputStoreLoaded(true)
+            })
+    }, [allowTestcaseInputPurchases, submissionId, classId])
 
     // Baseline the toggles on mount per submission/class
     useEffect(() => {
@@ -441,7 +637,7 @@ export default function DiffView(props: DiffViewProps) {
             initialIntraRef.current ? 'On' : 'Off'
         )
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [submissionId, classId])
+    }, [submissionId, classId, isPractice, practiceProblemId])
 
     useEffect(() => {
         if (submissionId < 0 || classId < 0) {
@@ -489,7 +685,7 @@ export default function DiffView(props: DiffViewProps) {
                 setCodeFiles([{ name: 'Submission', content: '' }])
                 setSelectedCodeFile('Submission')
             })
-    }, [submissionId, classId])
+    }, [submissionId, classId, isPractice, practiceProblemId])
 
     const diffFilesAll: DiffEntry[] = useMemo(() => {
         const raw = Array.isArray(payload?.results) ? payload.results : []
@@ -508,12 +704,15 @@ export default function DiffView(props: DiffViewProps) {
                 const shortDiff = String(rr.shortDiff ?? '')
                 const longDiff = String(rr.longDiff ?? '')
                 const shortDiffSameAsLong = Boolean((rr as any).shortDiffSameAsLong)
-                const desc = String(rr.description ?? '')
+                const parsedOrder = Number(rr.order)
+                const order = Number.isFinite(parsedOrder) && parsedOrder > 0
+                    ? parsedOrder
+                    : idx + 1
                 entries.push({
                     id: `${idx}__${testName}`,
                     num: idx + 1,
+                    order,
                     test: testName,
-                    description: desc,
                     status: passed ? 'Passed' : 'Failed',
                     passed,
                     skipped: false,
@@ -523,7 +722,9 @@ export default function DiffView(props: DiffViewProps) {
                     hidden,
                 })
             })
-            return entries.sort((a, b) => Number(a.passed) - Number(b.passed) || a.test.localeCompare(b.test))
+            return entries
+                .sort((a, b) => a.order - b.order || a.num - b.num)
+                .map((entry, index) => ({ ...entry, num: index + 1 }))
         }
 
         // Legacy fallback (should be rare now): convert old shape into unified-ish diffs
@@ -533,8 +734,11 @@ export default function DiffView(props: DiffViewProps) {
             const passed = Boolean(rr.passed)
             const t = rr.test ?? {}
             const testName = String(t.name ?? `Test ${idx + 1}`)
-            const desc = String(t.description ?? '')
             const hidden = Boolean((t as any).hidden)
+            const parsedOrder = Number(rr.order ?? t.order)
+            const order = Number.isFinite(parsedOrder) && parsedOrder > 0
+                ? parsedOrder
+                : idx + 1
             const rawOut = (skipped ? ['This test did not run due to a configuration issue.'] : (t.output || [])).join(
                 '\n'
             )
@@ -544,8 +748,8 @@ export default function DiffView(props: DiffViewProps) {
             entries.push({
                 id: `${idx}__${testName}`,
                 num: idx + 1,
+                order,
                 test: testName,
-                description: desc,
                 status: skipped ? 'Skipped' : passed ? 'Passed' : 'Failed',
                 passed,
                 skipped,
@@ -563,11 +767,15 @@ export default function DiffView(props: DiffViewProps) {
             }
         })
 
-        return entries.sort((a, b) => Number(a.passed) - Number(b.passed) || a.test.localeCompare(b.test))
+        return entries
+            .sort((a, b) => a.order - b.order || a.num - b.num)
+            .map((entry, index) => ({ ...entry, num: index + 1 }))
     }, [payload])
 
     useEffect(() => {
-        if (!selectedDiffId && diffFilesAll.length > 0) {
+        if (diffFilesAll.length === 0) {
+            if (selectedDiffId !== null) setSelectedDiffId(null)
+        } else if (!selectedDiffId) {
             setSelectedDiffId(diffFilesAll[0].id)
         } else if (selectedDiffId && diffFilesAll.every((f) => f.id !== selectedDiffId)) {
             setSelectedDiffId(diffFilesAll[0]?.id ?? null)
@@ -578,6 +786,108 @@ export default function DiffView(props: DiffViewProps) {
         () => diffFilesAll.find((f) => f.id === selectedDiffId) || null,
         [diffFilesAll, selectedDiffId]
     )
+
+    const visibleTestcaseInputOptions = useMemo(
+        () =>
+            (testcaseInputStore?.testcases ?? []).filter(
+                (testcase) => testcase.purchased || testcase.purchase_eligible
+            ),
+        [testcaseInputStore]
+    )
+
+    const selectedTestcaseInput = useMemo(
+        () =>
+            visibleTestcaseInputOptions.find(
+                (testcase) => testcase.testcase_id === selectedTestcaseInputId
+            ) ?? null,
+        [visibleTestcaseInputOptions, selectedTestcaseInputId]
+    )
+
+    useEffect(() => {
+        if (
+            selectedTestcaseInputId !== null &&
+            visibleTestcaseInputOptions.some(
+                (testcase) => testcase.testcase_id === selectedTestcaseInputId
+            )
+        ) {
+            return
+        }
+
+        setSelectedTestcaseInputId(
+            visibleTestcaseInputOptions[0]?.testcase_id ?? null
+        )
+        setInputPurchaseConfirmationOpen(false)
+    }, [visibleTestcaseInputOptions, selectedTestcaseInputId])
+
+    const testcaseInputCost = Math.max(0, Number(testcaseInputStore?.input_cost ?? 0))
+    const testcaseInputStarBalance = Math.max(
+        0,
+        Number(testcaseInputStore?.star_balance ?? 0)
+    )
+    const testcaseInputStarLabel = testcaseInputCost === 1 ? 'star' : 'stars'
+
+    const formatStarCount = (value: number) =>
+        `${value} ${value === 1 ? 'star' : 'stars'}`
+
+    const purchaseSelectedTestcaseInput = () => {
+        if (
+            !selectedTestcaseInput ||
+            selectedTestcaseInput.purchased ||
+            !selectedTestcaseInput.purchase_eligible ||
+            isPurchasingTestcaseInput
+        ) {
+            return
+        }
+
+        setIsPurchasingTestcaseInput(true)
+        setTestcaseInputPurchaseError('')
+
+        axios
+            .post(
+                `${import.meta.env.VITE_API_URL}/submissions/testcase-inputs`,
+                {
+                    submission_id: submissionId,
+                    class_id: classId,
+                    testcase_id: selectedTestcaseInput.testcase_id,
+                },
+                {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                }
+            )
+            .then((res) => {
+                const store = res.data as TestcaseInputStore
+                setTestcaseInputStore({
+                    ...store,
+                    testcases: Array.isArray(store?.testcases) ? store.testcases : [],
+                })
+                setInputPurchaseConfirmationOpen(false)
+                fetchTestcaseDiffPayload()
+                    .then((nextPayload) => setPayload(nextPayload))
+                    .catch(() => {
+                        setTestcaseInputPurchaseError(
+                            'The input was revealed, but the diff could not refresh. Reload the page to view it.'
+                        )
+                    })
+            })
+            .catch((err) => {
+                const nextBalance = Number(err?.response?.data?.star_balance)
+                if (Number.isFinite(nextBalance)) {
+                    setTestcaseInputStore((current) =>
+                        current
+                            ? { ...current, star_balance: Math.max(0, nextBalance) }
+                            : current
+                    )
+                }
+
+                setTestcaseInputPurchaseError(
+                    err?.response?.data?.message || 'Could not reveal this testcase input.'
+                )
+                setInputPurchaseConfirmationOpen(false)
+            })
+            .finally(() => {
+                setIsPurchasingTestcaseInput(false)
+            })
+    }
 
     useEffect(() => {
         if (!onActiveTestcaseChange) return
@@ -611,13 +921,35 @@ export default function DiffView(props: DiffViewProps) {
         }
     }, [selectedFile, diffMode])
 
+    const selectedTestcaseInputForDiff = useMemo(
+        () =>
+            (testcaseInputStore?.testcases ?? []).find(
+                (testcase) => testcase.order === selectedFile?.order
+            ) ?? null,
+        [testcaseInputStore, selectedFile]
+    )
+
     const selectedDiffText = useMemo(() => {
         if (!selectedFile) return ''
         if (selectedFile.passed) return ''
         if (selectedFile.hidden && !revealHiddenOutput) return ''
-        if (selectedFile.shortDiffSameAsLong) return selectedFile.longDiff ?? ''
-        return diffMode === 'short' ? (selectedFile.shortDiff ?? '') : (selectedFile.longDiff ?? '')
-    }, [selectedFile, diffMode, revealHiddenOutput])
+        const diffText = selectedFile.shortDiffSameAsLong
+            ? selectedFile.longDiff ?? ''
+            : diffMode === 'short'
+                ? selectedFile.shortDiff ?? ''
+                : selectedFile.longDiff ?? ''
+
+        const canRevealInput =
+            !allowTestcaseInputPurchases || Boolean(selectedTestcaseInputForDiff?.purchased)
+
+        return canRevealInput ? diffText : concealInputEvents(diffText)
+    }, [
+        selectedFile,
+        diffMode,
+        revealHiddenOutput,
+        allowTestcaseInputPurchases,
+        selectedTestcaseInputForDiff,
+    ])
 
     useEffect(() => {
         if (diffLayout !== 'side-by-side') return
@@ -791,21 +1123,73 @@ export default function DiffView(props: DiffViewProps) {
         return rows
     }, [selectedDiffText, intraEnabled])
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (diffLayout !== 'side-by-side') return
+        if (sideBySideRows.length === 0) return
 
-        const frame = requestAnimationFrame(() => {
+        let cancelled = false
+        let frame1 = 0
+        let frame2 = 0
+        const timeouts: number[] = []
+
+        const refreshMetrics = () => {
+            if (cancelled) return
             updateSharedSideScrollMetrics()
+        }
+
+        refreshMetrics()
+
+        frame1 = requestAnimationFrame(() => {
+            refreshMetrics()
+
+            frame2 = requestAnimationFrame(() => {
+                refreshMetrics()
+            })
         })
 
-        const handleResize = () => updateSharedSideScrollMetrics()
-        window.addEventListener('resize', handleResize)
+        // The side-by-side layout can finish sizing after async data, fonts, and parent panels settle.
+        // Rechecking a few times prevents the shared bar from staying at its initial no-overflow width.
+        ;[0, 50, 150, 500].forEach((delay) => {
+            timeouts.push(window.setTimeout(refreshMetrics, delay))
+        })
+
+        const resizeObserver =
+            typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refreshMetrics) : null
+
+        ;[
+            sideBySideLeftRef.current,
+            sideBySideRightRef.current,
+            sideBySideBarRef.current,
+            sideBySideLeftContentRef.current,
+            sideBySideRightContentRef.current,
+            sideBySideBarRef.current?.parentElement ?? null,
+            sideBySideLeftRef.current?.closest('.diff-code') ?? null,
+            sideBySideLeftRef.current?.closest('.diff-pane') ?? null,
+        ].forEach((el) => {
+            if (el && resizeObserver) resizeObserver.observe(el)
+        })
+
+        const mutationObserver =
+            typeof MutationObserver !== 'undefined' ? new MutationObserver(refreshMetrics) : null
+
+        ;[sideBySideLeftContentRef.current, sideBySideRightContentRef.current].forEach((el) => {
+            if (el && mutationObserver) {
+                mutationObserver.observe(el, { childList: true, subtree: true, characterData: true })
+            }
+        })
+
+        window.addEventListener('resize', refreshMetrics)
 
         return () => {
-            cancelAnimationFrame(frame)
-            window.removeEventListener('resize', handleResize)
+            cancelled = true
+            cancelAnimationFrame(frame1)
+            cancelAnimationFrame(frame2)
+            timeouts.forEach((timeout) => window.clearTimeout(timeout))
+            resizeObserver?.disconnect()
+            mutationObserver?.disconnect()
+            window.removeEventListener('resize', refreshMetrics)
         }
-    }, [diffLayout, sideBySideRows])
+    }, [diffLayout, selectedDiffId, selectedDiffText, intraEnabled, sideBySideRows.length])
 
     const selectedCode = useMemo(() => {
         if (codeFiles.length === 0) return null
@@ -830,12 +1214,14 @@ export default function DiffView(props: DiffViewProps) {
             return (
                 <>
                     <span className="diff-sign">{kind === 'add' ? '+' : '-'}</span>
-                    {segs ? renderSegs(segs, kind === 'add' ? 'add-ch' : 'del-ch') : rawText || '\u00A0'}
+                    {segs
+                        ? renderSegs(segs, kind === 'add' ? 'add-ch' : 'del-ch')
+                        : renderInputTranscript(rawText, `side-${kind}`)}
                 </>
             )
         }
 
-        return text || '\u00A0'
+        return renderInputTranscript(text, `side-${kind}`)
     }
 
     const renderStackedDiff = () => {
@@ -884,13 +1270,13 @@ export default function DiffView(props: DiffViewProps) {
                     out.push(
                         <div key={`d-${i}`} className="diff-line del">
                             <span className="diff-sign">-</span>
-                            {delText || '\u00A0'}
+                            {renderInputTranscript(delText, `stacked-del-${i}`)}
                         </div>
                     )
                     out.push(
                         <div key={`a-${i + 1}`} className="diff-line add">
                             <span className="diff-sign">+</span>
-                            {addText || '\u00A0'}
+                            {renderInputTranscript(addText, `stacked-add-${i}`)}
                         </div>
                     )
                     i++
@@ -918,7 +1304,7 @@ export default function DiffView(props: DiffViewProps) {
 
             out.push(
                 <div key={i} className={`diff-line ${cls}`}>
-                    {line || ' '}
+                    {renderInputTranscript(line, `stacked-line-${i}`)}
                 </div>
             )
         }
@@ -940,7 +1326,7 @@ export default function DiffView(props: DiffViewProps) {
                             ref={sideBySideLeftRef}
                             onScroll={() => syncSideBySideScroll('left')}
                         >
-                            <div className="sbs-pane-content">
+                            <div className="sbs-pane-content" ref={sideBySideLeftContentRef}>
                                 {sideBySideRows.map((row) => (
                                     <div key={`left-${row.key}`} className={`diff-line sbs-cell ${row.leftKind}`}>
                                         {renderSideBySideCell(row.leftText, row.leftKind, row.leftSegs)}
@@ -956,7 +1342,7 @@ export default function DiffView(props: DiffViewProps) {
                             ref={sideBySideRightRef}
                             onScroll={() => syncSideBySideScroll('right')}
                         >
-                            <div className="sbs-pane-content">
+                            <div className="sbs-pane-content" ref={sideBySideRightContentRef}>
                                 {sideBySideRows.map((row) => (
                                     <div key={`right-${row.key}`} className={`diff-line sbs-cell ${row.rightKind}`}>
                                         {renderSideBySideCell(row.rightText, row.rightKind, row.rightSegs)}
@@ -979,8 +1365,7 @@ export default function DiffView(props: DiffViewProps) {
         )
     }
 
-    const DiffViewSection = () => {
-        return (
+    const renderDiffViewSection = () => (
             <section
                 className={`diff-view ${disableCopy ? 'no-user-select' : ''}`}
                 {...copyBlockHandlers}
@@ -1011,6 +1396,101 @@ export default function DiffView(props: DiffViewProps) {
                             </li>
                         ))}
                     </ul>
+
+                    {allowTestcaseInputPurchases && (
+                        <div className="testcase-input-store">
+                            <div className="testcase-input-store__heading">
+                                <span>Reveal testcase input</span>
+                                {testcaseInputStore && (
+                                    <span className="testcase-input-store__balance">
+                                        <FaStar aria-hidden="true" />
+                                        {testcaseInputStarBalance}
+                                    </span>
+                                )}
+                            </div>
+
+                            {!testcaseInputStoreLoaded && (
+                                <div className="testcase-input-store__muted">Loading input options…</div>
+                            )}
+
+                            {testcaseInputStoreLoaded && visibleTestcaseInputOptions.length === 0 && (
+                                <div className="testcase-input-store__muted">
+                                    No failing or previously revealed testcase inputs are available.
+                                </div>
+                            )}
+
+                            {selectedTestcaseInput && (
+                                <>
+                                    <label
+                                        className="testcase-input-store__label"
+                                        htmlFor="testcase-input-select"
+                                    >
+                                        Testcase
+                                    </label>
+                                    <div className="testcase-input-store__select-wrap">
+                                        <select
+                                            id="testcase-input-select"
+                                            value={selectedTestcaseInputId ?? ''}
+                                            onChange={(event) => {
+                                                setSelectedTestcaseInputId(Number(event.target.value))
+                                                setTestcaseInputPurchaseError('')
+                                                setInputPurchaseConfirmationOpen(false)
+                                            }}
+                                        >
+                                            {visibleTestcaseInputOptions.map((testcase) => (
+                                                <option
+                                                    key={testcase.testcase_id}
+                                                    value={testcase.testcase_id}
+                                                >
+                                                    {testcase.order}. {testcase.name}
+                                                    {testcase.purchased ? ' — Revealed' : ''}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <FaChevronDown aria-hidden="true" />
+                                    </div>
+
+                                    {selectedTestcaseInput.purchased ? (
+                                        <div className="testcase-input-store__revealed">
+                                            <span>Exact input</span>
+                                            {selectedTestcaseInput.input === '' ? (
+                                                <div className="testcase-input-store__empty-input">
+                                                    This testcase has no input.
+                                                </div>
+                                            ) : (
+                                                <pre>{selectedTestcaseInput.input}</pre>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="testcase-input-store__purchase"
+                                            disabled={
+                                                !selectedTestcaseInput.purchase_eligible ||
+                                                testcaseInputStarBalance < testcaseInputCost ||
+                                                isPurchasingTestcaseInput
+                                            }
+                                            onClick={() => {
+                                                setTestcaseInputPurchaseError('')
+                                                setInputPurchaseConfirmationOpen(true)
+                                            }}
+                                        >
+                                            <FaEye aria-hidden="true" />
+                                            {testcaseInputStarBalance < testcaseInputCost
+                                                ? `Need ${testcaseInputCost} ${testcaseInputStarLabel}`
+                                                : `Reveal for ${testcaseInputCost} ${testcaseInputStarLabel}`}
+                                        </button>
+                                    )}
+                                </>
+                            )}
+
+                            {testcaseInputPurchaseError && (
+                                <div className="testcase-input-store__error" role="alert">
+                                    {testcaseInputPurchaseError}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </aside>
 
                 <div className="diff-pane">
@@ -1162,11 +1642,9 @@ export default function DiffView(props: DiffViewProps) {
                     </div>
                 </div>
             </section>
-        )
-    }
+    )
 
-    const CodeSection = () => {
-        return (
+    const renderCodeSection = () => (
             <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
                 {({ style, tokens, getLineProps, getTokenProps }) => (
                     <div
@@ -1213,15 +1691,14 @@ export default function DiffView(props: DiffViewProps) {
                     </div>
                 )}
             </Highlight>
-        )
-    }
+    )
 
     return (
         <>
             {rightPanel ? (
                 <div className="diff-code-panel">
                     <div className="diff-and-code">
-                        <DiffViewSection />
+                        {renderDiffViewSection()}
 
                         {betweenDiffAndCode}
 
@@ -1255,7 +1732,7 @@ export default function DiffView(props: DiffViewProps) {
                                         </div>
                                     )}
 
-                                    <CodeSection />
+                                    {renderCodeSection()}
                                 </>
                             )}
                         </section>
@@ -1266,7 +1743,7 @@ export default function DiffView(props: DiffViewProps) {
                 </div>
             ) : (
                 <>
-                    <DiffViewSection />
+                    {renderDiffViewSection()}
 
                     {betweenDiffAndCode}
 
@@ -1300,13 +1777,99 @@ export default function DiffView(props: DiffViewProps) {
                                     </div>
                                 )}
 
-                                <CodeSection />
+                                {renderCodeSection()}
                             </>
                         )}
                     </section>
                     {belowCode}
                 </>
             )}
+
+            {inputPurchaseConfirmationOpen &&
+                selectedTestcaseInput?.purchase_eligible &&
+                !selectedTestcaseInput.purchased ? (
+                <div
+                    className="skip-cooldown-confirmation"
+                    onMouseDown={(event) => {
+                        if (
+                            event.target === event.currentTarget &&
+                            !isPurchasingTestcaseInput
+                        ) {
+                            setInputPurchaseConfirmationOpen(false)
+                        }
+                    }}
+                >
+                    <div
+                        className="skip-cooldown-confirmation__dialog"
+                        role="alertdialog"
+                        aria-modal="true"
+                        aria-labelledby="testcase-input-confirmation-title"
+                        aria-describedby="testcase-input-confirmation-description"
+                        onKeyDown={(event) => {
+                            if (event.key === 'Escape' && !isPurchasingTestcaseInput) {
+                                setInputPurchaseConfirmationOpen(false)
+                            }
+                        }}
+                    >
+                        <span
+                            className="skip-cooldown-confirmation__icon"
+                            aria-hidden="true"
+                        >
+                            <FaStar />
+                        </span>
+                        <h2 id="testcase-input-confirmation-title">
+                            Spend {testcaseInputCost} {testcaseInputStarLabel}?
+                        </h2>
+                        <p id="testcase-input-confirmation-description">
+                            This will permanently reveal the exact input for Testcase{' '}
+                            {selectedTestcaseInput.order}: {selectedTestcaseInput.name}. This
+                            purchase cannot be undone.
+                        </p>
+
+                        <div className="skip-cooldown-confirmation__balance">
+                            <span>
+                                Current balance
+                                <strong>{formatStarCount(testcaseInputStarBalance)}</strong>
+                            </span>
+                            <FaArrowRight aria-hidden="true" />
+                            <span>
+                                Balance after
+                                <strong>
+                                    {formatStarCount(
+                                        Math.max(
+                                            0,
+                                            testcaseInputStarBalance - testcaseInputCost
+                                        )
+                                    )}
+                                </strong>
+                            </span>
+                        </div>
+
+                        <div className="skip-cooldown-confirmation__actions">
+                            <button
+                                type="button"
+                                className="skip-cooldown-confirmation__cancel"
+                                disabled={isPurchasingTestcaseInput}
+                                onClick={() => setInputPurchaseConfirmationOpen(false)}
+                                autoFocus
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="skip-cooldown-confirmation__confirm"
+                                disabled={isPurchasingTestcaseInput}
+                                onClick={purchaseSelectedTestcaseInput}
+                            >
+                                <FaEye aria-hidden="true" />
+                                {isPurchasingTestcaseInput
+                                    ? 'Spending...'
+                                    : `Confirm and spend ${testcaseInputCost} ${testcaseInputStarLabel}`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </>
     )
 }

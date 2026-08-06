@@ -3,15 +3,13 @@ import re
 from operator import and_
 from typing import Dict, List
 
-from sqlalchemy import asc, desc
-
 from src.constants import STUDENT_ROLE
 from src.repositories.database import db
 from .models import ClassAssignments, LectureSections, Users, LoginAttempts, Labs
 from flask_jwt_extended import current_user
 
 
-class UserRepository():
+class UserRepository:
 
     def get_user_status(self) -> str:
         return str(self.get_highest_class_role(getattr(current_user, "Id", None)))
@@ -66,18 +64,6 @@ class UserRepository():
         user = Users.query.filter(Users.Id == user_id).one_or_none()
         return user
 
-    #TODO: Remove in favor of calling get_user
-    def get_user_by_id(self, user_id: int) -> Users:
-        """
-        Retrieves a user from the database by their ID.
-
-        Args:
-            user_id (int): The ID of the user to retrieve.
-
-        Returns:
-            Users: The user object if found, otherwise None.
-        """
-        return Users.query.filter(Users.Id == user_id).one_or_none()
     def doesUserExist(self, username: str) -> bool:
         """Checks if a user with the given username exists in the database.
 
@@ -142,7 +128,21 @@ class UserRepository():
         Returns:
             None
         """
-        login_attempt = LoginAttempts(IPAddress=ipadr, Username=username, Time=time)
+        attempt_time = time
+        if not isinstance(attempt_time, (datetime.datetime, datetime.date)):
+            try:
+                attempt_time = datetime.datetime.strptime(
+                    str(attempt_time),
+                    "%Y/%m/%d %H:%M:%S",
+                )
+            except (TypeError, ValueError):
+                attempt_time = datetime.datetime.now()
+
+        login_attempt = LoginAttempts(
+            IPAddress=str(ipadr or ""),
+            Username=str(username or ""),
+            AttemptedAt=attempt_time,
+        )
         db.session.add(login_attempt)
         db.session.commit()
 
@@ -185,22 +185,26 @@ class UserRepository():
         query.IsLocked=True
         db.session.commit()
     
-    def get_user_lectures(self, userIds: List[int], class_id) -> Dict[int, ClassAssignments]:
+    def get_user_lectures(self, userIds: List[int], class_id) -> Dict[int, str]:
         """Returns a dictionary of lecture names for each user in the given list of user IDs.
         
         Args:
             userIds (List[int]): A list of user IDs for which to retrieve lecture names.
             
         Returns:
-            Dict[int, ClassAssignments]: A dictionary where the keys are user IDs and the values are the names of the lectures
+            Dict[int, str]: A dictionary where the keys are user IDs and the values are the names of the lectures
             assigned to each user.
         """
         #TODO: Do we still use this? seems to only work for single class submissions.
         class_assignments = ClassAssignments.query.filter(and_(ClassAssignments.UserId.in_(userIds), ClassAssignments.ClassId == class_id)).all()
         
-        user_lectures_dict={}
+        user_lectures_dict = {user_id: "" for user_id in userIds}
         for class_assignment in class_assignments:
-            user_lectures_dict[class_assignment.UserId] = LectureSections.query.filter(LectureSections.Id == class_assignment.LectureId).one().Name
+            lecture = LectureSections.query.filter(
+                LectureSections.Id == class_assignment.LectureId
+            ).one_or_none()
+            if lecture is not None:
+                user_lectures_dict[class_assignment.UserId] = lecture.Name
 
         return user_lectures_dict
 
