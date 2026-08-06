@@ -58,6 +58,7 @@ EARLY_START_MULTIPLIER = 2
 CHECKPOINT_SKIP_COST_STARS = 6
 CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 1
 MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
+INPUT_EVENT_PREFIX = "[[[MAAT_INPUT_B64:"
 
 
 
@@ -101,6 +102,47 @@ def normalize_grader_language(language: str, solution_root: str = "") -> str:
         pass
 
     return raw or "py"
+
+
+def solution_source_uses_input(solution_root: str, language: str) -> bool:
+    """Best-effort check used to migrate legacy testcase output transcripts."""
+    if not solution_root or not os.path.exists(solution_root):
+        return False
+
+    normalized_language = normalize_grader_language(language, solution_root)
+    if normalized_language not in {"py", "java"}:
+        return False
+
+    expected_extension = ".py" if normalized_language == "py" else ".java"
+    if os.path.isdir(solution_root):
+        source_paths = [
+            os.path.join(base, filename)
+            for base, _, filenames in os.walk(solution_root)
+            for filename in filenames
+            if os.path.splitext(filename)[1].lower() == expected_extension
+        ]
+    else:
+        source_paths = [solution_root]
+
+    for source_path in source_paths:
+        try:
+            if os.path.getsize(source_path) > 2 * 1024 * 1024:
+                continue
+            with open(source_path, "r", encoding="utf-8", errors="replace") as source_file:
+                source = source_file.read()
+        except OSError:
+            continue
+
+        if normalized_language == "py" and re.search(r"\binput\s*\(", source):
+            return True
+        if normalized_language == "java" and (
+            re.search(r"\bScanner\b[\s\S]*?\.\s*next(?:Line|Boolean|Byte|Short|Int|Long|Float|Double|BigInteger|BigDecimal)?\s*\(", source)
+            or re.search(r"\bBufferedReader\b[\s\S]*?\.\s*readLine\s*\(", source)
+            or re.search(r"\bSystem\s*\.\s*console\s*\(\s*\)\s*\.\s*readLine\s*\(", source)
+        ):
+            return True
+
+    return False
 
 def parse_int(v, default: int = 0) -> int:
     try:
@@ -2392,7 +2434,7 @@ def run_solution_for_input(solution_root: str, language: str, input_text: str, p
         proc = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(solution_root) if os.path.isfile(solution_root) else solution_root)
     except Exception:
         return ""
-    out = (proc.stdout or "").strip()
+    out = (proc.stdout or "").replace("\r\n", "\n").replace("\r", "\n")
     err = (proc.stderr or "").strip()
     return (out or err)
 
@@ -2619,6 +2661,41 @@ def get_testcases(project_repo: ProjectRepository = Provide[Container.project_re
         return access_denied_response(HTTPStatus.FORBIDDEN)
     ppid = opt_int(request.args.get("checkpoint_id", ""))
     testcases = project_repo.get_testcases(int(project_id), checkpoint_id=ppid)
+
+    # Older expected outputs predate terminal-style input events. Refresh them
+    # once when Project Manage first encounters an input-reading Python/Java
+    # solution so existing projects receive the same display as new projects.
+    has_input_event = any(
+        isinstance(values, (list, tuple))
+        and len(values) > 3
+        and INPUT_EVENT_PREFIX in str(values[3] or "")
+        for values in testcases.values()
+    )
+    if testcases and not has_input_event:
+        try:
+            solution_root = project_repo.get_project_path(int(project_id), checkpoint_id=ppid)
+            project = project_repo.get_selected_project(int(project_id))
+            if ppid:
+                checkpoint = project_repo.get_checkpoint(int(ppid))
+                language = (
+                    getattr(checkpoint, "Language", "")
+                    or getattr(project, "Language", "")
+                    or ""
+                )
+            else:
+                language = getattr(project, "Language", "") or ""
+
+            if solution_source_uses_input(solution_root, language):
+                recompute_expected_outputs(
+                    project_repo,
+                    int(project_id),
+                    solution_override_path=solution_root,
+                    language_override=language,
+                    checkpoint_id=ppid,
+                )
+                testcases = project_repo.get_testcases(int(project_id), checkpoint_id=ppid)
+        except Exception as exc:
+            print(f"[get_testcases] legacy input transcript refresh failed: {exc}", flush=True)
  
     return make_response(json.dumps(list(testcases.values())), HTTPStatus.OK)
 
@@ -2707,6 +2784,24 @@ def json_add_testcases(project_repo: ProjectRepository = Provide[Container.proje
                 "output": str(testcase.get("output", "") or ""),
                 "hidden": parse_bool(testcase.get("hidden", False)),
             })
+
+        project = project_repo.get_selected_project(int(project_id))
+        language = str(getattr(project, "Language", "") or "")
+        if ppid:
+            checkpoint = project_repo.get_checkpoint(int(ppid))
+            additional_path = getattr(checkpoint, "AdditionalFilePath", "") if checkpoint else ""
+        else:
+            additional_path = getattr(project, "AdditionalFilePath", "") if project else ""
+
+        for testcase in validated_testcases:
+            testcase["output"] = run_solution_for_input(
+                sol,
+                language,
+                testcase["input"],
+                int(project_id),
+                int(class_id),
+                additional_path,
+            )
 
         existing_count = project_repo.count_testcases(
             int(project_id),

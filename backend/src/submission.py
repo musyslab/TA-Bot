@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import os
+import re
 import threading
 import requests
 import urllib3
@@ -1051,6 +1052,72 @@ def testcase_input_rows_for_scope(project_id: int, checkpoint_id: int):
     return query.order_by(Testcases.SortOrder.asc(), Testcases.Id.asc()).all()
 
 
+INPUT_EVENT_PATTERN = re.compile(
+    r"\[\[\[MAAT_INPUT_B64:[A-Za-z0-9_-]*\]\]\]"
+)
+HIDDEN_INPUT_EVENT = "[[[MAAT_INPUT_HIDDEN]]]"
+
+
+def redact_input_events(value):
+    if isinstance(value, str):
+        return INPUT_EVENT_PATTERN.sub(HIDDEN_INPUT_EVENT, value)
+    if isinstance(value, list):
+        return [redact_input_events(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: redact_input_events(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def protect_unrevealed_testcase_inputs(
+    output_json,
+    user_id: int,
+    class_id: int,
+    project_id: int,
+    checkpoint_id: int,
+):
+    """Remove exact testcase values from student diff payloads until purchased."""
+    try:
+        ensure_incentive_tables()
+        testcase_rows = testcase_input_rows_for_scope(project_id, checkpoint_id)
+        purchased_ids = {
+            int(row.TestcaseId)
+            for row in StudentTestcaseInputPurchases.query.filter(
+                StudentTestcaseInputPurchases.UserId == int(user_id),
+                StudentTestcaseInputPurchases.ClassId == int(class_id),
+                StudentTestcaseInputPurchases.ProjectId == int(project_id),
+                StudentTestcaseInputPurchases.CheckpointId == int(checkpoint_id),
+            ).all()
+        }
+        revealed_orders = {
+            order
+            for order, testcase in enumerate(testcase_rows, start=1)
+            if int(testcase.Id) in purchased_ids
+        }
+
+        payload = json.loads(output_json) if isinstance(output_json, str) else (output_json or {})
+        results = payload.get("results", []) if isinstance(payload, dict) else []
+
+        for index, result in enumerate(results, start=1):
+            if not isinstance(result, dict):
+                results[index - 1] = redact_input_events(result)
+                continue
+
+            result_order = parse_int(
+                result.get("order", (result.get("test") or {}).get("order", index)),
+                index,
+            )
+            if result_order not in revealed_orders:
+                results[index - 1] = redact_input_events(result)
+
+        return json.dumps(payload, sort_keys=True, indent=4)
+    except Exception:
+        # Fail closed: a malformed or unexpected payload must not expose input.
+        return INPUT_EVENT_PATTERN.sub(HIDDEN_INPUT_EVENT, str(output_json or ""))
+
+
 def testcase_result_status(result: dict) -> str:
     if parse_bool(result.get("skipped", False)):
         return "skipped"
@@ -1266,6 +1333,18 @@ def get_testcase_errors(submission_repo: SubmissionRepository = Provide[Containe
 
     output = convert_tap_to_json(submission.OutputFilepath, current_user_effective_role(), 0, False)
     output = apply_hidden_flags_to_results(output, int(projectid), checkpoint_id)
+
+    project = Projects.query.filter(Projects.Id == int(projectid)).first()
+    submission_class_id = int(getattr(project, "ClassId", 0) or 0)
+
+    if current_user_class_role(submission_class_id) == STUDENT_ROLE:
+        output = protect_unrevealed_testcase_inputs(
+            output,
+            current_user_id(),
+            submission_class_id,
+            int(projectid),
+            int(checkpoint_id or 0),
+        )
 
     return make_response(output, HTTPStatus.OK)
 

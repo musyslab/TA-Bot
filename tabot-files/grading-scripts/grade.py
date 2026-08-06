@@ -22,7 +22,7 @@ import re
 import sys
 from typing import Any, Dict, List, Tuple
 
-from judge0 import execute_test
+from judge0 import INPUT_EVENT_PREFIX, execute_test, strip_input_events
 
 
 def normalize_newlines(text: str) -> str:
@@ -102,6 +102,8 @@ def build_short_diff(student_text: str, expected_text: str, from_name: str = "ac
         expected_line = expected_lines[i] if i < len(expected_lines) else None
 
         if student_line == expected_line:
+            if student_line is not None and INPUT_EVENT_PREFIX in student_line:
+                changed.append(f" {student_line}")
             continue
 
         if student_line is not None:
@@ -284,13 +286,15 @@ def admin_run(language: str, user_input: str, path: str, additional_files: Any) 
 
     runner_response = execute_test(path, user_input, language, additional_files)
     combined = (
-        runner_response.get("stdout")
+        runner_response.get("stdout_transcript")
+        or runner_response.get("stdout")
         or runner_response.get("stderr")
         or runner_response.get("compile_output")
         or ""
     )
     combined = normalize_newlines(combined)
-    print(combined)
+    sys.stdout.write(combined)
+    sys.stdout.flush()
     return combined
 
 def run(student_name: str, language: str, testcases_json: str, path: str, additional_file_path: Any, root: str) -> int:
@@ -356,13 +360,16 @@ def run(student_name: str, language: str, testcases_json: str, path: str, additi
             entry_class=entry_class,
         )
 
-        student_text = normalize_newlines(
-            runner_resp.get("stdout")
+        student_text = normalize_newlines(runner_resp.get("stdout") or "")
+        student_transcript = normalize_newlines(
+            runner_resp.get("stdout_transcript")
+            or runner_resp.get("stdout")
             or runner_resp.get("stderr")
             or runner_resp.get("compile_output")
             or ""
         )
-        expected_text = normalize_newlines(testcase_expected or "")
+        expected_transcript = normalize_newlines(testcase_expected or "")
+        expected_text = strip_input_events(expected_transcript)
 
         passed = check_passed(student_text, expected_text)
 
@@ -373,8 +380,18 @@ def run(student_name: str, language: str, testcases_json: str, path: str, additi
         else:
             from_name = f"actual:{test_name}"
             to_name = f"expected:{test_name}"
-            short_diff = build_short_diff(student_text, expected_text, from_name=from_name, to_name=to_name)
-            long_diff = build_long_diff(student_text, expected_text, from_name=from_name, to_name=to_name)
+            short_diff = build_short_diff(
+                student_transcript,
+                expected_transcript,
+                from_name=from_name,
+                to_name=to_name,
+            )
+            long_diff = build_long_diff(
+                student_transcript,
+                expected_transcript,
+                from_name=from_name,
+                to_name=to_name,
+            )
             short_same_as_long = bool(long_diff) and (short_diff == long_diff)
             if short_same_as_long:
                 short_diff = ""

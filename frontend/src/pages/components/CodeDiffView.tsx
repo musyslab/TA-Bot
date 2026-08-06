@@ -1,5 +1,5 @@
 // frontend/src/pages/components/CodeDiffView.tsx
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { diffChars } from 'diff'
 import '../../styling/CodeDiffView.scss'
@@ -15,6 +15,7 @@ import {
     FaColumns,
     FaGripLines,
     FaAlignJustify,
+    FaKeyboard,
     FaSearch,
     FaStar,
 } from 'react-icons/fa'
@@ -125,6 +126,69 @@ type SideBySideRow = {
 
 const MAX_CHANGE_RATIO_FOR_INTRA = 0.7
 const SHARED_SIDE_SCROLLBAR_EPSILON_PX = 1
+const INPUT_EVENT_PATTERN = /\[\[\[MAAT_INPUT_(?:B64:([A-Za-z0-9_-]*)|HIDDEN)\]\]\]/g
+const HIDDEN_INPUT_EVENT = '[[[MAAT_INPUT_HIDDEN]]]'
+
+function decodeInputEvent(encoded: string) {
+    try {
+        const padded = encoded.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(encoded.length / 4) * 4, '=')
+        const binary = window.atob(padded)
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+        return new TextDecoder().decode(bytes)
+    } catch {
+        return 'Unreadable input'
+    }
+}
+
+function renderInputTranscript(text: string, keyPrefix: string): React.ReactNode {
+    if (!text || !text.includes('[[[MAAT_INPUT_')) return text || '\u00A0'
+
+    const parts: React.ReactNode[] = []
+    let cursor = 0
+    let eventIndex = 0
+
+    for (const match of text.matchAll(INPUT_EVENT_PATTERN)) {
+        const start = match.index ?? 0
+        if (start > cursor) parts.push(text.slice(cursor, start))
+
+        const inputIsHidden = match[1] === undefined
+        const value = inputIsHidden ? '' : decodeInputEvent(match[1] ?? '')
+        parts.push(
+            <span
+                key={`${keyPrefix}-input-${eventIndex}`}
+                className={`input-event ${inputIsHidden ? 'is-hidden' : ''}`}
+                aria-label={inputIsHidden ? 'Program input hidden' : `Program input: ${value || 'empty input'}`}
+                title={
+                    inputIsHidden
+                        ? 'Reveal this testcase input to see its value'
+                        : 'The program paused here and read one line of input'
+                }
+            >
+                <span className="input-event__label">
+                    <FaKeyboard aria-hidden="true" /> Input
+                </span>
+                <span className={`input-event__value ${!inputIsHidden && value === '' ? 'is-empty' : ''}`}>
+                    {inputIsHidden ? (
+                        <><FaLock aria-hidden="true" /> Hidden</>
+                    ) : value === '' ? (
+                        'empty input'
+                    ) : (
+                        value
+                    )}
+                </span>
+            </span>
+        )
+        cursor = start + match[0].length
+        eventIndex++
+    }
+
+    if (cursor < text.length) parts.push(text.slice(cursor))
+    return parts
+}
+
+function concealInputEvents(text: string) {
+    return (text ?? '').replace(INPUT_EVENT_PATTERN, HIDDEN_INPUT_EVENT)
+}
 
 function diffModeStateLabel(mode: DiffMode) {
     return mode === 'short' ? 'Short' : 'Long'
@@ -240,10 +304,10 @@ function renderSegs(segs: Seg[], cls: 'add-ch' | 'del-ch') {
     return segs.map((seg, idx) =>
         seg.changed ? (
             <span key={idx} className={`intra ${cls}`}>
-                {seg.text}
+                {renderInputTranscript(seg.text, `changed-${idx}`)}
             </span>
         ) : (
-            <span key={idx}>{seg.text}</span>
+            <span key={idx}>{renderInputTranscript(seg.text, `same-${idx}`)}</span>
         )
     )
 }
@@ -463,6 +527,22 @@ export default function DiffView(props: DiffViewProps) {
         if (bar.scrollLeft > maxBarScrollLeft) bar.scrollLeft = maxBarScrollLeft
     }
 
+    const fetchTestcaseDiffPayload = useCallback(() =>
+        axios
+            .get(
+                `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?id=${submissionId}&class_id=${classId}` +
+                `&practice=${isPractice ? 1 : 0}` +
+                (practiceProblemId != null ? `&practice_problem_id=${practiceProblemId}` : ``),
+                {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
+                }
+            )
+            .then((res) => {
+                const maybe = safeJsonParse(res.data)
+                return (maybe && typeof maybe === 'object' ? maybe : { results: [] }) as AnyPayload
+            }),
+    [submissionId, classId, isPractice, practiceProblemId])
+
     useEffect(() => {
         setTestsLoaded(false)
         setPayload({ results: [] })
@@ -476,17 +556,9 @@ export default function DiffView(props: DiffViewProps) {
             return
         }
 
-        axios
-            .get(
-                `${import.meta.env.VITE_API_URL}/submissions/testcaseerrors?id=${submissionId}&class_id=${classId}` +
-                `&practice=${isPractice ? 1 : 0}` +
-                (practiceProblemId != null ? `&practice_problem_id=${practiceProblemId}` : ``),
-                {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('AUTOTA_AUTH_TOKEN')}` },
-                })
-            .then((res) => {
-                const maybe = safeJsonParse(res.data)
-                setPayload((maybe && typeof maybe === 'object' ? maybe : { results: [] }) as AnyPayload)
+        fetchTestcaseDiffPayload()
+            .then((nextPayload) => {
+                setPayload(nextPayload)
                 setTestsLoaded(true)
             })
             .catch((err) => {
@@ -494,7 +566,7 @@ export default function DiffView(props: DiffViewProps) {
                 setPayload({ results: [] })
                 setTestsLoaded(true)
             })
-    }, [submissionId, classId, isPractice, practiceProblemId])
+    }, [submissionId, classId, isPractice, practiceProblemId, fetchTestcaseDiffPayload])
 
     useEffect(() => {
         setTestcaseInputStore(null)
@@ -789,6 +861,13 @@ export default function DiffView(props: DiffViewProps) {
                     testcases: Array.isArray(store?.testcases) ? store.testcases : [],
                 })
                 setInputPurchaseConfirmationOpen(false)
+                fetchTestcaseDiffPayload()
+                    .then((nextPayload) => setPayload(nextPayload))
+                    .catch(() => {
+                        setTestcaseInputPurchaseError(
+                            'The input was revealed, but the diff could not refresh. Reload the page to view it.'
+                        )
+                    })
             })
             .catch((err) => {
                 const nextBalance = Number(err?.response?.data?.star_balance)
@@ -842,13 +921,35 @@ export default function DiffView(props: DiffViewProps) {
         }
     }, [selectedFile, diffMode])
 
+    const selectedTestcaseInputForDiff = useMemo(
+        () =>
+            (testcaseInputStore?.testcases ?? []).find(
+                (testcase) => testcase.order === selectedFile?.order
+            ) ?? null,
+        [testcaseInputStore, selectedFile]
+    )
+
     const selectedDiffText = useMemo(() => {
         if (!selectedFile) return ''
         if (selectedFile.passed) return ''
         if (selectedFile.hidden && !revealHiddenOutput) return ''
-        if (selectedFile.shortDiffSameAsLong) return selectedFile.longDiff ?? ''
-        return diffMode === 'short' ? (selectedFile.shortDiff ?? '') : (selectedFile.longDiff ?? '')
-    }, [selectedFile, diffMode, revealHiddenOutput])
+        const diffText = selectedFile.shortDiffSameAsLong
+            ? selectedFile.longDiff ?? ''
+            : diffMode === 'short'
+                ? selectedFile.shortDiff ?? ''
+                : selectedFile.longDiff ?? ''
+
+        const canRevealInput =
+            !allowTestcaseInputPurchases || Boolean(selectedTestcaseInputForDiff?.purchased)
+
+        return canRevealInput ? diffText : concealInputEvents(diffText)
+    }, [
+        selectedFile,
+        diffMode,
+        revealHiddenOutput,
+        allowTestcaseInputPurchases,
+        selectedTestcaseInputForDiff,
+    ])
 
     useEffect(() => {
         if (diffLayout !== 'side-by-side') return
@@ -1113,12 +1214,14 @@ export default function DiffView(props: DiffViewProps) {
             return (
                 <>
                     <span className="diff-sign">{kind === 'add' ? '+' : '-'}</span>
-                    {segs ? renderSegs(segs, kind === 'add' ? 'add-ch' : 'del-ch') : rawText || '\u00A0'}
+                    {segs
+                        ? renderSegs(segs, kind === 'add' ? 'add-ch' : 'del-ch')
+                        : renderInputTranscript(rawText, `side-${kind}`)}
                 </>
             )
         }
 
-        return text || '\u00A0'
+        return renderInputTranscript(text, `side-${kind}`)
     }
 
     const renderStackedDiff = () => {
@@ -1167,13 +1270,13 @@ export default function DiffView(props: DiffViewProps) {
                     out.push(
                         <div key={`d-${i}`} className="diff-line del">
                             <span className="diff-sign">-</span>
-                            {delText || '\u00A0'}
+                            {renderInputTranscript(delText, `stacked-del-${i}`)}
                         </div>
                     )
                     out.push(
                         <div key={`a-${i + 1}`} className="diff-line add">
                             <span className="diff-sign">+</span>
-                            {addText || '\u00A0'}
+                            {renderInputTranscript(addText, `stacked-add-${i}`)}
                         </div>
                     )
                     i++
@@ -1201,7 +1304,7 @@ export default function DiffView(props: DiffViewProps) {
 
             out.push(
                 <div key={i} className={`diff-line ${cls}`}>
-                    {line || ' '}
+                    {renderInputTranscript(line, `stacked-line-${i}`)}
                 </div>
             )
         }

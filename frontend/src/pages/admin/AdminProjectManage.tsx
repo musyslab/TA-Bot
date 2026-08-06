@@ -21,6 +21,7 @@ import {
     FaEdit,
     FaExchangeAlt,
     FaFileAlt,
+    FaKeyboard,
     FaPlusCircle,
     FaRegFile,
     FaTimes,
@@ -43,6 +44,54 @@ class Testcase {
     output: string
     hidden: boolean
     order: number
+}
+
+const INPUT_EVENT_PATTERN = /\[\[\[MAAT_INPUT_B64:([A-Za-z0-9_-]*)\]\]\]/g
+
+function decodeInputEvent(encoded: string) {
+    try {
+        const padded = encoded.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(encoded.length / 4) * 4, '=')
+        const binary = window.atob(padded)
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+        return new TextDecoder().decode(bytes)
+    } catch {
+        return 'Unreadable input'
+    }
+}
+
+function InputTranscript({ text }: { text: string }) {
+    if (!text || !text.includes('[[[MAAT_INPUT_B64:')) return <>{text}</>
+
+    const parts: React.ReactNode[] = []
+    let cursor = 0
+    let eventIndex = 0
+
+    for (const match of text.matchAll(INPUT_EVENT_PATTERN)) {
+        const start = match.index ?? 0
+        if (start > cursor) parts.push(text.slice(cursor, start))
+
+        const value = decodeInputEvent(match[1] ?? '')
+        parts.push(
+            <span
+                key={`project-input-${eventIndex}`}
+                className="input-event"
+                aria-label={`Program input: ${value || 'empty input'}`}
+                title="The solution paused here and read one line of input"
+            >
+                <span className="input-event__label">
+                    <FaKeyboard aria-hidden="true" /> Input
+                </span>
+                <span className={`input-event__value ${value === '' ? 'is-empty' : ''}`}>
+                    {value === '' ? 'empty input' : value}
+                </span>
+            </span>
+        )
+        cursor = start + match[0].length
+        eventIndex++
+    }
+
+    if (cursor < text.length) parts.push(text.slice(cursor))
+    return <>{parts}</>
 }
 
 type AdminProjectManageProps = {
@@ -2043,7 +2092,7 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
                                                                             <pre className="testcase-input">{tc.input}</pre>
                                                                         </td>
                                                                         <td>
-                                                                            <pre className="testcase-output">{tc.output}</pre>
+                                                                            <pre className="testcase-output"><InputTranscript text={tc.output} /></pre>
                                                                         </td>
                                                                         <td>
                                                                             <button
@@ -2276,13 +2325,14 @@ const AdminProjectManage = ({ practiceMode = false }: AdminProjectManageProps) =
 
                                         <div className="form-field modal-textarea">
                                             <label>Output</label>
-                                            <textarea
-                                                className="modal-textarea"
-                                                rows={1}
-                                                value={selectedTestCase?.output || ''}
-                                                readOnly
+                                            <div
+                                                className="testcase-output-preview"
+                                                role="textbox"
                                                 aria-readonly="true"
-                                            />
+                                                tabIndex={0}
+                                            >
+                                                <InputTranscript text={selectedTestCase?.output || ''} />
+                                            </div>
                                         </div>
 
                                         <div className="form-field modal-checkbox">
