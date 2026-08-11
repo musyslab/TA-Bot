@@ -24,19 +24,9 @@ Install and verify npm is working:
 
 Install Docker (Follow instructions at: https://docs.docker.com/engine/install/ubuntu/)
 
-Make it so you don't have to run sudo everytime in docker:
-
-```sudo usermod -aG docker $USER```
-
-```source ~/.bashrc```
-
-```newgrp docker```
-
-```docker run hello-world```
-
 ## Install MAAT:
 
-```git clone https://github.com/musyslab/TA-Bot.git```
+```git clone https://github.com/musyslab/MAAT.git```
 
 Inside MAAT folder, make file named tabot.env. Enter environment variables.
 
