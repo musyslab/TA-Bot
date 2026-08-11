@@ -10,10 +10,6 @@ It is currently maintained by Sam Mazzone.
 
 Download Ubuntu App from Windows Store
 
-Launch Ubuntu App
-
-Make username/password
-
 ## Install packages:
 
 In Ubuntu:
@@ -22,17 +18,7 @@ Update Packages:
 
 ```sudo apt update```
 
-Install nvm:
-
-```curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash```
-
-Install Node.js:
-
-```nvm install --latest-npm```
-
-Verify node/npm is working:
-
-```node -v```
+Install and verify npm is working:
 
 ```npm -v```
 
@@ -52,7 +38,7 @@ Make it so you don't have to run sudo everytime in docker:
 
 ```git clone https://github.com/musyslab/TA-Bot.git```
 
-Enter Github username and personal access token (not password)
+Inside MAAT folder, make file named tabot.env. Enter environment variables.
 
 Go into frontend folder:
 
@@ -60,9 +46,7 @@ Go into frontend folder:
 
 Still in the frontend folder, create a file named: ```.env```
 
-Add the following line to that file: ```VITE_API_URL=http://localhost:5000/api```
-
-(Or different URL for Production)
+Add the following line to that file: ```VITE_API_URL=http://localhost:5000/api``` (Or different URL for Production)
 
 ## Run MAAT
 
@@ -79,10 +63,6 @@ It will take a while to compile the first time, but once it is ready navigate to
 Download DBDeaver: https://dbeaver.io/download/
 
 In DBBeaver, connect to: ```localhost:3306```
-
-## Setup Database for First Time Use
-
-Classes, lectures, and labs need to be customized 
 
 ## Pushing Docker Image to Production:
 
