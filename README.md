@@ -28,7 +28,7 @@ Install Docker (Follow instructions at: https://docs.docker.com/engine/install/u
 
 ```git clone https://github.com/musyslab/MAAT.git```
 
-Inside MAAT folder, make file named tabot.env. Enter environment variables.
+Inside MAAT folder, make file named ```tabot.env``` Enter environment variables.
 
 Go into frontend folder:
 
