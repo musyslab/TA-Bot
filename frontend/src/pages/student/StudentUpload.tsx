@@ -6,6 +6,10 @@ import LoadingAnimation from "../components/LoadingAnimation";
 import { Helmet } from "react-helmet";
 import { useParams, Link } from "react-router-dom";
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs";
+import PythonIDE, {
+  PythonIdeRunRequest,
+  PythonIdeRunResult,
+} from "../components/PythonIDE";
 import "../../styling/StudentUpload.scss";
 import "../../styling/FileUploadCommon.scss";
 
@@ -119,6 +123,8 @@ type IncentiveState = {
   reward_already_awarded?: boolean;
   reward_started_early?: boolean;
 };
+
+type SubmissionMethod = "editor" | "upload";
 
 const CHECKPOINT_SCHEDULE = [
   { attempt: 1, label: "Attempt 1", value: "No wait" },
@@ -305,6 +311,13 @@ const StudentUpload = () => {
 
   const [files, setFiles] = useState<File[]>([]);
   const [mainJavaFileName, setMainJavaFileName] = useState<string>("");
+  const [submissionMethod, setSubmissionMethod] =
+    useState<SubmissionMethod>("upload");
+  const [pythonIdeEnabled, setPythonIdeEnabled] = useState<boolean>(false);
+  const [pythonFilename, setPythonFilename] = useState<string>("main.py");
+  const [pythonSource, setPythonSource] = useState<string>(
+    "# Write your Python program here\n\n",
+  );
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error_message, setError_Message] = useState<string>("");
@@ -434,7 +447,15 @@ const StudentUpload = () => {
     : "Main submission";
   const submissionTypeShortLabel = isCheckpoint ? "Checkpoint" : "Main";
   const canSkipCooldown = isCoolingDown && cooldownSkipCost > 0 && starBalance >= cooldownSkipCost;
-  const canSubmit = !passedAllTests && !isCoolingDown && !isCooldownStateLoading;
+  const hasSelectedProgram =
+    submissionMethod === "editor"
+      ? pythonIdeEnabled && Boolean(pythonSource.trim())
+      : files.length > 0;
+  const canSubmit =
+    !passedAllTests &&
+    !isCoolingDown &&
+    !isCooldownStateLoading &&
+    hasSelectedProgram;
 
   const formatCooldown = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -923,6 +944,50 @@ const StudentUpload = () => {
   }, [cid, routeProjectId, moduleId]);
 
   useEffect(() => {
+    if (!Number.isFinite(cid) || cid <= 0 || project_id <= 0) {
+      setPythonIdeEnabled(false);
+      setSubmissionMethod("upload");
+      return;
+    }
+
+    let cancelled = false;
+
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/upload/ide-context`, {
+        headers: authHeader(),
+        params: {
+          class_id: cid,
+          project_id,
+          checkpoint_id: isCheckpoint ? checkpointId : undefined,
+        },
+      })
+      .then((res) => {
+        if (cancelled) return;
+
+        const enabled = Boolean(res?.data?.python_ide_enabled);
+        setPythonIdeEnabled(enabled);
+
+        const defaultFilename = String(res?.data?.default_filename || "").trim();
+        if (enabled && defaultFilename.toLowerCase().endsWith(".py")) {
+          setPythonFilename(defaultFilename);
+        }
+
+        if (!enabled) {
+          setSubmissionMethod("upload");
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPythonIdeEnabled(false);
+        setSubmissionMethod("upload");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cid, project_id, isCheckpoint, checkpointId]);
+
+  useEffect(() => {
     if (!project_id || project_id <= 0 || project_id === -1) {
       setPassedAllTests(false);
       setCheckedPassedAll(true);
@@ -1075,6 +1140,7 @@ const StudentUpload = () => {
     }
 
     setIsErrorMessageHidden(true);
+    setSubmissionMethod("upload");
     setFiles(valid);
   }
 
@@ -1230,6 +1296,29 @@ const StudentUpload = () => {
     return `code${sidPart}${qs}`;
   }
 
+  async function runPythonProgram(
+    runRequest: PythonIdeRunRequest,
+  ): Promise<PythonIdeRunResult> {
+    if (!pythonIdeEnabled) {
+      throw new Error("The Python IDE is not available for this assignment.");
+    }
+
+    const response = await axios.post(
+      `${import.meta.env.VITE_API_URL}/upload/run-python`,
+      {
+        class_id: cid,
+        project_id,
+        checkpoint_id: isCheckpoint ? checkpointId : null,
+        filename: runRequest.filename,
+        source: runRequest.source,
+        stdin: runRequest.stdin,
+      },
+      { headers: authHeader() },
+    );
+
+    return response.data as PythonIdeRunResult;
+  }
+
   function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
 
@@ -1257,13 +1346,41 @@ const StudentUpload = () => {
       return;
     }
 
-    if (files.length === 0) {
+    if (submissionMethod === "editor" && !pythonIdeEnabled) {
+      setError_Message("The Python IDE is not available for this assignment.");
+      setIsErrorMessageHidden(false);
+      return;
+    }
+
+    const editorFilename = pythonFilename.trim();
+
+    if (
+      submissionMethod === "editor" &&
+      (!editorFilename || !editorFilename.toLowerCase().endsWith(".py"))
+    ) {
+      setError_Message("The Python program file name must end in .py.");
+      setIsErrorMessageHidden(false);
+      return;
+    }
+
+    if (submissionMethod === "editor" && !pythonSource.trim()) {
+      setError_Message("Enter Python code before submitting the program.");
+      setIsErrorMessageHidden(false);
+      return;
+    }
+
+    const submissionFiles =
+      submissionMethod === "editor"
+        ? [new File([pythonSource], editorFilename, { type: "text/x-python" })]
+        : files;
+
+    if (submissionFiles.length === 0) {
       setError_Message("Please select a file to upload.");
       setIsErrorMessageHidden(false);
       return;
     }
 
-    if (files.length > 1 && !files.every(isJavaFile)) {
+    if (submissionFiles.length > 1 && !submissionFiles.every(isJavaFile)) {
       setError_Message(
         "Multi-file upload is only available for Java (.java) files.",
       );
@@ -1271,7 +1388,7 @@ const StudentUpload = () => {
       return;
     }
 
-    if (files.some((f) => !isAllowedFileName(f.name))) {
+    if (submissionFiles.some((f) => !isAllowedFileName(f.name))) {
       setError_Message("Only .py, .java, .c, or .rkt files are allowed.");
       setIsErrorMessageHidden(false);
       return;
@@ -1282,7 +1399,7 @@ const StudentUpload = () => {
 
     const formData = new FormData();
 
-    files.forEach((f) => formData.append("files", f, f.name));
+    submissionFiles.forEach((f) => formData.append("files", f, f.name));
     formData.append("class_id", cid.toString());
     formData.append("project_id", project_id.toString());
 
@@ -1462,7 +1579,10 @@ const StudentUpload = () => {
 
   return (
     <div className="student-upload-page">
-      <LoadingAnimation show={isLoading} message="Uploading..." />
+      <LoadingAnimation
+        show={isLoading}
+        message={submissionMethod === "editor" ? "Submitting..." : "Uploading..."}
+      />
 
       <Helmet>
         <title>MAAT</title>
@@ -1647,7 +1767,49 @@ const StudentUpload = () => {
               className={`upload-form ${isLoading ? "is-loading" : ""}`}
               onSubmit={handleSubmit}
             >
+            {pythonIdeEnabled ? (
+              <fieldset className="student-upload-program-source">
+                <legend className="student-upload-program-source__legend">
+                  Choose how to provide your program
+                </legend>
+                <div className="student-upload-program-source__options">
+                  <button
+                    type="button"
+                    className={`student-upload-program-source__option ${submissionMethod === "upload" ? "is-active" : ""}`}
+                    aria-pressed={submissionMethod === "upload"}
+                    onClick={() => {
+                      setSubmissionMethod("upload");
+                      setIsErrorMessageHidden(true);
+                    }}
+                  >
+                    Upload program
+                  </button>
+                  <button
+                    type="button"
+                    className={`student-upload-program-source__option ${submissionMethod === "editor" ? "is-active" : ""}`}
+                    aria-pressed={submissionMethod === "editor"}
+                    onClick={() => {
+                      setSubmissionMethod("editor");
+                      setIsErrorMessageHidden(true);
+                    }}
+                  >
+                    Write Python
+                  </button>
+                </div>
+              </fieldset>
+            ) : null}
+
             <div className="dropzone">
+              {submissionMethod === "editor" && pythonIdeEnabled ? (
+                <PythonIDE
+                  filename={pythonFilename}
+                  source={pythonSource}
+                  disabled={project_id <= 0}
+                  onFilenameChange={setPythonFilename}
+                  onSourceChange={setPythonSource}
+                  onRun={runPythonProgram}
+                />
+              ) : (
               <div
                 className={`file-drop-area ${isCoolingDown ? "is-cooldown-locked" : ""}`}
                 aria-disabled={isCoolingDown}
@@ -1691,6 +1853,7 @@ const StudentUpload = () => {
                   }
 
                   setIsErrorMessageHidden(true);
+                  setSubmissionMethod("upload");
                   setFiles(valid);
                 }}
               >
@@ -1761,8 +1924,9 @@ const StudentUpload = () => {
                   </div>
                 )}
               </div>
+              )}
 
-              {isCooldownStateLoading && !passedAllTests ? (
+              {submissionMethod === "upload" && isCooldownStateLoading && !passedAllTests ? (
                 <div
                   className="submission-cooldown-lock is-checking"
                   role="status"
@@ -1774,7 +1938,7 @@ const StudentUpload = () => {
                     <p>Verifying whether this project is ready for another submission.</p>
                   </div>
                 </div>
-              ) : isCoolingDown && !passedAllTests ? (
+              ) : submissionMethod === "upload" && isCoolingDown && !passedAllTests ? (
                 <div
                   className="submission-cooldown-lock"
                   role="status"
@@ -1841,9 +2005,33 @@ const StudentUpload = () => {
               <button
                 type="submit"
                 disabled={!is_allowed_to_submit || !canSubmit || passedAllTests || isLoading}
-                className={`primary ${!is_allowed_to_submit || !canSubmit || isLoading ? "disabled" : ""}`}
+                className={[
+                  "primary",
+                  "student-upload-submit",
+                  !is_allowed_to_submit || !canSubmit || isLoading
+                    ? "disabled"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
               >
-                {isCooldownStateLoading ? "Checking Cooldown" : isCoolingDown ? "Cooling Down" : "Upload"}
+                <span
+                  className="student-upload-submit__icon"
+                  aria-hidden="true"
+                >
+                  {isCooldownStateLoading || isCoolingDown ? (
+                    <FaClock />
+                  ) : (
+                    <FaCheckCircle />
+                  )}
+                </span>
+                <span>
+                  {isCooldownStateLoading
+                    ? "Checking Cooldown"
+                    : isCoolingDown
+                      ? "Cooling Down"
+                      : "Submit program"}
+                </span>
               </button>
             </div>
 

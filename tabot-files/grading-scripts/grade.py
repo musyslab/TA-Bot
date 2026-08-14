@@ -297,6 +297,48 @@ def admin_run(language: str, user_input: str, path: str, additional_files: Any) 
     sys.stdout.flush()
     return combined
 
+
+def ide_run(
+    language: str,
+    user_input: str,
+    path: str,
+    additional_files: Any,
+) -> Dict[str, Any]:
+    """Run an IDE program through Judge0 and preserve each output channel."""
+    if isinstance(additional_files, str):
+        raw = additional_files.strip()
+        if raw.startswith("[") or raw.startswith("{"):
+            try:
+                additional_files = json.loads(raw)
+            except Exception:
+                pass
+
+    runner_response = execute_test(
+        path,
+        user_input,
+        language,
+        additional_files,
+    )
+
+    stderr = normalize_newlines(runner_response.get("stderr") or "")
+
+    return {
+        "stdout": normalize_newlines(runner_response.get("stdout") or ""),
+        "stdout_transcript": normalize_newlines(
+            runner_response.get("stdout_transcript")
+            or runner_response.get("stdout")
+            or ""
+        ),
+        "stderr": stderr,
+        "compile_output": normalize_newlines(
+            runner_response.get("compile_output") or ""
+        ),
+        "waiting_for_input": bool(
+            re.search(r"EOFError:\s*EOF when reading a line", stderr)
+        ),
+    }
+
+
 def run(student_name: str, language: str, testcases_json: str, path: str, additional_file_path: Any, root: str) -> int:
     output_dir = pick_output_directory(path, root)
     os.makedirs(output_dir, exist_ok=True)
@@ -416,6 +458,21 @@ def run(student_name: str, language: str, testcases_json: str, path: str, additi
 
 
 def main() -> int:
+    # IDE mode:
+    #   grade.py IDE <language> <input_text> <solution_path> [additional_files_json]
+    if len(sys.argv) >= 5 and sys.argv[1] == "IDE":
+        language = sys.argv[2]
+        user_input = sys.argv[3]
+        paths = sys.argv[4]
+        additional = sys.argv[5] if len(sys.argv) > 5 else ""
+        json.dump(
+            ide_run(language, user_input, paths, additional),
+            sys.stdout,
+            ensure_ascii=False,
+        )
+        sys.stdout.flush()
+        return 0
+
     # ADMIN mode:
     #   grade.py ADMIN <language> <input_text> <solution_path> [additional_files_json]
     if len(sys.argv) >= 5 and sys.argv[1] == "ADMIN":
