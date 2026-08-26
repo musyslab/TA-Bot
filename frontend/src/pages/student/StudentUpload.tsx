@@ -1,11 +1,13 @@
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import MenuComponent from "../components/MenuComponent";
+import StarSpendingInfo from "../components/StarSpendingInfo";
 import ErrorMessage from "../components/ErrorMessage";
 import LoadingAnimation from "../components/LoadingAnimation";
 import { Helmet } from "react-helmet";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs";
+import DiffView from "../components/CodeDiffView";
 import PythonIDE, {
   PythonIdeRunRequest,
   PythonIdeRunResult,
@@ -19,13 +21,15 @@ import {
   FaBan,
   FaBolt,
   FaCloudUploadAlt,
+  FaCompressAlt,
   FaCode,
   FaClock,
-  FaDownload,
   FaExchangeAlt,
+  FaExpandAlt,
+  FaExternalLinkAlt,
+  FaFileWord,
   FaRegFile,
   FaTimesCircle,
-  FaExternalLinkAlt,
   FaCheckCircle,
   FaEye,
   FaFilePowerpoint,
@@ -125,6 +129,18 @@ type IncentiveState = {
 };
 
 type SubmissionMethod = "editor" | "upload";
+
+type StudentUploadSection = "instructions" | "submission" | "testcases";
+
+type StudentUploadProps = {
+  initialSection?: StudentUploadSection;
+};
+
+type AssignmentPreview = {
+  url: string;
+  contentType: string;
+  filename: string;
+};
 
 const CHECKPOINT_SCHEDULE = [
   { attempt: 1, label: "Attempt 1", value: "No wait" },
@@ -265,32 +281,26 @@ const getPastCheckpointSubmission = (
     };
 };
 
-const downloadBlobResponse = (res: any, fallbackName: string) => {
-  const type =
-    (res.headers as any)["content-type"] || "application/octet-stream";
-  const blob = new Blob([res.data], { type });
-  const name = (res.headers as any)["x-filename"] || fallbackName;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
+const submissionIdAsNumber = (
+  value: number | string | null | undefined,
+): number | null => {
+  const normalized = normalizePositiveSubmissionId(value);
+  if (normalized === null) return null;
 
-  a.href = url;
-  a.download = name;
-
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(url);
+  const parsed = Number(normalized);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
-const StudentUpload = () => {
+const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
   const {
+    id,
     school_id,
     class_id,
     module_id,
     project_id: route_project_id,
     checkpoint_id,
   } = useParams<{
+    id?: string;
     school_id?: string;
     class_id?: string;
     module_id?: string;
@@ -302,6 +312,7 @@ const StudentUpload = () => {
   const schoolId = parsePositiveInt(school_id);
   const moduleId = parsePositiveInt(module_id);
   const routeProjectId = parsePositiveInt(route_project_id);
+  const routeSubmissionId = parsePositiveInt(id);
 
   const checkpointId = parsePositiveInt(checkpoint_id);
   const isCheckpoint = checkpointId !== null;
@@ -354,6 +365,73 @@ const StudentUpload = () => {
   const [checkpointLabel, setCheckpointLabel] = useState<string>("");
   const [hideClassSelectionCrumb, setHideClassSelectionCrumb] =
     useState<boolean>(false);
+  const [assignmentPreview, setAssignmentPreview] =
+    useState<AssignmentPreview | null>(null);
+  const [isAssignmentPreviewLoading, setIsAssignmentPreviewLoading] =
+    useState<boolean>(false);
+  const [assignmentPreviewError, setAssignmentPreviewError] =
+    useState<string>("");
+  const [presentationPreview, setPresentationPreview] =
+    useState<AssignmentPreview | null>(null);
+  const [isPresentationPreviewLoading, setIsPresentationPreviewLoading] =
+    useState<boolean>(false);
+  const [presentationPreviewError, setPresentationPreviewError] =
+    useState<string>("");
+  const [activeWorkspaceSection, setActiveWorkspaceSection] =
+    useState<StudentUploadSection>("instructions");
+  const [isAssignmentPreviewExpanded, setIsAssignmentPreviewExpanded] =
+    useState<boolean>(false);
+  const [isPresentationPreviewExpanded, setIsPresentationPreviewExpanded] =
+    useState<boolean>(false);
+  const [activeSubmissionId, setActiveSubmissionId] =
+    useState<number | null>(routeSubmissionId);
+  const resultsRef = useRef<HTMLElement | null>(null);
+  const initialSectionAppliedRef = useRef<boolean>(false);
+
+  const scrollToSection = useCallback((section: StudentUploadSection) => {
+    setActiveWorkspaceSection(section);
+    window.requestAnimationFrame(() => {
+      document.getElementById("student-workspace")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, []);
+
+  const openAssignmentPreview = useCallback(() => {
+    if (!assignmentPreview?.url) return;
+
+    const previewWindow = window.open(
+      assignmentPreview.url,
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    if (previewWindow) previewWindow.opener = null;
+  }, [assignmentPreview]);
+
+  const openPresentationPreview = useCallback(() => {
+    if (!presentationPreview?.url) return;
+
+    const previewWindow = window.open(
+      presentationPreview.url,
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    if (previewWindow) previewWindow.opener = null;
+  }, [presentationPreview]);
+
+  const showSubmissionResults = useCallback(
+    (submissionId: number | string | null | undefined) => {
+      const nextSubmissionId = submissionIdAsNumber(submissionId);
+      if (nextSubmissionId === null) return;
+
+      setActiveSubmissionId(nextSubmissionId);
+      window.requestAnimationFrame(() => scrollToSection("testcases"));
+    },
+    [scrollToSection],
+  );
 
   const autoGrowTextarea = (el: HTMLTextAreaElement | null) => {
     if (!el) return;
@@ -414,9 +492,16 @@ const StudentUpload = () => {
   const testcaseProgress = useMemo(() => {
     const total = Math.max(0, testcasesTotalCount);
     const passed = Math.max(0, Math.min(testcasesPassedCount, total));
+    const failed = Math.max(0, total - passed);
     const pct = total === 0 ? 0 : Math.round((passed / total) * 100);
-    return { total, passed, pct };
+    return { total, passed, failed, pct };
   }, [testcasesPassedCount, testcasesTotalCount]);
+
+  const hasNonPassingSubmission =
+    checkedPassedAll &&
+    testcaseProgress.total > 0 &&
+    !passedAllTests &&
+    (activeSubmissionId !== null || previousSubmissionId !== null);
 
   const cooldownRemainingSeconds = useMemo(() => {
     return Math.max(0, Math.ceil((cooldownLiftedAtMs - nowMs) / 1000));
@@ -751,7 +836,7 @@ const StudentUpload = () => {
     return getPastMainSubmission(projectRow);
   };
 
-  const fetchLatestSubmissionFromPastSubmissions = () => {
+  const fetchLatestSubmissionFromPastSubmissions = (): Promise<LatestPastSubmission | null> => {
     const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
 
     if (
@@ -763,10 +848,10 @@ const StudentUpload = () => {
       project_id === -1
     ) {
       clearPreviousSubmissionId();
-      return;
+      return Promise.resolve(null);
     }
 
-    axios
+    return axios
       .get(`${import.meta.env.VITE_API_URL}/projects/past-submissions`, {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -779,7 +864,7 @@ const StudentUpload = () => {
         if (latestSubmission !== null) {
           rememberPreviousSubmissionId(latestSubmission.submissionId);
           setPassedAllTests(latestSubmission.passed);
-          return;
+          return latestSubmission;
         }
 
         clearPreviousSubmissionId();
@@ -787,12 +872,14 @@ const StudentUpload = () => {
         setTestcasesPassedCount(0);
         setTestcasesTotalCount(0);
         setCheckedPassedAll(true);
+        return null;
       })
       .catch(() => {
         clearPreviousSubmissionId();
         setTestcasesPassedCount(0);
         setTestcasesTotalCount(0);
         setCheckedPassedAll(true);
+        return null;
       });
   };
 
@@ -942,6 +1029,182 @@ const StudentUpload = () => {
     getSubmissionDetails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cid, routeProjectId, moduleId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let previewUrl = "";
+
+    setAssignmentPreview(null);
+    setAssignmentPreviewError("");
+    setIsAssignmentPreviewExpanded(false);
+
+    if (!project_id || project_id <= 0 || project_id === -1) {
+      setIsAssignmentPreviewLoading(false);
+      return;
+    }
+
+    setIsAssignmentPreviewLoading(true);
+
+    axios
+      .get(
+        `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription`,
+        {
+          headers: authHeader(),
+          params: {
+            project_id,
+            checkpoint_id: isCheckpoint ? checkpointId : undefined,
+            preview: 1,
+          },
+          responseType: "blob",
+        },
+      )
+      .then((res) => {
+        if (cancelled) return;
+
+        const contentType =
+          String((res.headers as any)["content-type"] || res.data?.type || "") ||
+          "application/octet-stream";
+        const blob =
+          res.data instanceof Blob
+            ? res.data
+            : new Blob([res.data], { type: contentType });
+
+        previewUrl = URL.createObjectURL(blob);
+        setAssignmentPreview({
+          url: previewUrl,
+          contentType,
+          filename:
+            String((res.headers as any)["x-original-filename"] || "").trim() ||
+            String((res.headers as any)["x-filename"] || "").trim() ||
+            "Assignment instructions",
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+
+        setAssignmentPreviewError(
+          err.response?.data?.message ||
+          "The assignment instructions could not be previewed.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setIsAssignmentPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [project_id, isCheckpoint, checkpointId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let previewUrl = "";
+
+    setPresentationPreview(null);
+    setPresentationPreviewError("");
+    setIsPresentationPreviewExpanded(false);
+
+    if (
+      !hasModulePresentation ||
+      ((!moduleId || moduleId <= 0) && (!project_id || project_id <= 0 || project_id === -1))
+    ) {
+      setIsPresentationPreviewLoading(false);
+      return;
+    }
+
+    setIsPresentationPreviewLoading(true);
+
+    const params = moduleId
+      ? { module_id: moduleId, preview: 1 }
+      : { project_id, preview: 1 };
+
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/projects/module_presentation`, {
+        headers: authHeader(),
+        params,
+        responseType: "blob",
+      })
+      .then((res) => {
+        if (cancelled) return;
+
+        const contentType =
+          String((res.headers as any)["content-type"] || res.data?.type || "") ||
+          "application/octet-stream";
+        const blob =
+          res.data instanceof Blob
+            ? res.data
+            : new Blob([res.data], { type: contentType });
+
+        previewUrl = URL.createObjectURL(blob);
+        setPresentationPreview({
+          url: previewUrl,
+          contentType,
+          filename:
+            String((res.headers as any)["x-original-filename"] || "").trim() ||
+            String((res.headers as any)["x-filename"] || "").trim() ||
+            modulePresentationFileName ||
+            "Module presentation",
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+
+        setPresentationPreviewError(
+          err.response?.data?.message ||
+          "The module presentation could not be previewed.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setIsPresentationPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [
+    hasModulePresentation,
+    moduleId,
+    project_id,
+    modulePresentationFileName,
+  ]);
+
+  useEffect(() => {
+    setActiveSubmissionId(routeSubmissionId);
+  }, [routeSubmissionId, project_id, isCheckpoint, checkpointId]);
+
+  useEffect(() => {
+    if (activeSubmissionId !== null || previousSubmissionId === null) return;
+
+    setActiveSubmissionId(submissionIdAsNumber(previousSubmissionId));
+  }, [activeSubmissionId, previousSubmissionId]);
+
+  useEffect(() => {
+    if (!initialSection || initialSectionAppliedRef.current) return;
+
+    initialSectionAppliedRef.current = true;
+    window.requestAnimationFrame(() => scrollToSection(initialSection));
+  }, [initialSection, scrollToSection]);
+
+  useEffect(() => {
+    if (!isAssignmentPreviewExpanded && !isPresentationPreviewExpanded) return;
+
+    const originalOverflow = document.body.style.overflow;
+    const closeExpandedPreview = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setIsAssignmentPreviewExpanded(false);
+      setIsPresentationPreviewExpanded(false);
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeExpandedPreview);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", closeExpandedPreview);
+    };
+  }, [isAssignmentPreviewExpanded, isPresentationPreviewExpanded]);
 
   useEffect(() => {
     if (!Number.isFinite(cid) || cid <= 0 || project_id <= 0) {
@@ -1206,52 +1469,6 @@ const StudentUpload = () => {
       });
   }
 
-  const downloadAssignment = (pid: number) => {
-    if (!pid || pid <= 0) return;
-
-    const qs =
-      isCheckpoint && checkpointId ? `&checkpoint_id=${checkpointId}` : "";
-
-    axios
-      .get(
-        `${import.meta.env.VITE_API_URL}/projects/getAssignmentDescription?project_id=${pid}${qs}`,
-        {
-          headers: authHeader(),
-          responseType: "blob",
-        },
-      )
-      .then((res) => downloadBlobResponse(res, "assignment_description"))
-      .catch((err) => console.error("Download failed:", err));
-  };
-
-  const downloadModulePresentation = () => {
-    const params = moduleId
-      ? { module_id: moduleId }
-      : { project_id };
-
-    if ((!moduleId && project_id <= 0) || !hasModulePresentation) return;
-
-    axios
-      .get(
-        `${import.meta.env.VITE_API_URL}/projects/module_presentation`,
-        {
-          headers: authHeader(),
-          params,
-          responseType: "blob",
-        },
-      )
-      .then((res) =>
-        downloadBlobResponse(
-          res,
-          modulePresentationFileName || "module_presentation",
-        ),
-      )
-      .catch(() => {
-        setError_Message("The module presentation could not be downloaded.");
-        setIsErrorMessageHidden(false);
-      });
-  };
-
   function submitSuggestions() {
     axios
       .post(
@@ -1271,29 +1488,6 @@ const StudentUpload = () => {
           );
         },
       );
-  }
-
-  function getResultsHref(submissionId?: number | string) {
-    const sidPart = submissionId !== undefined ? `/${submissionId}` : "";
-
-    if (hasModuleRoute && schoolId && moduleId && routeProjectId) {
-      if (isCheckpoint && checkpointId) {
-        return `/student/school/${schoolId}/class/${cid}/module/${moduleId}/project/${routeProjectId}/checkpoint/${checkpointId}/code${sidPart}`;
-      }
-
-      return `/student/school/${schoolId}/class/${cid}/module/${moduleId}/project/${routeProjectId}/code${sidPart}`;
-    }
-
-    const qs =
-      isCheckpoint && checkpointId
-        ? `?checkpoint=1&checkpoint_id=${checkpointId}`
-        : "";
-
-    if (class_id !== undefined) {
-      return `/student/${class_id}/code${sidPart}${qs}`;
-    }
-
-    return `code${sidPart}${qs}`;
   }
 
   async function runPythonProgram(
@@ -1444,12 +1638,27 @@ const StudentUpload = () => {
 
         if (sid !== null) {
           rememberPreviousSubmissionId(sid);
-          window.location.href = getResultsHref(sid);
+          setFiles([]);
+          setCheckedPassedAll(false);
+          setIsLoading(false);
+          showSubmissionResults(sid);
           return;
         }
 
-        fetchLatestSubmissionFromPastSubmissions();
-        window.location.href = getResultsHref();
+        fetchLatestSubmissionFromPastSubmissions().then((latestSubmission) => {
+          setFiles([]);
+          setIsLoading(false);
+
+          if (latestSubmission !== null) {
+            showSubmissionResults(latestSubmission.submissionId);
+            return;
+          }
+
+          setError_Message(
+            "Your program was submitted, but the testcase results could not be located. Refresh the page to try again.",
+          );
+          setIsErrorMessageHidden(false);
+        });
       })
       .catch((err) => {
         const retryAfterSeconds = Number(
@@ -1573,9 +1782,26 @@ const StudentUpload = () => {
     class_id,
   ]);
 
-  const latestSubmissionHref = previousSubmissionId
-    ? getResultsHref(previousSubmissionId)
-    : "";
+  const workspaceViews = [
+    {
+      id: "instructions" as StudentUploadSection,
+      label: "Instructions",
+      detail: "View assignment details",
+      icon: <FaInfoCircle aria-hidden="true" />,
+    },
+    {
+      id: "submission" as StudentUploadSection,
+      label: "Program",
+      detail: "Write or upload code",
+      icon: <FaCode aria-hidden="true" />,
+    },
+    {
+      id: "testcases" as StudentUploadSection,
+      label: "Results",
+      detail: "View testcase results",
+      icon: <FaCheckCircle aria-hidden="true" />,
+    },
+  ];
 
   return (
     <div className="student-upload-page">
@@ -1604,51 +1830,31 @@ const StudentUpload = () => {
       <div className="student-upload-shell">
         <section
           className="panel panel-upload"
-          aria-label={passedAllTests ? "Assignment Complete" : "Upload Assignment"}
+          aria-label={
+            passedAllTests
+              ? "Assignment Complete"
+              : hasNonPassingSubmission
+                ? "Submission Not Passing"
+                : "Upload Assignment"
+          }
         >
           <header className="panel-header assignment-quest-hero">
             <div className="assignment-quest-copy">
               <h1 className="panel-title panel-title--project">
                 {pageTitle || "No Active Project"}
               </h1>
-              <div className="assignment-actions">
-                <button
-                  type="button"
-                  className="assignment-download"
-                  onClick={() => downloadAssignment(project_id)}
-                  disabled={!project_id || project_id <= 0}
-                  aria-label="Download assignment description"
-                  title="Download assignment instructions"
-                >
-                  <FaDownload aria-hidden="true" />
-                  <span>Download Instructions</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="presentation-download"
-                  onClick={downloadModulePresentation}
-                  disabled={!hasModulePresentation}
-                  aria-disabled={!hasModulePresentation}
-                  aria-label={
-                    hasModulePresentation
-                      ? "Download module presentation"
-                      : "Module presentation unavailable"
-                  }
-                  title={
-                    hasModulePresentation
-                      ? `Download ${modulePresentationFileName || "module presentation"}`
-                      : "No presentation has been saved for this module"
-                  }
-                >
-                  <FaFilePowerpoint aria-hidden="true" />
-                  <span>Download Presentation</span>
-                </button>
-              </div>
             </div>
 
             <div className="assignment-quest-side">
-              <div className="assignment-quest-progress-card">
+              <div
+                className={`assignment-quest-progress-card ${
+                  passedAllTests
+                    ? "is-passed"
+                    : hasNonPassingSubmission
+                      ? "is-failed"
+                      : ""
+                }`}
+              >
                 <div
                   className="assignment-quest-progress-ring"
                   style={
@@ -1665,6 +1871,26 @@ const StudentUpload = () => {
                     ? `${testcaseProgress.passed} / ${testcaseProgress.total} testcases passed`
                     : "Checking testcases..."}
                 </div>
+
+                {hasNonPassingSubmission ? (
+                  <div
+                    className="assignment-quest-progress-status is-failed"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <FaTimesCircle aria-hidden="true" />
+                    <span>Not passing</span>
+                  </div>
+                ) : passedAllTests ? (
+                  <div
+                    className="assignment-quest-progress-status is-passed"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <FaCheckCircle aria-hidden="true" />
+                    <span>Passed</span>
+                  </div>
+                ) : null}
               </div>
 
               <div className="student-stars-card" aria-label="Student stars and possible reward">
@@ -1677,6 +1903,7 @@ const StudentUpload = () => {
                       </div>
                       <div className="student-stars-card__label">Stars available</div>
                     </div>
+                    <StarSpendingInfo />
                   </div>
 
                   <div className="student-stars-card__reward">
@@ -1688,474 +1915,905 @@ const StudentUpload = () => {
                 </div>
               </div>
 
-              <div className="previous-submission-card">
-                <div>
-                  <div className="previous-submission-title">Previous Submission</div>
-                  <p>Review your latest submitted code and testcase results.</p>
-                </div>
-
-                {previousSubmissionId ? (
-                  <Link
-                    to={latestSubmissionHref}
-                    className="previous-submission-button"
-                    aria-label="View previous submission"
-                  >
-                    <FaEye aria-hidden="true" />
-                    <span>View Submission</span>
-                  </Link>
-                ) : (
-                  <button
-                    type="button"
-                    className="previous-submission-button is-disabled"
-                    disabled
-                    aria-disabled="true"
-                  >
-                    <FaEye aria-hidden="true" />
-                    <span>No Submission Yet</span>
-                  </button>
-                )}
-              </div>
             </div>
           </header>
 
-          {passedAllTests ? (
+          <nav
+            id="student-workspace"
+            className="student-workspace-nav"
+            aria-label="Assignment workspace"
+          >
+            <ol role="tablist" aria-label="Assignment workspace views">
+              {workspaceViews.map((view, viewIndex) => {
+                const isActive = activeWorkspaceSection === view.id;
+
+                return (
+                  <li
+                    key={view.id}
+                    className={`student-workspace-nav__view ${isActive ? "is-active" : ""}`}
+                  >
+                    <button
+                      id={`student-workspace-tab-${view.id}`}
+                      type="button"
+                      role="tab"
+                      onClick={() => scrollToSection(view.id)}
+                      onKeyDown={(event) => {
+                        let nextIndex = viewIndex;
+
+                        if (event.key === "ArrowRight") {
+                          nextIndex = (viewIndex + 1) % workspaceViews.length;
+                        } else if (event.key === "ArrowLeft") {
+                          nextIndex = (viewIndex - 1 + workspaceViews.length) % workspaceViews.length;
+                        } else if (event.key === "Home") {
+                          nextIndex = 0;
+                        } else if (event.key === "End") {
+                          nextIndex = workspaceViews.length - 1;
+                        } else {
+                          return;
+                        }
+
+                        event.preventDefault();
+                        const nextView = workspaceViews[nextIndex];
+                        if (!nextView) return;
+                        scrollToSection(nextView.id);
+                        window.requestAnimationFrame(() => {
+                          document.getElementById(`student-workspace-tab-${nextView.id}`)?.focus();
+                        });
+                      }}
+                      aria-selected={isActive}
+                      aria-controls={`student-${view.id === "submission" ? "submit" : view.id}-section`}
+                      aria-label={`${view.label}. ${view.detail}. Open`}
+                      tabIndex={isActive ? 0 : -1}
+                    >
+                      <span className="student-workspace-view__icon" aria-hidden="true">
+                        {view.icon}
+                      </span>
+                      <span className="student-workspace-view__copy">
+                        <strong>{view.label}</strong>
+                        <small>{view.detail}</small>
+                      </span>
+                      <span className="student-workspace-view__status">
+                        Open
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
+
+          <div className="student-workflow">
+
             <section
-              className="assignment-complete-screen"
-              role="status"
-              aria-live="polite"
-              aria-labelledby="assignment-complete-title"
+              id="student-instructions-section"
+              className={`assignment-instructions-panel student-workflow-step ${activeWorkspaceSection === "instructions" ? "is-active" : ""}`}
+              role="tabpanel"
+              aria-labelledby="student-workspace-tab-instructions assignment-instructions-title"
+              hidden={activeWorkspaceSection !== "instructions"}
             >
-              <div className="assignment-complete-screen__content">
+              <header className="assignment-instructions-panel__header">
+                <div>
+                  <p className="assignment-instructions-panel__eyebrow">
+                    Instructions
+                  </p>
+                  <h2 id="assignment-instructions-title">
+                    Assignment Instructions
+                  </h2>
+                </div>
                 <span
-                  className="assignment-complete-screen__icon"
-                  aria-hidden="true"
+                  className={`student-workflow-status ${assignmentPreview ? "is-ready" : ""}`}
                 >
-                  <FaCheckCircle />
+                  {isAssignmentPreviewLoading
+                    ? "Loading"
+                    : assignmentPreview
+                      ? "Ready"
+                      : "Unavailable"}
                 </span>
-                <p className="assignment-complete-screen__eyebrow">
-                  Submission complete
-                </p>
-                <h2 id="assignment-complete-title">
-                  You passed all testcases!
-                </h2>
-                <p>
-                  You&apos;re finished
-                  {isCheckpoint
-                    ? " with this checkpoint"
-                    : " with this assignment"}
-                  . Additional submissions are disabled.
-                </p>
+              </header>
 
-                {previousSubmissionId ? (
-                  <Link
-                    to={latestSubmissionHref}
-                    className="assignment-complete-screen__link"
-                  >
-                    <FaEye aria-hidden="true" />
-                    <span>View previous testcases</span>
-                    <FaExternalLinkAlt aria-hidden="true" />
-                  </Link>
-                ) : (
-                  <span className="assignment-complete-screen__link is-disabled">
-                    Previous testcases unavailable
-                  </span>
-                )}
-              </div>
-            </section>
-          ) : (
-            <form
-              className={`upload-form ${isLoading ? "is-loading" : ""}`}
-              onSubmit={handleSubmit}
-            >
-            {pythonIdeEnabled ? (
-              <fieldset className="student-upload-program-source">
-                <legend className="student-upload-program-source__legend">
-                  Choose how to provide your program
-                </legend>
-                <div className="student-upload-program-source__options">
-                  <button
-                    type="button"
-                    className={`student-upload-program-source__option ${submissionMethod === "upload" ? "is-active" : ""}`}
-                    aria-pressed={submissionMethod === "upload"}
-                    onClick={() => {
-                      setSubmissionMethod("upload");
-                      setIsErrorMessageHidden(true);
-                    }}
-                  >
-                    Upload program
-                  </button>
-                  <button
-                    type="button"
-                    className={`student-upload-program-source__option ${submissionMethod === "editor" ? "is-active" : ""}`}
-                    aria-pressed={submissionMethod === "editor"}
-                    onClick={() => {
-                      setSubmissionMethod("editor");
-                      setIsErrorMessageHidden(true);
-                    }}
-                  >
-                    Write Python
-                  </button>
-                </div>
-              </fieldset>
-            ) : null}
-
-            <div className="dropzone">
-              {submissionMethod === "editor" && pythonIdeEnabled ? (
-                <PythonIDE
-                  filename={pythonFilename}
-                  source={pythonSource}
-                  disabled={project_id <= 0}
-                  onFilenameChange={setPythonFilename}
-                  onSourceChange={setPythonSource}
-                  onRun={runPythonProgram}
-                />
-              ) : (
               <div
-                className={`file-drop-area ${isCoolingDown ? "is-cooldown-locked" : ""}`}
-                aria-disabled={isCoolingDown}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  if (isCoolingDown) e.dataTransfer.dropEffect = "none";
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-
-                  if (passedAllTests || isCoolingDown) return;
-
-                  const dropped = Array.from(e.dataTransfer.files || []);
-                  const valid = dropped.filter((f) =>
-                    isAllowedFileName(f.name),
-                  );
-
-                  if (dropped.length && valid.length === 0) {
-                    setError_Message(
-                      "Only .py, .java, .c, or .rkt files are allowed.",
-                    );
-                    setIsErrorMessageHidden(false);
-                    return;
-                  }
-
-                  if (dropped.length !== valid.length) {
-                    setError_Message(
-                      "Only .py, .java, .c, or .rkt files are allowed.",
-                    );
-                    setIsErrorMessageHidden(false);
-                    return;
-                  }
-
-                  if (valid.length > 1 && !valid.every(isJavaFile)) {
-                    setFiles([]);
-                    setError_Message(
-                      "Multi-file upload is only available for Java (.java) files.",
-                    );
-                    setIsErrorMessageHidden(false);
-                    return;
-                  }
-
-                  setIsErrorMessageHidden(true);
-                  setSubmissionMethod("upload");
-                  setFiles(valid);
-                }}
+                className={`assignment-document-viewer ${isAssignmentPreviewExpanded ? "is-expanded" : ""}`}
+                role={isAssignmentPreviewExpanded ? "dialog" : undefined}
+                aria-modal={isAssignmentPreviewExpanded ? "true" : undefined}
+                aria-label={isAssignmentPreviewExpanded ? "Expanded assignment instructions" : undefined}
               >
-                {!files.length ? (
-                  <>
-                    <input
-                      type="file"
-                      className="file-input"
-                      accept=".py,.java,.c,.rkt"
-                      multiple
-                      disabled={passedAllTests || isCoolingDown}
-                      onChange={handleFileChange}
-                    />
+                <div className="assignment-document-viewer__toolbar">
+                  <div className="assignment-document-viewer__identity">
+                    <span className="assignment-document-viewer__file-icon" aria-hidden="true">
+                      <FaFileWord />
+                    </span>
+                    <span>
+                      <strong>{assignmentPreview?.filename || "Assignment instructions"}</strong>
+                      <small>
+                        {assignmentPreview?.contentType.toLowerCase().includes("pdf")
+                          ? "Word document · print-quality PDF preview"
+                          : assignmentPreview?.contentType.toLowerCase().includes("html")
+                            ? "Word document · accessible web preview"
+                            : "Assignment document"}
+                      </small>
+                    </span>
+                  </div>
 
-                    <div className="file-drop-message">
-                      <FaCloudUploadAlt
-                        className="file-drop-icon"
-                        aria-hidden="true"
-                      />
-                      <p>
-                        Drag &amp; drop your file(s) here or{" "}
-                        <span className="browse-text">browse</span>
-                      </p>
-                      <p className="file-drop-hint">
-                        Multi-file upload is supported for Java only.
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <div className="file-preview">
+                  <div className="assignment-document-viewer__actions">
                     <button
                       type="button"
-                      className="exchange-icon"
-                      aria-label="Clear selected files"
-                      title="Clear selected files"
-                      onClick={() => setFiles([])}
-                      disabled={isCoolingDown}
+                      onClick={openAssignmentPreview}
+                      disabled={!assignmentPreview}
+                      title="Open the preview in a new tab"
                     >
-                      <FaExchangeAlt aria-hidden="true" />
+                      <FaExternalLinkAlt aria-hidden="true" />
+                      <span>Open</span>
                     </button>
-
-                    <div className="file-preview-list" title="Selected files">
-                      {files.map((f) => (
-                        <div
-                          key={f.name}
-                          className="file-preview-row solution-file-card"
-                        >
-                          <div className="file-icon-wrapper" aria-hidden="true">
-                            <FaRegFile
-                              className="file-outline-icon"
-                              aria-hidden="true"
-                            />
-                            {getFileIcon(f.name)}
-                          </div>
-
-                          <span className="file-name">
-                            {f.name}
-                            {files.length > 1 &&
-                              files.every(isJavaFile) &&
-                              mainJavaFileName &&
-                              f.name === mainJavaFileName && (
-                                <span className="main-indicator">Main</span>
-                              )}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              )}
-
-              {submissionMethod === "upload" && isCooldownStateLoading && !passedAllTests ? (
-                <div
-                  className="submission-cooldown-lock is-checking"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <div className="submission-cooldown-lock__content">
-                    <FaClock aria-hidden="true" />
-                    <h2>Checking submission cooldown</h2>
-                    <p>Verifying whether this project is ready for another submission.</p>
+                    <button
+                      type="button"
+                      onClick={() => setIsAssignmentPreviewExpanded((current) => !current)}
+                      disabled={!assignmentPreview}
+                      title={isAssignmentPreviewExpanded ? "Exit expanded view" : "Expand the preview"}
+                    >
+                      {isAssignmentPreviewExpanded ? (
+                        <FaCompressAlt aria-hidden="true" />
+                      ) : (
+                        <FaExpandAlt aria-hidden="true" />
+                      )}
+                      <span>{isAssignmentPreviewExpanded ? "Close" : "Expand"}</span>
+                    </button>
                   </div>
                 </div>
-              ) : submissionMethod === "upload" && isCoolingDown && !passedAllTests ? (
-                <div
-                  className="submission-cooldown-lock"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <div className="submission-cooldown-lock__content">
-                    <FaLock aria-hidden="true" />
-                    <h2>{submissionTypeLabel} cooldown active</h2>
-                    <p className="submission-cooldown-lock__timer">
-                      Attempt {nextAttemptNumber} unlocks in{" "}
-                      {formatCooldown(cooldownRemainingSeconds)}
-                    </p>
-                    <p>
-                      Test your code in your local deployment before submitting it again.
-                    </p>
-                    <Link
-                      to={latestSubmissionHref || getResultsHref()}
-                      className="previous-submission-button submission-cooldown-view-button"
-                      aria-label="View latest submission"
-                    >
-                      <FaEye aria-hidden="true" />
-                      <span>View Submission</span>
-                    </Link>
-                    <button
-                      type="button"
-                      className={`skip-cooldown-button ${!canSkipCooldown || isSkippingCooldown ? "disabled" : ""}`}
-                      disabled={!canSkipCooldown || isSkippingCooldown}
-                      onClick={() => setIsSkipConfirmationOpen(true)}
-                      title={
-                        canSkipCooldown
-                          ? `Spend ${cooldownSkipCost} ${cooldownSkipStarLabel} to skip the timer`
-                          : `You need ${cooldownSkipCost} ${cooldownSkipStarLabel} to skip the timer`
+
+                <div className="assignment-instructions-panel__preview">
+                  {isAssignmentPreviewLoading ? (
+                    <div className="assignment-preview-state" role="status" aria-live="polite">
+                      <FaClock aria-hidden="true" />
+                      <strong>Loading assignment instructions…</strong>
+                      <span>Preparing the best available browser preview.</span>
+                    </div>
+                  ) : assignmentPreview ? (
+                    <iframe
+                      key={assignmentPreview.url}
+                      src={assignmentPreview.url}
+                      className="assignment-instructions-frame"
+                      title={`${assignmentPreview.filename} preview`}
+                      sandbox={
+                        assignmentPreview.contentType.toLowerCase().includes("text/html")
+                          ? ""
+                          : undefined
                       }
-                    >
-                      <FaForward aria-hidden="true" />
-                      {isSkippingCooldown
-                        ? "Skipping..."
-                        : `Skip Timer (${cooldownSkipCost} ${cooldownSkipStarLabel})`}
-                    </button>
+                    />
+                  ) : (
+                    <div className="assignment-preview-state is-error" role="alert">
+                      <FaInfoCircle aria-hidden="true" />
+                      <strong>
+                        {assignmentPreviewError || "No assignment preview is available."}
+                      </strong>
+                      <span>Ask your instructor for a browser-compatible copy if needed.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {hasModulePresentation ? (
+                <div
+                  className={`assignment-document-viewer presentation-document-viewer ${isPresentationPreviewExpanded ? "is-expanded" : ""}`}
+                  role={isPresentationPreviewExpanded ? "dialog" : undefined}
+                  aria-modal={isPresentationPreviewExpanded ? "true" : undefined}
+                  aria-label={isPresentationPreviewExpanded ? "Expanded module presentation" : undefined}
+                >
+                  <div className="assignment-document-viewer__toolbar">
+                    <div className="assignment-document-viewer__identity">
+                      <span
+                        className="assignment-document-viewer__file-icon presentation-document-viewer__file-icon"
+                        aria-hidden="true"
+                      >
+                        <FaFilePowerpoint />
+                      </span>
+                      <span>
+                        <strong>
+                          {presentationPreview?.filename ||
+                            modulePresentationFileName ||
+                            "Module presentation"}
+                        </strong>
+                        <small>Optional module presentation</small>
+                      </span>
+                    </div>
+
+                    <div className="assignment-document-viewer__actions">
+                      <button
+                        type="button"
+                        onClick={openPresentationPreview}
+                        disabled={!presentationPreview}
+                        title="Open the presentation preview in a new tab"
+                      >
+                        <FaExternalLinkAlt aria-hidden="true" />
+                        <span>Open</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setIsPresentationPreviewExpanded((current) => !current)
+                        }
+                        disabled={!presentationPreview}
+                        title={
+                          isPresentationPreviewExpanded
+                            ? "Exit expanded view"
+                            : "Expand the presentation preview"
+                        }
+                      >
+                        {isPresentationPreviewExpanded ? (
+                          <FaCompressAlt aria-hidden="true" />
+                        ) : (
+                          <FaExpandAlt aria-hidden="true" />
+                        )}
+                        <span>
+                          {isPresentationPreviewExpanded ? "Close" : "Expand"}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="assignment-instructions-panel__preview">
+                    {isPresentationPreviewLoading ? (
+                      <div className="assignment-preview-state" role="status" aria-live="polite">
+                        <FaClock aria-hidden="true" />
+                        <strong>Loading module presentation…</strong>
+                        <span>Preparing the presentation for browser viewing.</span>
+                      </div>
+                    ) : presentationPreview ? (
+                      <iframe
+                        key={presentationPreview.url}
+                        src={presentationPreview.url}
+                        className="assignment-instructions-frame"
+                        title={`${presentationPreview.filename} preview`}
+                        sandbox={
+                          presentationPreview.contentType.toLowerCase().includes("text/html")
+                            ? ""
+                            : undefined
+                        }
+                      />
+                    ) : (
+                      <div className="assignment-preview-state is-error" role="alert">
+                        <FaInfoCircle aria-hidden="true" />
+                        <strong>
+                          {presentationPreviewError ||
+                            "The module presentation could not be previewed."}
+                        </strong>
+                        <span>The presentation is optional for this module.</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : null}
 
-              {project_id === -1 && (
-                <div
-                  className="no-active-project-overlay"
-                  role="alert"
-                  aria-live="assertive"
-                >
-                  <div className="no-active-project-content">
-                    <FaBan
-                      className="no-active-project-icon"
-                      aria-hidden="true"
-                    />
-                    <h2 className="no-active-project-title">
-                      No active project
-                    </h2>
-                  </div>
+              <footer className="student-workflow-actions">
+                <div className="student-workflow-actions__group">
+                  {activeSubmissionId ? (
+                    <button
+                      type="button"
+                      className="student-workflow-actions__secondary"
+                      onClick={() => scrollToSection("testcases")}
+                    >
+                      Open latest results
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="student-workflow-actions__primary"
+                    onClick={() => scrollToSection("submission")}
+                  >
+                    Open program workspace
+                    <FaArrowRight aria-hidden="true" />
+                  </button>
                 </div>
-              )}
-            </div>
+              </footer>
+            </section>
 
-            <div className="actions">
-              <button
-                type="submit"
-                disabled={!is_allowed_to_submit || !canSubmit || passedAllTests || isLoading}
-                className={[
-                  "primary",
-                  "student-upload-submit",
-                  !is_allowed_to_submit || !canSubmit || isLoading
-                    ? "disabled"
-                    : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
+            <section
+              id="student-submit-section"
+              className={`student-submit-section student-workflow-step ${activeWorkspaceSection === "submission" ? "is-active" : ""}`}
+              role="tabpanel"
+              aria-labelledby="student-workspace-tab-submission student-submit-title"
+              hidden={activeWorkspaceSection !== "submission"}
+            >
+              <header className="student-submit-section__header">
+                <div>
+                  <p className="student-submit-section__eyebrow">Program workspace</p>
+                  <h2 id="student-submit-title">Prepare and Submit Your Program</h2>
+                </div>
                 <span
-                  className="student-upload-submit__icon"
-                  aria-hidden="true"
+                  className={`student-workflow-status ${passedAllTests || activeSubmissionId ? "is-complete" : hasSelectedProgram ? "is-ready" : ""}`}
                 >
-                  {isCooldownStateLoading || isCoolingDown ? (
-                    <FaClock />
-                  ) : (
-                    <FaCheckCircle />
-                  )}
-                </span>
-                <span>
-                  {isCooldownStateLoading
-                    ? "Checking Cooldown"
+                  {passedAllTests
+                    ? "Completed"
                     : isCoolingDown
-                      ? "Cooling Down"
-                      : "Submit program"}
+                      ? `Ready in ${formatCooldown(cooldownRemainingSeconds)}`
+                      : hasSelectedProgram
+                        ? "Ready to submit"
+                        : "Program needed"}
                 </span>
-              </button>
-            </div>
+              </header>
 
-            <section className="submission-cooldown-policy" aria-labelledby="submission-cooldown-title">
-              <div className="submission-cooldown-policy__header">
-                <div className="submission-cooldown-policy__heading">
-                  <span className="submission-cooldown-policy__icon" aria-hidden="true">
-                    <FaClock />
-                  </span>
-                  <div>
-                    <h2 id="submission-cooldown-title">
-                      {isCheckpoint ? "Checkpoint Cooldowns" : "Main Project Cooldowns"}
-                    </h2>
-                    <p>
-                      After each attempt, wait the time shown before submitting again.
-                    </p>
-                  </div>
-                </div>
-                <div
-                  className={[
-                    "submission-cooldown-policy__current",
-                    isCooldownStateLoading
-                      ? "is-loading"
-                      : isCoolingDown
-                        ? "is-active"
-                        : "is-ready",
-                  ].join(" ")}
+              {passedAllTests ? (
+                <section
+                  className="assignment-complete-screen"
                   role="status"
                   aria-live="polite"
+                  aria-labelledby="assignment-complete-title"
                 >
-                  {isCooldownStateLoading ? (
-                    <>
-                      <FaClock aria-hidden="true" />
-                      <span>Checking cooldown</span>
-                    </>
-                  ) : isCoolingDown ? (
-                    <>
-                      <FaClock aria-hidden="true" />
-                      <span>Cooldown ends in</span>
-                      <strong>{formatCooldown(cooldownRemainingSeconds)}</strong>
-                    </>
-                  ) : (
-                    <>
-                      <FaCheckCircle aria-hidden="true" />
-                      <span>Ready</span>
-                      <strong>Attempt {nextAttemptNumber}</strong>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <ol
-                className={`submission-cooldown-policy__grid ${isCheckpoint ? "is-checkpoint" : "is-main"}`}
-                aria-label={`${submissionTypeShortLabel} submission cooldown schedule`}
-              >
-                {(isCheckpoint ? CHECKPOINT_SCHEDULE : MAIN_SCHEDULE).map((item, index, arr) => {
-                  const isLast = index === arr.length - 1;
-                  const isCurrent =
-                    isCoolingDown &&
-                    (
-                      submissionAttemptCount === item.attempt ||
-                      (isLast && submissionAttemptCount >= item.attempt)
-                    );
-                  const isNext =
-                    !isCoolingDown &&
-                    (
-                      nextAttemptNumber === item.attempt ||
-                      (isLast && nextAttemptNumber >= item.attempt)
-                    );
-
-                  return (
-                    <li
-                      className={[
-                        "submission-cooldown-policy__step",
-                        isCurrent ? "is-current" : "",
-                        isNext ? "is-next" : "",
-                      ].filter(Boolean).join(" ")}
-                      key={item.attempt}
-                      aria-current={isCurrent ? "step" : undefined}
-                      aria-label={`${item.label}: ${item.value} cooldown afterward${isCurrent ? ", active cooldown" : isNext ? ", next cooldown" : ""}`}
+                  <div className="assignment-complete-screen__content">
+                    <span
+                      className="assignment-complete-screen__icon"
+                      aria-hidden="true"
                     >
-                      <div className="submission-cooldown-policy__step-header">
-                        <span className="submission-cooldown-policy__attempt">
-                          {item.label}
-                        </span>
+                      <FaCheckCircle />
+                    </span>
+                    <p className="assignment-complete-screen__eyebrow">
+                      Submission complete
+                    </p>
+                    <h2 id="assignment-complete-title">
+                      You passed all testcases!
+                    </h2>
+                    <p>
+                      You&apos;re finished
+                      {isCheckpoint
+                        ? " with this checkpoint"
+                        : " with this assignment"}
+                      . Additional submissions are disabled.
+                    </p>
+
+                    {previousSubmissionId ? (
+                      <button
+                        type="button"
+                        className="assignment-complete-screen__link"
+                        onClick={() => showSubmissionResults(previousSubmissionId)}
+                      >
+                        <FaEye aria-hidden="true" />
+                        <span>View testcase results</span>
+                      </button>
+                    ) : (
+                      <span className="assignment-complete-screen__link is-disabled">
+                        Previous testcases unavailable
+                      </span>
+                    )}
+                  </div>
+                </section>
+              ) : (
+                <form
+                  className={`upload-form ${isLoading ? "is-loading" : ""}`}
+                  onSubmit={handleSubmit}
+                >
+                  {pythonIdeEnabled ? (
+                    <fieldset className="student-upload-program-source">
+                      <legend className="student-upload-program-source__legend">
+                        Choose how to provide your program
+                      </legend>
+                      <div className="student-upload-program-source__options">
+                        <button
+                          type="button"
+                          className={`student-upload-program-source__option ${submissionMethod === "upload" ? "is-active" : ""}`}
+                          aria-pressed={submissionMethod === "upload"}
+                          onClick={() => {
+                            setSubmissionMethod("upload");
+                            setIsErrorMessageHidden(true);
+                          }}
+                        >
+                          Upload program
+                        </button>
+                        <button
+                          type="button"
+                          className={`student-upload-program-source__option ${submissionMethod === "editor" ? "is-active" : ""}`}
+                          aria-pressed={submissionMethod === "editor"}
+                          onClick={() => {
+                            setSubmissionMethod("editor");
+                            setIsErrorMessageHidden(true);
+                          }}
+                        >
+                          Write Python
+                        </button>
                       </div>
+                    </fieldset>
+                  ) : null}
+
+                  <div className="dropzone">
+                    {submissionMethod === "editor" && pythonIdeEnabled ? (
+                      <PythonIDE
+                        filename={pythonFilename}
+                        source={pythonSource}
+                        disabled={project_id <= 0}
+                        onFilenameChange={setPythonFilename}
+                        onSourceChange={setPythonSource}
+                        onRun={runPythonProgram}
+                      />
+                    ) : (
+                      <div
+                        className={`file-drop-area ${isCoolingDown ? "is-cooldown-locked" : ""}`}
+                        aria-disabled={isCoolingDown}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (isCoolingDown) e.dataTransfer.dropEffect = "none";
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+
+                          if (passedAllTests || isCoolingDown) return;
+
+                          const dropped = Array.from(e.dataTransfer.files || []);
+                          const valid = dropped.filter((f) =>
+                            isAllowedFileName(f.name),
+                          );
+
+                          if (dropped.length && valid.length === 0) {
+                            setError_Message(
+                              "Only .py, .java, .c, or .rkt files are allowed.",
+                            );
+                            setIsErrorMessageHidden(false);
+                            return;
+                          }
+
+                          if (dropped.length !== valid.length) {
+                            setError_Message(
+                              "Only .py, .java, .c, or .rkt files are allowed.",
+                            );
+                            setIsErrorMessageHidden(false);
+                            return;
+                          }
+
+                          if (valid.length > 1 && !valid.every(isJavaFile)) {
+                            setFiles([]);
+                            setError_Message(
+                              "Multi-file upload is only available for Java (.java) files.",
+                            );
+                            setIsErrorMessageHidden(false);
+                            return;
+                          }
+
+                          setIsErrorMessageHidden(true);
+                          setSubmissionMethod("upload");
+                          setFiles(valid);
+                        }}
+                      >
+                        {!files.length ? (
+                          <>
+                            <input
+                              type="file"
+                              className="file-input"
+                              accept=".py,.java,.c,.rkt"
+                              multiple
+                              disabled={passedAllTests || isCoolingDown}
+                              onChange={handleFileChange}
+                            />
+
+                            <div className="file-drop-message">
+                              <FaCloudUploadAlt
+                                className="file-drop-icon"
+                                aria-hidden="true"
+                              />
+                              <p>
+                                Drag &amp; drop your file(s) here or{" "}
+                                <span className="browse-text">browse</span>
+                              </p>
+                              <p className="file-drop-hint">
+                                Multi-file upload is supported for Java only.
+                              </p>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="file-preview">
+                            <button
+                              type="button"
+                              className="exchange-icon"
+                              aria-label="Clear selected files"
+                              title="Clear selected files"
+                              onClick={() => setFiles([])}
+                              disabled={isCoolingDown}
+                            >
+                              <FaExchangeAlt aria-hidden="true" />
+                            </button>
+
+                            <div className="file-preview-list" title="Selected files">
+                              {files.map((f) => (
+                                <div
+                                  key={f.name}
+                                  className="file-preview-row solution-file-card"
+                                >
+                                  <div className="file-icon-wrapper" aria-hidden="true">
+                                    <FaRegFile
+                                      className="file-outline-icon"
+                                      aria-hidden="true"
+                                    />
+                                    {getFileIcon(f.name)}
+                                  </div>
+
+                                  <span className="file-name">
+                                    {f.name}
+                                    {files.length > 1 &&
+                                      files.every(isJavaFile) &&
+                                      mainJavaFileName &&
+                                      f.name === mainJavaFileName && (
+                                        <span className="main-indicator">Main</span>
+                                      )}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {submissionMethod === "upload" && isCooldownStateLoading && !passedAllTests ? (
+                      <div
+                        className="submission-cooldown-lock is-checking"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <div className="submission-cooldown-lock__content">
+                          <FaClock aria-hidden="true" />
+                          <h2>Checking submission cooldown</h2>
+                          <p>Verifying whether this project is ready for another submission.</p>
+                        </div>
+                      </div>
+                    ) : submissionMethod === "upload" && isCoolingDown && !passedAllTests ? (
+                      <div
+                        className="submission-cooldown-lock"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <div className="submission-cooldown-lock__content">
+                          <FaLock aria-hidden="true" />
+                          <h2>{submissionTypeLabel} cooldown active</h2>
+                          <p className="submission-cooldown-lock__timer">
+                            Attempt {nextAttemptNumber} unlocks in{" "}
+                            {formatCooldown(cooldownRemainingSeconds)}
+                          </p>
+                          <p>
+                            Test your code in your local deployment before submitting it again.
+                          </p>
+                          <button
+                            type="button"
+                            className="submission-cooldown-view-button"
+                            aria-label="View latest submission"
+                            disabled={!previousSubmissionId}
+                            onClick={() => showSubmissionResults(previousSubmissionId)}
+                          >
+                            <FaEye aria-hidden="true" />
+                            <span>View Testcases</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`skip-cooldown-button ${!canSkipCooldown || isSkippingCooldown ? "disabled" : ""}`}
+                            disabled={!canSkipCooldown || isSkippingCooldown}
+                            onClick={() => setIsSkipConfirmationOpen(true)}
+                            title={
+                              canSkipCooldown
+                                ? `Spend ${cooldownSkipCost} ${cooldownSkipStarLabel} to skip the timer`
+                                : `You need ${cooldownSkipCost} ${cooldownSkipStarLabel} to skip the timer`
+                            }
+                          >
+                            <FaForward aria-hidden="true" />
+                            {isSkippingCooldown
+                              ? "Skipping..."
+                              : `Skip Timer (${cooldownSkipCost} ${cooldownSkipStarLabel})`}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {project_id === -1 && (
+                      <div
+                        className="no-active-project-overlay"
+                        role="alert"
+                        aria-live="assertive"
+                      >
+                        <div className="no-active-project-content">
+                          <FaBan
+                            className="no-active-project-icon"
+                            aria-hidden="true"
+                          />
+                          <h2 className="no-active-project-title">
+                            No active project
+                          </h2>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="actions">
+                    <button
+                      type="submit"
+                      disabled={!is_allowed_to_submit || !canSubmit || passedAllTests || isLoading}
+                      className={[
+                        "primary",
+                        "student-upload-submit",
+                        !is_allowed_to_submit || !canSubmit || isLoading
+                          ? "disabled"
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
                       <span
-                        className="submission-cooldown-policy__connector"
+                        className="student-upload-submit__icon"
                         aria-hidden="true"
                       >
-                        <span>After this attempt</span>
-                        <FaArrowRight aria-hidden="true" />
+                        {isCooldownStateLoading || isCoolingDown ? (
+                          <FaClock />
+                        ) : (
+                          <FaCheckCircle />
+                        )}
                       </span>
-                      <div className="submission-cooldown-policy__value">
-                        {isCurrent ? (
-                          <span className="submission-cooldown-policy__state is-current">
-                            Active
-                          </span>
-                        ) : isNext ? (
-                          <span className="submission-cooldown-policy__state">
-                            Next cooldown
-                          </span>
-                        ) : null}
-                        <span className="submission-cooldown-policy__value-icon" aria-hidden="true">
+                      <span>
+                        {isCooldownStateLoading
+                          ? "Checking Cooldown"
+                          : isCoolingDown
+                            ? "Cooling Down"
+                            : "Submit program"}
+                      </span>
+                    </button>
+                  </div>
+
+                  <section
+                    className="submission-cooldown-policy"
+                    aria-labelledby="submission-cooldown-title"
+                  >
+                    <div className="submission-cooldown-policy__header">
+                      <div className="submission-cooldown-policy__heading">
+                        <span className="submission-cooldown-policy__icon" aria-hidden="true">
                           <FaClock />
                         </span>
-                        <span className="submission-cooldown-policy__value-copy">
-                          <span>Cooldown</span>
-                          <strong>{item.value}</strong>
-                        </span>
+                        <div>
+                          <h2 id="submission-cooldown-title">
+                            {isCheckpoint ? "Checkpoint Cooldowns" : "Main Project Cooldowns"}
+                          </h2>
+                          <p>
+                            After each attempt, wait the time shown before submitting again.
+                          </p>
+                        </div>
                       </div>
-                    </li>
-                  );
-                })}
-              </ol>
-            </section>
-            </form>
-          )}
+                      <div
+                        className={[
+                          "submission-cooldown-policy__current",
+                          isCooldownStateLoading
+                            ? "is-loading"
+                            : isCoolingDown
+                              ? "is-active"
+                              : "is-ready",
+                        ].join(" ")}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {isCooldownStateLoading ? (
+                          <>
+                            <FaClock aria-hidden="true" />
+                            <span>Checking cooldown</span>
+                          </>
+                        ) : isCoolingDown ? (
+                          <>
+                            <FaClock aria-hidden="true" />
+                            <span>Cooldown ends in</span>
+                            <strong>{formatCooldown(cooldownRemainingSeconds)}</strong>
+                          </>
+                        ) : (
+                          <>
+                            <FaCheckCircle aria-hidden="true" />
+                            <span>Ready</span>
+                            <strong>Attempt {nextAttemptNumber}</strong>
+                          </>
+                        )}
+                      </div>
+                    </div>
 
-          <div className="below-upload">
-            <ErrorMessage
-              message={error_message}
-              isHidden={isErrorMessageHidden}
-            />
+                    <ol
+                      className={`submission-cooldown-policy__grid ${isCheckpoint ? "is-checkpoint" : "is-main"}`}
+                      aria-label={`${submissionTypeShortLabel} submission cooldown schedule`}
+                    >
+                      {(isCheckpoint ? CHECKPOINT_SCHEDULE : MAIN_SCHEDULE).map((item, index, arr) => {
+                        const isLast = index === arr.length - 1;
+                        const isCurrent =
+                          isCoolingDown &&
+                          (
+                            submissionAttemptCount === item.attempt ||
+                            (isLast && submissionAttemptCount >= item.attempt)
+                          );
+                        const isNext =
+                          !isCoolingDown &&
+                          (
+                            nextAttemptNumber === item.attempt ||
+                            (isLast && nextAttemptNumber >= item.attempt)
+                          );
+
+                        return (
+                          <li
+                            className={[
+                              "submission-cooldown-policy__step",
+                              isCurrent ? "is-current" : "",
+                              isNext ? "is-next" : "",
+                            ].filter(Boolean).join(" ")}
+                            key={item.attempt}
+                            aria-current={isCurrent ? "step" : undefined}
+                            aria-label={`${item.label}: ${item.value} cooldown afterward${isCurrent ? ", active cooldown" : isNext ? ", next cooldown" : ""}`}
+                          >
+                            <div className="submission-cooldown-policy__step-header">
+                              <span className="submission-cooldown-policy__attempt">
+                                {item.label}
+                              </span>
+                            </div>
+                            <span
+                              className="submission-cooldown-policy__connector"
+                              aria-hidden="true"
+                            >
+                              <span>After this attempt</span>
+                              <FaArrowRight aria-hidden="true" />
+                            </span>
+                            <div className="submission-cooldown-policy__value">
+                              {isCurrent ? (
+                                <span className="submission-cooldown-policy__state is-current">
+                                  Active
+                                </span>
+                              ) : isNext ? (
+                                <span className="submission-cooldown-policy__state">
+                                  Next cooldown
+                                </span>
+                              ) : null}
+                              <span className="submission-cooldown-policy__value-icon" aria-hidden="true">
+                                <FaClock />
+                              </span>
+                              <span className="submission-cooldown-policy__value-copy">
+                                <span>Cooldown</span>
+                                <strong>{item.value}</strong>
+                              </span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </section>
+                </form>
+              )}
+
+              <div className="below-upload">
+                <ErrorMessage
+                  message={error_message}
+                  isHidden={isErrorMessageHidden}
+                />
+              </div>
+
+              <footer className="student-workflow-actions student-workflow-actions--split">
+                <button
+                  type="button"
+                  className="student-workflow-actions__secondary"
+                  onClick={() => scrollToSection("instructions")}
+                >
+                  Open instructions
+                </button>
+                {activeSubmissionId ? (
+                  <button
+                    type="button"
+                    className="student-workflow-actions__primary"
+                    onClick={() => scrollToSection("testcases")}
+                  >
+                    Open latest results
+                    <FaArrowRight aria-hidden="true" />
+                  </button>
+                ) : (
+                  <span>Submitting automatically opens the testcase results.</span>
+                )}
+              </footer>
+            </section>
+
+            <section
+              id="student-testcases-section"
+              ref={resultsRef}
+              className={[
+                "student-inline-results",
+                "student-workflow-step",
+                activeWorkspaceSection === "testcases" ? "is-active" : "",
+                hasNonPassingSubmission ? "has-failed-submission" : "",
+              ].filter(Boolean).join(" ")}
+              role="tabpanel"
+              aria-labelledby="student-workspace-tab-testcases student-testcases-title"
+              hidden={activeWorkspaceSection !== "testcases"}
+            >
+              <header className="student-inline-results__header">
+                <div>
+                  <p className="student-inline-results__eyebrow">
+                    Results workspace
+                  </p>
+                  <h2 id="student-testcases-title">Testcase Results</h2>
+                </div>
+                {activeSubmissionId ? (
+                  <span
+                    className={[
+                      "student-inline-results__submission",
+                      passedAllTests
+                        ? "is-passed"
+                        : hasNonPassingSubmission
+                          ? "is-failed"
+                          : "",
+                    ].filter(Boolean).join(" ")}
+                  >
+                    {passedAllTests
+                      ? "All testcases passed"
+                      : hasNonPassingSubmission
+                        ? "Not passing"
+                        : `Submission #${activeSubmissionId}`}
+                  </span>
+                ) : (
+                  <span className="student-workflow-status">Waiting for submission</span>
+                )}
+              </header>
+
+              {activeSubmissionId !== null ? (
+                <div className="student-inline-results__content">
+                  {hasNonPassingSubmission ? (
+                    <div
+                      className="submission-result-alert submission-result-alert--failed"
+                      role="alert"
+                      aria-live="assertive"
+                    >
+                      <span
+                        className="submission-result-alert__icon"
+                        aria-hidden="true"
+                      >
+                        <FaTimesCircle />
+                      </span>
+                      <div className="submission-result-alert__copy">
+                        <p className="submission-result-alert__eyebrow">
+                          Submission did not pass
+                        </p>
+                        <h3>This program is not correct yet.</h3>
+                        <p>
+                          <strong>
+                            {testcaseProgress.passed} of {testcaseProgress.total} testcases passed;{" "}
+                            {testcaseProgress.failed} failed.
+                          </strong>{" "}
+                          Review the failed testcase{testcaseProgress.failed === 1 ? "" : "s"}
+                          {" "}below, update your program, and submit again.
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <DiffView
+                    key={`${activeSubmissionId}:${cid}:${isCheckpoint ? checkpointId : "main"}`}
+                    submissionId={activeSubmissionId}
+                    classId={cid}
+                    disableCopy
+                    isPractice={isCheckpoint}
+                    practiceProblemId={checkpointId}
+                    allowTestcaseInputPurchases
+                  />
+                </div>
+              ) : (
+                <div className="student-inline-results__empty">
+                  <FaRegFile aria-hidden="true" />
+                  <h3>No testcase results yet</h3>
+                  <p>
+                    Open the Program view and submit your code. The latest testcase
+                    results will stay available in this view.
+                  </p>
+                  <button type="button" onClick={() => scrollToSection("submission")}>
+                    Open program workspace
+                  </button>
+                </div>
+              )}
+
+              <footer className="student-workflow-actions student-workflow-actions--split">
+                <button
+                  type="button"
+                  className="student-workflow-actions__secondary"
+                  onClick={() => scrollToSection("instructions")}
+                >
+                  Open instructions
+                </button>
+                <button
+                  type="button"
+                  className="student-workflow-actions__primary"
+                  onClick={() => scrollToSection("submission")}
+                >
+                  Open program workspace
+                  <FaArrowRight aria-hidden="true" />
+                </button>
+              </footer>
+            </section>
           </div>
         </section>
       </div>
