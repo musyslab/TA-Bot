@@ -1,15 +1,22 @@
 import importlib.util
+import base64
+import html
 import json
+import mimetypes
 import os
+import posixpath
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from collections import defaultdict
 from datetime import datetime
 from http import HTTPStatus
 from io import BytesIO
 from urllib.parse import quote
+from xml.etree import ElementTree
 
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, Response, jsonify, make_response, request
@@ -59,6 +66,623 @@ CHECKPOINT_SKIP_COST_STARS = 6
 CHECKPOINT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 1
 MAIN_PROJECT_SUBMISSION_COOLDOWN_SKIP_COST_STARS = 2
 INPUT_EVENT_PREFIX = "[[[MAAT_INPUT_B64:"
+
+DOCX_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+DOCX_RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+DOCX_PACKAGE_RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships"
+DOCX_DRAWING_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/main"
+DOCX_WORDPROCESSING_DRAWING_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+DOCX_NAMESPACES = {
+    "w": DOCX_NAMESPACE,
+    "r": DOCX_RELATIONSHIP_NAMESPACE,
+    "a": DOCX_DRAWING_NAMESPACE,
+    "wp": DOCX_WORDPROCESSING_DRAWING_NAMESPACE,
+}
+
+
+def docx_tag(name: str) -> str:
+    return f"{{{DOCX_NAMESPACE}}}{name}"
+
+
+def docx_element_text(element) -> str:
+    """Extract readable text, including tabs and explicit line breaks, from OOXML."""
+    pieces = []
+
+    for node in element.iter():
+        if node.tag == docx_tag("t"):
+            pieces.append(node.text or "")
+        elif node.tag == docx_tag("tab"):
+            pieces.append("\t")
+        elif node.tag in {docx_tag("br"), docx_tag("cr")}:
+            pieces.append("\n")
+
+    return "".join(pieces)
+
+
+def docx_xml_value(element, default: str = "") -> str:
+    if element is None:
+        return default
+    return str(element.get(docx_tag("val"), default) or default)
+
+
+def docx_property_enabled(properties, name: str) -> bool:
+    if properties is None:
+        return False
+
+    value_node = properties.find(f"w:{name}", DOCX_NAMESPACES)
+    if value_node is None:
+        return False
+
+    value = docx_xml_value(value_node, "true").strip().lower()
+    return value not in {"0", "false", "none", "off"}
+
+
+def docx_relationships(archive: zipfile.ZipFile) -> dict[str, dict[str, str | bool]]:
+    try:
+        relationships_xml = archive.read("word/_rels/document.xml.rels")
+    except KeyError:
+        return {}
+
+    root = ElementTree.fromstring(relationships_xml)
+    relationship_tag = f"{{{DOCX_PACKAGE_RELATIONSHIP_NAMESPACE}}}Relationship"
+    relationships = {}
+
+    for relationship in root.findall(relationship_tag):
+        relationship_id = str(relationship.get("Id", ""))
+        if not relationship_id:
+            continue
+        relationships[relationship_id] = {
+            "target": str(relationship.get("Target", "")),
+            "external": str(relationship.get("TargetMode", "")).lower() == "external",
+        }
+
+    return relationships
+
+
+def docx_paragraph_styles(archive: zipfile.ZipFile) -> dict[str, dict[str, str | int]]:
+    try:
+        styles_xml = archive.read("word/styles.xml")
+    except KeyError:
+        return {}
+
+    root = ElementTree.fromstring(styles_xml)
+    styles = {}
+
+    for style in root.findall("w:style", DOCX_NAMESPACES):
+        if str(style.get(docx_tag("type"), "")) != "paragraph":
+            continue
+
+        style_id = str(style.get(docx_tag("styleId"), ""))
+        if not style_id:
+            continue
+
+        name = docx_xml_value(style.find("w:name", DOCX_NAMESPACES), style_id)
+        heading_level = 0
+        outline_level = style.find("./w:pPr/w:outlineLvl", DOCX_NAMESPACES)
+
+        if outline_level is not None:
+            try:
+                heading_level = min(6, max(1, int(docx_xml_value(outline_level, "0")) + 1))
+            except ValueError:
+                heading_level = 0
+
+        if heading_level == 0:
+            heading_match = re.search(r"heading\s*([1-6])", f"{style_id} {name}", re.IGNORECASE)
+            if heading_match:
+                heading_level = int(heading_match.group(1))
+
+        styles[style_id] = {"name": name, "heading_level": heading_level}
+
+    return styles
+
+
+def docx_safe_archive_target(target: str) -> str | None:
+    raw_target = str(target or "").replace("\\", "/")
+    if not raw_target:
+        return None
+
+    if raw_target.startswith("/"):
+        normalized = posixpath.normpath(raw_target.lstrip("/"))
+    else:
+        normalized = posixpath.normpath(posixpath.join("word", raw_target))
+
+    if normalized.startswith("../") or normalized == "..":
+        return None
+    return normalized
+
+
+def docx_image_html(element, archive: zipfile.ZipFile, relationships: dict) -> str:
+    images = []
+
+    for blip in element.findall(".//a:blip", DOCX_NAMESPACES):
+        relationship_id = str(blip.get(f"{{{DOCX_RELATIONSHIP_NAMESPACE}}}embed", ""))
+        relationship = relationships.get(relationship_id) or {}
+        if relationship.get("external"):
+            continue
+
+        archive_target = docx_safe_archive_target(str(relationship.get("target", "")))
+        if not archive_target:
+            continue
+
+        try:
+            image_bytes = archive.read(archive_target)
+        except KeyError:
+            continue
+
+        mime_type = mimetypes.guess_type(archive_target)[0] or "application/octet-stream"
+        if not mime_type.startswith("image/"):
+            continue
+
+        drawing_properties = element.find(".//wp:docPr", DOCX_NAMESPACES)
+        alt_text = "Document image"
+        if drawing_properties is not None:
+            alt_text = str(
+                drawing_properties.get("descr")
+                or drawing_properties.get("title")
+                or drawing_properties.get("name")
+                or alt_text
+            )
+
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        images.append(
+            f'<img class="docx-image" src="data:{html.escape(mime_type)};base64,{encoded}" '
+            f'alt="{html.escape(alt_text, quote=True)}">'
+        )
+
+    return "".join(images)
+
+
+def docx_run_html(run, archive: zipfile.ZipFile, relationships: dict) -> str:
+    fragments = []
+
+    for child in run:
+        if child.tag == docx_tag("t"):
+            fragments.append(html.escape(child.text or ""))
+        elif child.tag == docx_tag("tab"):
+            fragments.append('<span class="docx-tab" aria-hidden="true">&#9;</span>')
+        elif child.tag in {docx_tag("br"), docx_tag("cr")}:
+            break_type = str(child.get(docx_tag("type"), "")).lower()
+            fragments.append(
+                '<span class="docx-page-break" aria-label="Page break"></span>'
+                if break_type == "page"
+                else "<br>"
+            )
+        elif child.tag in {docx_tag("drawing"), docx_tag("pict")}:
+            fragments.append(docx_image_html(child, archive, relationships))
+
+    if not fragments:
+        return ""
+
+    run_properties = run.find("w:rPr", DOCX_NAMESPACES)
+    styles = []
+
+    if docx_property_enabled(run_properties, "b"):
+        styles.append("font-weight:700")
+    if docx_property_enabled(run_properties, "i"):
+        styles.append("font-style:italic")
+    if docx_property_enabled(run_properties, "u"):
+        styles.append("text-decoration:underline")
+    if docx_property_enabled(run_properties, "strike"):
+        styles.append("text-decoration:line-through")
+
+    color_value = docx_xml_value(
+        run_properties.find("w:color", DOCX_NAMESPACES) if run_properties is not None else None,
+    )
+    if re.fullmatch(r"[0-9a-fA-F]{6}", color_value):
+        styles.append(f"color:#{color_value}")
+
+    size_value = docx_xml_value(
+        run_properties.find("w:sz", DOCX_NAMESPACES) if run_properties is not None else None,
+    )
+    try:
+        size_points = min(96, max(6, int(size_value) / 2))
+        styles.append(f"font-size:{size_points:g}pt")
+    except (TypeError, ValueError):
+        pass
+
+    highlight_value = docx_xml_value(
+        run_properties.find("w:highlight", DOCX_NAMESPACES) if run_properties is not None else None,
+    ).lower()
+    highlight_colors = {
+        "yellow": "#fef08a",
+        "green": "#bbf7d0",
+        "cyan": "#a5f3fc",
+        "magenta": "#f5d0fe",
+        "blue": "#bfdbfe",
+        "red": "#fecaca",
+        "darkyellow": "#fde68a",
+        "lightgray": "#e5e7eb",
+    }
+    if highlight_value in highlight_colors:
+        styles.append(f"background:{highlight_colors[highlight_value]}")
+
+    fonts = run_properties.find("w:rFonts", DOCX_NAMESPACES) if run_properties is not None else None
+    font_name = ""
+    if fonts is not None:
+        font_name = str(fonts.get(docx_tag("ascii"), "") or fonts.get(docx_tag("hAnsi"), ""))
+        font_name = re.sub(r"[^A-Za-z0-9 _-]", "", font_name).strip()
+    if font_name:
+        styles.append(f"font-family:'{font_name}',sans-serif")
+
+    content = "".join(fragments)
+    style_attribute = f' style="{html.escape(";".join(styles), quote=True)}"' if styles else ""
+    content = f"<span{style_attribute}>{content}</span>"
+
+    vertical_alignment = docx_xml_value(
+        run_properties.find("w:vertAlign", DOCX_NAMESPACES) if run_properties is not None else None,
+    ).lower()
+    if vertical_alignment == "superscript":
+        return f"<sup>{content}</sup>"
+    if vertical_alignment == "subscript":
+        return f"<sub>{content}</sub>"
+    return content
+
+
+def docx_inline_html(element, archive: zipfile.ZipFile, relationships: dict) -> str:
+    fragments = []
+
+    for child in element:
+        if child.tag == docx_tag("r"):
+            fragments.append(docx_run_html(child, archive, relationships))
+        elif child.tag == docx_tag("hyperlink"):
+            link_content = "".join(
+                docx_run_html(run, archive, relationships)
+                for run in child.findall("w:r", DOCX_NAMESPACES)
+            )
+            relationship_id = str(
+                child.get(f"{{{DOCX_RELATIONSHIP_NAMESPACE}}}id", "")
+            )
+            relationship = relationships.get(relationship_id) or {}
+            target = str(relationship.get("target", ""))
+
+            if (
+                relationship.get("external")
+                and re.match(r"^(?:https?://|mailto:)", target, re.IGNORECASE)
+            ):
+                fragments.append(
+                    f'<a href="{html.escape(target, quote=True)}" target="_blank" '
+                    f'rel="noopener noreferrer">{link_content}</a>'
+                )
+            else:
+                fragments.append(link_content)
+        elif child.tag != docx_tag("pPr"):
+            fragments.extend(
+                docx_run_html(run, archive, relationships)
+                for run in child.findall(".//w:r", DOCX_NAMESPACES)
+            )
+
+    return "".join(fragments)
+
+
+def docx_twips_to_points(value: str) -> float | None:
+    try:
+        return min(360.0, max(-360.0, int(value) / 20.0))
+    except (TypeError, ValueError):
+        return None
+
+
+def docx_paragraph_html(
+    paragraph,
+    archive: zipfile.ZipFile,
+    relationships: dict,
+    paragraph_styles: dict,
+) -> str:
+    content = docx_inline_html(paragraph, archive, relationships)
+    if not content and not docx_element_text(paragraph).strip():
+        return '<div class="docx-spacer" aria-hidden="true"></div>'
+
+    paragraph_properties = paragraph.find("w:pPr", DOCX_NAMESPACES)
+    paragraph_style_node = (
+        paragraph_properties.find("w:pStyle", DOCX_NAMESPACES)
+        if paragraph_properties is not None
+        else None
+    )
+    style_id = docx_xml_value(paragraph_style_node)
+    style_details = paragraph_styles.get(style_id, {})
+    style_name = str(style_details.get("name", style_id)).lower()
+    heading_level = int(style_details.get("heading_level", 0) or 0)
+
+    if heading_level == 0:
+        heading_match = re.search(r"heading\s*([1-6])", style_id, re.IGNORECASE)
+        if heading_match:
+            heading_level = int(heading_match.group(1))
+
+    paragraph_styles_css = []
+    alignment = docx_xml_value(
+        paragraph_properties.find("w:jc", DOCX_NAMESPACES)
+        if paragraph_properties is not None
+        else None,
+    ).lower()
+    alignment_map = {
+        "left": "left",
+        "center": "center",
+        "right": "right",
+        "both": "justify",
+        "distribute": "justify",
+    }
+    if alignment in alignment_map:
+        paragraph_styles_css.append(f"text-align:{alignment_map[alignment]}")
+
+    indentation = (
+        paragraph_properties.find("w:ind", DOCX_NAMESPACES)
+        if paragraph_properties is not None
+        else None
+    )
+    if indentation is not None:
+        indentation_rules = {
+            "left": "margin-left",
+            "start": "margin-left",
+            "right": "margin-right",
+            "end": "margin-right",
+            "firstLine": "text-indent",
+            "hanging": "text-indent",
+        }
+        for attribute_name, css_name in indentation_rules.items():
+            points = docx_twips_to_points(str(indentation.get(docx_tag(attribute_name), "")))
+            if points is None:
+                continue
+            if attribute_name == "hanging":
+                points = -abs(points)
+            paragraph_styles_css.append(f"{css_name}:{points:g}pt")
+
+    spacing = (
+        paragraph_properties.find("w:spacing", DOCX_NAMESPACES)
+        if paragraph_properties is not None
+        else None
+    )
+    if spacing is not None:
+        for attribute_name, css_name in (("before", "margin-top"), ("after", "margin-bottom")):
+            points = docx_twips_to_points(str(spacing.get(docx_tag(attribute_name), "")))
+            if points is not None:
+                paragraph_styles_css.append(f"{css_name}:{max(0, points):g}pt")
+
+    style_attribute = (
+        f' style="{html.escape(";".join(paragraph_styles_css), quote=True)}"'
+        if paragraph_styles_css
+        else ""
+    )
+
+    if heading_level:
+        return f"<h{heading_level}{style_attribute}>{content}</h{heading_level}>"
+
+    if "title" == style_name or style_name.endswith(" title"):
+        return f'<h1 class="docx-title"{style_attribute}>{content}</h1>'
+
+    is_numbered = (
+        paragraph_properties is not None
+        and paragraph_properties.find("w:numPr", DOCX_NAMESPACES) is not None
+    )
+    css_class = ' class="docx-list-item"' if is_numbered else ""
+    marker = '<span class="docx-list-marker" aria-hidden="true">•</span>' if is_numbered else ""
+    return f"<p{css_class}{style_attribute}>{marker}{content}</p>"
+
+
+def docx_table_html(
+    table,
+    archive: zipfile.ZipFile,
+    relationships: dict,
+    paragraph_styles: dict,
+) -> str:
+    rows = []
+
+    for row in table.findall("w:tr", DOCX_NAMESPACES):
+        cells = []
+        for cell in row.findall("w:tc", DOCX_NAMESPACES):
+            cell_blocks = [
+                docx_paragraph_html(paragraph, archive, relationships, paragraph_styles)
+                for paragraph in cell.findall("w:p", DOCX_NAMESPACES)
+            ]
+            cell_html = "".join(cell_blocks) or html.escape(docx_element_text(cell))
+            cells.append(f"<td>{cell_html}</td>")
+        if cells:
+            rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    return f'<div class="docx-table-wrap"><table>{"".join(rows)}</table></div>' if rows else ""
+
+
+def docx_preview_html(contents: bytes, filename: str) -> bytes:
+    """Create a safe, rich HTML preview when server-side PDF conversion is unavailable."""
+    with zipfile.ZipFile(BytesIO(contents)) as archive:
+        document_xml = archive.read("word/document.xml")
+        root = ElementTree.fromstring(document_xml)
+        body = root.find("w:body", DOCX_NAMESPACES)
+        relationships = docx_relationships(archive)
+        paragraph_styles = docx_paragraph_styles(archive)
+
+        def render_blocks(parent) -> list[str]:
+            rendered = []
+            for child in parent:
+                if child.tag == docx_tag("p"):
+                    rendered.append(
+                        docx_paragraph_html(
+                            child,
+                            archive,
+                            relationships,
+                            paragraph_styles,
+                        )
+                    )
+                elif child.tag == docx_tag("tbl"):
+                    rendered.append(
+                        docx_table_html(
+                            child,
+                            archive,
+                            relationships,
+                            paragraph_styles,
+                        )
+                    )
+                elif child.tag == docx_tag("sdt"):
+                    content = child.find("w:sdtContent", DOCX_NAMESPACES)
+                    if content is not None:
+                        rendered.extend(render_blocks(content))
+            return rendered
+
+        blocks = render_blocks(body) if body is not None else []
+
+    safe_filename = html.escape(filename or "Assignment instructions")
+    body_html = "\n".join(blocks) or "<p>This document does not contain previewable content.</p>"
+    preview = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{safe_filename}</title>
+  <style>
+    :root {{ color-scheme: light; font-family: Calibri, Arial, sans-serif; }}
+    * {{ box-sizing: border-box; }}
+    html {{ min-height: 100%; background: #dfe6ef; }}
+    body {{ margin: 0; padding: clamp(18px, 4vw, 48px) clamp(10px, 3vw, 30px) 72px; color: #172033; background: #dfe6ef; line-height: 1.5; }}
+    .docx-page {{ width: min(8.5in, 100%); min-height: 11in; margin: 0 auto; padding: clamp(38px, 8vw, 0.85in) clamp(28px, 8vw, 0.9in); overflow-wrap: anywhere; background: #fff; box-shadow: 0 8px 28px rgba(15, 23, 42, 0.22); }}
+    h1, h2, h3, h4, h5, h6 {{ color: #132238; line-height: 1.22; margin: 1.25em 0 0.42em; page-break-after: avoid; }}
+    h1:first-child, h2:first-child, .docx-title:first-child {{ margin-top: 0; }}
+    .docx-title {{ margin: 0 0 1em; font-size: 2rem; text-align: center; }}
+    p {{ margin: 0.62em 0; white-space: pre-wrap; }}
+    a {{ color: #1d4ed8; text-decoration: underline; text-underline-offset: 2px; }}
+    sup, sub {{ font-size: 0.75em; }}
+    .docx-tab {{ display: inline-block; width: 2.5rem; white-space: pre; }}
+    .docx-spacer {{ height: 0.75rem; }}
+    .docx-list-item {{ position: relative; padding-left: 1.5rem; }}
+    .docx-list-marker {{ position: absolute; left: 0.35rem; color: #2563eb; font-weight: 800; }}
+    .docx-image {{ display: block; max-width: 100%; height: auto; margin: 0.75rem auto; object-fit: contain; }}
+    .docx-page-break {{ display: block; height: 1px; margin: 2rem -0.35in; border-top: 2px dashed #cbd5e1; page-break-after: always; }}
+    .docx-table-wrap {{ width: 100%; margin: 1rem 0; overflow-x: auto; }}
+    table {{ width: 100%; border-collapse: collapse; table-layout: auto; }}
+    td {{ min-width: 6rem; padding: 0.55rem 0.65rem; border: 1px solid #94a3b8; vertical-align: top; }}
+    td p {{ margin: 0.2rem 0; }}
+    tr:nth-child(odd) td {{ background: #f8fafc; }}
+    @media (max-width: 680px) {{
+      body {{ padding: 0; }}
+      .docx-page {{ min-height: 100vh; padding: 28px 22px 56px; box-shadow: none; }}
+    }}
+    @media print {{
+      html, body {{ background: #fff; padding: 0; }}
+      .docx-page {{ width: auto; min-height: 0; padding: 0; box-shadow: none; }}
+    }}
+  </style>
+</head>
+<body>
+  <article class="docx-page" aria-label="{safe_filename}">
+{body_html}
+  </article>
+</body>
+</html>"""
+    return preview.encode("utf-8")
+
+
+def office_document_pdf_preview(path: str) -> bytes | None:
+    """Use LibreOffice when available so DOC/DOCX previews preserve page layout."""
+    office_binary = shutil.which("libreoffice") or shutil.which("soffice")
+    if not office_binary or not path or not os.path.isfile(path):
+        return None
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="maat-assignment-preview-") as output_dir:
+            office_profile_dir = os.path.join(output_dir, "office-profile")
+            os.makedirs(office_profile_dir, exist_ok=True)
+            completed = subprocess.run(
+                [
+                    office_binary,
+                    f"-env:UserInstallation=file://{quote(office_profile_dir)}",
+                    "--headless",
+                    "--nologo",
+                    "--nodefault",
+                    "--nofirststartwizard",
+                    "--convert-to",
+                    "pdf:writer_pdf_Export",
+                    "--outdir",
+                    output_dir,
+                    path,
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=45,
+            )
+            if completed.returncode != 0:
+                return None
+
+            converted_path = os.path.join(
+                output_dir,
+                f"{os.path.splitext(os.path.basename(path))[0]}.pdf",
+            )
+            if not os.path.isfile(converted_path):
+                return None
+
+            with open(converted_path, "rb") as converted_file:
+                return converted_file.read()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def unavailable_office_preview_html(filename: str) -> bytes:
+    safe_filename = html.escape(filename or "assignment document")
+    return f"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family:Inter,system-ui,sans-serif;padding:40px;color:#334155;line-height:1.55">
+  <h1 style="color:#172033">Preview unavailable</h1>
+  <p><strong>{safe_filename}</strong> uses the legacy Word format and could not be converted on this server.</p>
+  <p>Ask your instructor for a browser-compatible copy if you need to view this document here.</p>
+</body>
+</html>""".encode("utf-8")
+
+
+def presentation_pdf_preview(path: str) -> bytes | None:
+    """Convert PPT/PPTX files to PDF for inline student preview when LibreOffice is available."""
+    office_binary = shutil.which("libreoffice") or shutil.which("soffice")
+    if not office_binary or not path or not os.path.isfile(path):
+        return None
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="maat-presentation-preview-") as output_dir:
+            office_profile_dir = os.path.join(output_dir, "office-profile")
+            os.makedirs(office_profile_dir, exist_ok=True)
+            completed = subprocess.run(
+                [
+                    office_binary,
+                    f"-env:UserInstallation=file://{quote(office_profile_dir)}",
+                    "--headless",
+                    "--nologo",
+                    "--nodefault",
+                    "--nofirststartwizard",
+                    "--convert-to",
+                    "pdf:impress_pdf_Export",
+                    "--outdir",
+                    output_dir,
+                    path,
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=45,
+            )
+            if completed.returncode != 0:
+                return None
+
+            converted_path = os.path.join(
+                output_dir,
+                f"{os.path.splitext(os.path.basename(path))[0]}.pdf",
+            )
+            if not os.path.isfile(converted_path):
+                return None
+
+            with open(converted_path, "rb") as converted_file:
+                return converted_file.read()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def unavailable_presentation_preview_html(filename: str) -> bytes:
+    safe_filename = html.escape(filename or "module presentation")
+    return f"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family:Inter,system-ui,sans-serif;padding:40px;color:#334155;line-height:1.55">
+  <h1 style="color:#172033">Presentation preview unavailable</h1>
+  <p><strong>{safe_filename}</strong> could not be converted for browser viewing on this server.</p>
+  <p>The presentation is optional for this module.</p>
+</body>
+</html>""".encode("utf-8")
 
 
 
@@ -1175,7 +1799,7 @@ def analytics_iso(value) -> str:
         return str(value or "")
 
 
-def analytics_student_row_payload(user, lecture_name: str, lab_name: str, class_id: int, *, submission=None, attempts=0, grade=0):
+def analytics_student_row_payload(user, lecture_name: str, lab_name: str, class_id: int, *, submission=None, attempts=0, grade=0, skipped=False):
     student_id = str(getattr(user, "StudentNumber", "") or "")
     last_name = str(getattr(user, "Lastname", "") or "")
     first_name = str(getattr(user, "Firstname", "") or "")
@@ -1198,6 +1822,7 @@ def analytics_student_row_payload(user, lecture_name: str, lab_name: str, class_
             "0",
             student_id,
             is_locked,
+            bool(skipped),
         ]
 
     return [
@@ -1213,6 +1838,7 @@ def analytics_student_row_payload(user, lecture_name: str, lab_name: str, class_
         grade if grade is not None else 0,
         student_id,
         is_locked,
+        bool(skipped),
     ]
 
 
@@ -1339,6 +1965,22 @@ def analytics_dashboard_progress(class_id: int, project_ids: list[int], checkpoi
         .all()
     )
 
+    skipped_checkpoint_keys = {
+        (
+            int(getattr(row, "ProjectId", 0) or 0),
+            int(getattr(row, "CheckpointId", 0) or 0),
+            int(getattr(row, "UserId", 0) or 0),
+        )
+        for row in StudentCheckpointSkips.query.filter(
+            StudentCheckpointSkips.ClassId == int(class_id),
+            StudentCheckpointSkips.ProjectId.in_(project_ids),
+            StudentCheckpointSkips.UserId.in_(student_ids),
+        ).all()
+        if int(getattr(row, "ProjectId", 0) or 0) > 0
+        and int(getattr(row, "CheckpointId", 0) or 0) > 0
+        and int(getattr(row, "UserId", 0) or 0) > 0
+    }
+
     main_attempt_counts: dict[tuple[int, int], int] = defaultdict(int)
     checkpoint_attempt_counts: dict[tuple[int, int, int], int] = defaultdict(int)
     latest_main: dict[tuple[int, int], Submissions] = {}
@@ -1424,6 +2066,7 @@ def analytics_dashboard_progress(class_id: int, project_ids: list[int], checkpoi
                     submission=checkpoint_submission,
                     attempts=checkpoint_attempt_counts.get(checkpoint_key, 0),
                     grade=checkpoint_grade,
+                    skipped=checkpoint_key in skipped_checkpoint_keys,
                 )
 
     return progress
@@ -3257,16 +3900,41 @@ def get_module_presentation():
 
     filename = os.path.basename(presentation_path)
     ext = os.path.splitext(filename)[1].lower()
-    return Response(
-        data,
-        content_type=PRESENTATION_MIME_TYPES.get(ext, 'application/octet-stream'),
-        headers={
-            'Content-Disposition': f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}",
-            'Content-Length': str(len(data)),
-            'X-Filename': filename,
-            'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type, X-Filename',
-        },
-    )
+    preview = parse_bool(request.args.get('preview', False))
+    mime = PRESENTATION_MIME_TYPES.get(ext, 'application/octet-stream')
+    response_name = filename
+
+    if preview and ext in {'.ppt', '.pptx'}:
+        converted_pdf = presentation_pdf_preview(presentation_path)
+        if converted_pdf is not None:
+            data = converted_pdf
+            mime = 'application/pdf'
+            response_name = f"{os.path.splitext(filename)[0]}.pdf"
+        else:
+            data = unavailable_presentation_preview_html(filename)
+            mime = 'text/html; charset=utf-8'
+            response_name = f"{os.path.splitext(filename)[0]}.html"
+
+    disposition = 'inline' if preview else 'attachment'
+    headers = {
+        'Content-Disposition': f"{disposition}; filename=\"{response_name}\"; filename*=UTF-8''{quote(response_name)}",
+        'Content-Length': str(len(data)),
+        'X-Filename': response_name,
+        'X-Original-Filename': filename,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-store',
+        'Access-Control-Expose-Headers': (
+            'Content-Disposition, Content-Type, X-Filename, X-Original-Filename'
+        ),
+    }
+
+    if preview and mime.startswith('text/html'):
+        headers['Content-Security-Policy'] = (
+            "default-src 'none'; style-src 'unsafe-inline'; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+        )
+
+    return Response(data, content_type=mime, headers=headers)
 
 
 @projects_api.route('/module_presentation', methods=['POST'])
@@ -3551,26 +4219,63 @@ def getAssignmentDescription(project_repo: ProjectRepository = Provide[Container
 
     fname = os.path.basename(assignmentdesc_path) if assignmentdesc_path else 'assignment_description'
     ext = os.path.splitext(fname)[1].lower()
-    if ext == '.pdf':
-        mime = 'application/pdf'
-    elif ext == '.docx':
-        mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    elif ext == '.doc':
-        mime = 'application/msword'
-    else:
-        mime = 'application/octet-stream'
     file_stream = BytesIO(assignmentdesc_contents)
     data = file_stream.getvalue()
-    # Send original filename; expose headers for CORS so frontend can read them
+    preview = parse_bool(request.args.get('preview', False))
+
+    if preview and ext in {'.doc', '.docx'}:
+        converted_pdf = office_document_pdf_preview(assignmentdesc_path)
+        if converted_pdf is not None:
+            data = converted_pdf
+            mime = 'application/pdf'
+            response_name = f"{os.path.splitext(fname)[0]}.pdf"
+        elif ext == '.docx':
+            try:
+                data = docx_preview_html(data, fname)
+            except (KeyError, OSError, ValueError, zipfile.BadZipFile, ElementTree.ParseError):
+                data = unavailable_office_preview_html(fname)
+            mime = 'text/html; charset=utf-8'
+            response_name = f"{os.path.splitext(fname)[0]}.html"
+        else:
+            data = unavailable_office_preview_html(fname)
+            mime = 'text/html; charset=utf-8'
+            response_name = f"{os.path.splitext(fname)[0]}.html"
+    else:
+        response_name = fname
+        if ext == '.pdf':
+            mime = 'application/pdf'
+        elif ext == '.docx':
+            mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        elif ext == '.doc':
+            mime = 'application/msword'
+        elif ext in {'.txt', '.md'}:
+            mime = 'text/plain; charset=utf-8'
+        else:
+            mime = 'application/octet-stream'
+
+    disposition = 'inline' if preview else 'attachment'
+
+    headers = {
+        'Content-Disposition': f"{disposition}; filename=\"{response_name}\"; filename*=UTF-8''{quote(response_name)}",
+        'Content-Length': str(len(data)),
+        'X-Filename': response_name,
+        'X-Original-Filename': fname,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-store',
+        'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type, X-Filename, X-Original-Filename',
+    }
+
+    if preview and mime.startswith('text/html'):
+        headers['Content-Security-Policy'] = (
+            "default-src 'none'; img-src data:; style-src 'unsafe-inline'; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+        )
+
+    # Preserve the original filename while allowing the preview representation to differ.
     return Response(
         data,
         content_type=mime,
-        headers={
-            'Content-Disposition': f"attachment; filename=\"{fname}\"; filename*=UTF-8''{quote(fname)}",
-            'Content-Length': str(len(data)),
-            'X-Filename': fname,
-            'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type, X-Filename',
-        },
+        headers=headers,
     )
 
 @projects_api.route('/edit_checkpoint_project_files', methods=['POST'])

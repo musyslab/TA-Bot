@@ -541,7 +541,7 @@ export default function DiffView(props: DiffViewProps) {
                 const maybe = safeJsonParse(res.data)
                 return (maybe && typeof maybe === 'object' ? maybe : { results: [] }) as AnyPayload
             }),
-    [submissionId, classId, isPractice, practiceProblemId])
+        [submissionId, classId, isPractice, practiceProblemId])
 
     useEffect(() => {
         setTestsLoaded(false)
@@ -1147,36 +1147,36 @@ export default function DiffView(props: DiffViewProps) {
             })
         })
 
-        // The side-by-side layout can finish sizing after async data, fonts, and parent panels settle.
-        // Rechecking a few times prevents the shared bar from staying at its initial no-overflow width.
-        ;[0, 50, 150, 500].forEach((delay) => {
-            timeouts.push(window.setTimeout(refreshMetrics, delay))
-        })
+            // The side-by-side layout can finish sizing after async data, fonts, and parent panels settle.
+            // Rechecking a few times prevents the shared bar from staying at its initial no-overflow width.
+            ;[0, 50, 150, 500].forEach((delay) => {
+                timeouts.push(window.setTimeout(refreshMetrics, delay))
+            })
 
         const resizeObserver =
             typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refreshMetrics) : null
 
-        ;[
-            sideBySideLeftRef.current,
-            sideBySideRightRef.current,
-            sideBySideBarRef.current,
-            sideBySideLeftContentRef.current,
-            sideBySideRightContentRef.current,
-            sideBySideBarRef.current?.parentElement ?? null,
-            sideBySideLeftRef.current?.closest('.diff-code') ?? null,
-            sideBySideLeftRef.current?.closest('.diff-pane') ?? null,
-        ].forEach((el) => {
-            if (el && resizeObserver) resizeObserver.observe(el)
-        })
+            ;[
+                sideBySideLeftRef.current,
+                sideBySideRightRef.current,
+                sideBySideBarRef.current,
+                sideBySideLeftContentRef.current,
+                sideBySideRightContentRef.current,
+                sideBySideBarRef.current?.parentElement ?? null,
+                sideBySideLeftRef.current?.closest('.diff-code') ?? null,
+                sideBySideLeftRef.current?.closest('.diff-pane') ?? null,
+            ].forEach((el) => {
+                if (el && resizeObserver) resizeObserver.observe(el)
+            })
 
         const mutationObserver =
             typeof MutationObserver !== 'undefined' ? new MutationObserver(refreshMetrics) : null
 
-        ;[sideBySideLeftContentRef.current, sideBySideRightContentRef.current].forEach((el) => {
-            if (el && mutationObserver) {
-                mutationObserver.observe(el, { childList: true, subtree: true, characterData: true })
-            }
-        })
+            ;[sideBySideLeftContentRef.current, sideBySideRightContentRef.current].forEach((el) => {
+                if (el && mutationObserver) {
+                    mutationObserver.observe(el, { childList: true, subtree: true, characterData: true })
+                }
+            })
 
         window.addEventListener('resize', refreshMetrics)
 
@@ -1366,331 +1366,331 @@ export default function DiffView(props: DiffViewProps) {
     }
 
     const renderDiffViewSection = () => (
-            <section
-                className={`diff-view ${disableCopy ? 'no-user-select' : ''}`}
-                {...copyBlockHandlers}
-                ref={diffViewRef}
-            >
-                <aside className="diff-sidebar">
-                    <ul className="diff-file-list">
-                        {!testsLoaded && <li className="muted">Loading…</li>}
-                        {testsLoaded && diffFilesAll.length === 0 && <li className="muted">No tests.</li>}
-                        {[...diffFilesAll].sort((a, b) => a.num - b.num).map((f) => (
-                            <li
-                                key={f.id}
-                                className={
-                                    'file-item ' +
-                                    (f.id === selectedDiffId ? 'selected ' : '') +
-                                    (f.passed ? 'passed' : 'failed')
-                                }
-                                onClick={() => setSelectedDiffId(f.id)}
-                                title={`Testcase ${f.num}: ${f.test}`}
-                            >
-                                <div className="testcase-name">
-                                    <span className="tc-num">{f.num}.</span> {f.test}
-                                </div>
-                                <div className="testcase-sub">
-                                    <span className={'status-dot ' + (f.passed ? 'is-pass' : 'is-fail')} />
-                                    {f.status}
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-
-                    {allowTestcaseInputPurchases && (
-                        <div className="testcase-input-store">
-                            <div className="testcase-input-store__heading">
-                                <span>Reveal testcase input</span>
-                                {testcaseInputStore && (
-                                    <span className="testcase-input-store__balance">
-                                        <FaStar aria-hidden="true" />
-                                        {testcaseInputStarBalance}
-                                    </span>
-                                )}
+        <section
+            className={`diff-view ${disableCopy ? 'no-user-select' : ''}`}
+            {...copyBlockHandlers}
+            ref={diffViewRef}
+        >
+            <aside className="diff-sidebar">
+                <ul className="diff-file-list">
+                    {!testsLoaded && <li className="muted">Loading…</li>}
+                    {testsLoaded && diffFilesAll.length === 0 && <li className="muted">No tests.</li>}
+                    {[...diffFilesAll].sort((a, b) => a.num - b.num).map((f) => (
+                        <li
+                            key={f.id}
+                            className={
+                                'file-item ' +
+                                (f.id === selectedDiffId ? 'selected ' : '') +
+                                (f.passed ? 'passed' : 'failed')
+                            }
+                            onClick={() => setSelectedDiffId(f.id)}
+                            title={`Testcase ${f.num}: ${f.test}`}
+                        >
+                            <div className="testcase-name">
+                                <span className="tc-num">{f.num}.</span> {f.test}
                             </div>
+                            <div className="testcase-sub">
+                                <span className={'status-dot ' + (f.passed ? 'is-pass' : 'is-fail')} />
+                                {f.status}
+                            </div>
+                        </li>
+                    ))}
+                </ul>
 
-                            {!testcaseInputStoreLoaded && (
-                                <div className="testcase-input-store__muted">Loading input options…</div>
+                {allowTestcaseInputPurchases && (
+                    <div className="testcase-input-store">
+                        <div className="testcase-input-store__heading">
+                            <span>Reveal testcase input</span>
+                            {testcaseInputStore && (
+                                <span className="testcase-input-store__balance">
+                                    <FaStar aria-hidden="true" />
+                                    {testcaseInputStarBalance}
+                                </span>
                             )}
+                        </div>
 
-                            {testcaseInputStoreLoaded && visibleTestcaseInputOptions.length === 0 && (
-                                <div className="testcase-input-store__muted">
-                                    No failing or previously revealed testcase inputs are available.
-                                </div>
-                            )}
+                        {!testcaseInputStoreLoaded && (
+                            <div className="testcase-input-store__muted">Loading input options…</div>
+                        )}
 
-                            {selectedTestcaseInput && (
-                                <>
-                                    <label
-                                        className="testcase-input-store__label"
-                                        htmlFor="testcase-input-select"
+                        {testcaseInputStoreLoaded && visibleTestcaseInputOptions.length === 0 && (
+                            <div className="testcase-input-store__muted">
+                                No failing or previously revealed testcase inputs are available.
+                            </div>
+                        )}
+
+                        {selectedTestcaseInput && (
+                            <>
+                                <label
+                                    className="testcase-input-store__label"
+                                    htmlFor="testcase-input-select"
+                                >
+                                    Testcase
+                                </label>
+                                <div className="testcase-input-store__select-wrap">
+                                    <select
+                                        id="testcase-input-select"
+                                        value={selectedTestcaseInputId ?? ''}
+                                        onChange={(event) => {
+                                            setSelectedTestcaseInputId(Number(event.target.value))
+                                            setTestcaseInputPurchaseError('')
+                                            setInputPurchaseConfirmationOpen(false)
+                                        }}
                                     >
-                                        Testcase
-                                    </label>
-                                    <div className="testcase-input-store__select-wrap">
-                                        <select
-                                            id="testcase-input-select"
-                                            value={selectedTestcaseInputId ?? ''}
-                                            onChange={(event) => {
-                                                setSelectedTestcaseInputId(Number(event.target.value))
-                                                setTestcaseInputPurchaseError('')
-                                                setInputPurchaseConfirmationOpen(false)
-                                            }}
-                                        >
-                                            {visibleTestcaseInputOptions.map((testcase) => (
-                                                <option
-                                                    key={testcase.testcase_id}
-                                                    value={testcase.testcase_id}
-                                                >
-                                                    {testcase.order}. {testcase.name}
-                                                    {testcase.purchased ? ' — Revealed' : ''}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <FaChevronDown aria-hidden="true" />
-                                    </div>
+                                        {visibleTestcaseInputOptions.map((testcase) => (
+                                            <option
+                                                key={testcase.testcase_id}
+                                                value={testcase.testcase_id}
+                                            >
+                                                {testcase.order}. {testcase.name}
+                                                {testcase.purchased ? ' — Revealed' : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <FaChevronDown aria-hidden="true" />
+                                </div>
 
-                                    {selectedTestcaseInput.purchased ? (
-                                        <div className="testcase-input-store__revealed">
-                                            <span>Exact input</span>
-                                            {selectedTestcaseInput.input === '' ? (
-                                                <div className="testcase-input-store__empty-input">
-                                                    This testcase has no input.
-                                                </div>
-                                            ) : (
-                                                <pre>{selectedTestcaseInput.input}</pre>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            className="testcase-input-store__purchase"
-                                            disabled={
-                                                !selectedTestcaseInput.purchase_eligible ||
-                                                testcaseInputStarBalance < testcaseInputCost ||
-                                                isPurchasingTestcaseInput
-                                            }
-                                            onClick={() => {
-                                                setTestcaseInputPurchaseError('')
-                                                setInputPurchaseConfirmationOpen(true)
-                                            }}
-                                        >
-                                            <FaEye aria-hidden="true" />
-                                            {testcaseInputStarBalance < testcaseInputCost
-                                                ? `Need ${testcaseInputCost} ${testcaseInputStarLabel}`
-                                                : `Reveal for ${testcaseInputCost} ${testcaseInputStarLabel}`}
-                                        </button>
-                                    )}
-                                </>
+                                {selectedTestcaseInput.purchased ? (
+                                    <div className="testcase-input-store__revealed">
+                                        <span>Exact input</span>
+                                        {selectedTestcaseInput.input === '' ? (
+                                            <div className="testcase-input-store__empty-input">
+                                                This testcase has no input.
+                                            </div>
+                                        ) : (
+                                            <pre>{selectedTestcaseInput.input}</pre>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="testcase-input-store__purchase"
+                                        disabled={
+                                            !selectedTestcaseInput.purchase_eligible ||
+                                            testcaseInputStarBalance < testcaseInputCost ||
+                                            isPurchasingTestcaseInput
+                                        }
+                                        onClick={() => {
+                                            setTestcaseInputPurchaseError('')
+                                            setInputPurchaseConfirmationOpen(true)
+                                        }}
+                                    >
+                                        <FaEye aria-hidden="true" />
+                                        {testcaseInputStarBalance < testcaseInputCost
+                                            ? `Need ${testcaseInputCost} ${testcaseInputStarLabel}`
+                                            : `Reveal for ${testcaseInputCost} ${testcaseInputStarLabel}`}
+                                    </button>
+                                )}
+                            </>
+                        )}
+
+                        {testcaseInputPurchaseError && (
+                            <div className="testcase-input-store__error" role="alert">
+                                {testcaseInputPurchaseError}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </aside>
+
+            <div className="diff-pane">
+                <div className="diff-toolbar">
+                    <div className="diff-title">
+                        {selectedFile ? `Testcase ${selectedFile.num}: ${selectedFile.test}` : 'No selection'}
+                    </div>
+
+                    <div className="spacer" />
+
+                    {(showLayoutToggle || showDiffModeToggle) && (
+                        <div className="diff-toolbar-mode-group">
+                            {showLayoutToggle && (
+                                <button
+                                    type="button"
+                                    className={`btn toggle-mode view-toggle ${diffLayout === 'side-by-side' ? 'on' : 'off'}`}
+                                    aria-pressed={diffLayout === 'side-by-side'}
+                                    onClick={() => {
+                                        const next: DiffLayout = diffLayout === 'stacked' ? 'side-by-side' : 'stacked'
+                                        logUiClick(
+                                            'Diff Layout',
+                                            diffLayout === 'side-by-side',
+                                            diffLayoutStateLabel(diffLayout),
+                                            diffLayoutStateLabel(next)
+                                        )
+                                        setDiffLayout(next)
+                                    }}
+                                    title="Switch between stacked and split diff views"
+                                >
+                                    <span className="toggle-copy">
+                                        <span className="toggle-label">View</span>
+                                        <span className="toggle-value">
+                                            {diffLayout === 'side-by-side' ? 'Split' : 'Stacked'}
+                                        </span>
+                                    </span>
+                                    <span className="toggle-icon" aria-hidden="true">
+                                        {diffLayout === 'side-by-side' ? <FaColumns /> : <FaBars />}
+                                    </span>
+                                </button>
                             )}
 
-                            {testcaseInputPurchaseError && (
-                                <div className="testcase-input-store__error" role="alert">
-                                    {testcaseInputPurchaseError}
-                                </div>
+                            {/* Button 1: shortDiff vs longDiff */}
+                            {showDiffModeToggle && (
+                                <button
+                                    type="button"
+                                    className={`btn toggle-mode scope-toggle ${diffMode === 'long' ? 'on' : 'off'}`}
+                                    aria-pressed={diffMode === 'long'}
+                                    onClick={() => {
+                                        const next: DiffMode = diffMode === 'short' ? 'long' : 'short'
+
+                                        logUiClick(
+                                            'Diff Mode',
+                                            diffMode === 'long',
+                                            diffModeStateLabel(diffMode),
+                                            diffModeStateLabel(next)
+                                        )
+
+                                        setDiffMode(next)
+                                    }}
+                                    title="Switch between changed lines only and all diff lines"
+                                >
+                                    <span className="toggle-copy">
+                                        <span className="toggle-label">Lines</span>
+                                        <span className="toggle-value">
+                                            {diffMode === 'short' ? 'Differences' : 'All'}
+                                        </span>
+                                    </span>
+                                    <span className="toggle-icon" aria-hidden="true">
+                                        {diffMode === 'short' ? <FaGripLines /> : <FaAlignJustify />}
+                                    </span>
+                                </button>
                             )}
                         </div>
                     )}
-                </aside>
 
-                <div className="diff-pane">
-                    <div className="diff-toolbar">
-                        <div className="diff-title">
-                            {selectedFile ? `Testcase ${selectedFile.num}: ${selectedFile.test}` : 'No selection'}
-                        </div>
+                    {/* Button 2: Diff Finder */}
+                    {selectedFile && !selectedFile.passed && (!selectedFile.hidden || revealHiddenOutput) && hasIntraInSelected && (
+                        <button
+                            type="button"
+                            className={`btn toggle-intra ${intraEnabled ? 'on' : 'off'}`}
+                            aria-pressed={intraEnabled}
+                            disabled={!hasIntraInSelected}
+                            onClick={() => {
+                                const next = !intraEnabled
 
-                        <div className="spacer" />
+                                logUiClick(
+                                    'Diff Finder',
+                                    intraEnabled,
+                                    intraEnabled ? 'On' : 'Off',
+                                    next ? 'On' : 'Off'
+                                )
 
-                        {(showLayoutToggle || showDiffModeToggle) && (
-                            <div className="diff-toolbar-mode-group">
-                                {showLayoutToggle && (
-                                    <button
-                                        type="button"
-                                        className={`btn toggle-mode view-toggle ${diffLayout === 'side-by-side' ? 'on' : 'off'}`}
-                                        aria-pressed={diffLayout === 'side-by-side'}
-                                        onClick={() => {
-                                            const next: DiffLayout = diffLayout === 'stacked' ? 'side-by-side' : 'stacked'
-                                            logUiClick(
-                                                'Diff Layout',
-                                                diffLayout === 'side-by-side',
-                                                diffLayoutStateLabel(diffLayout),
-                                                diffLayoutStateLabel(next)
-                                            )
-                                            setDiffLayout(next)
-                                        }}
-                                        title="Switch between stacked and split diff views"
-                                    >
-                                        <span className="toggle-copy">
-                                            <span className="toggle-label">View</span>
-                                            <span className="toggle-value">
-                                                {diffLayout === 'side-by-side' ? 'Split' : 'Stacked'}
-                                            </span>
-                                        </span>
-                                        <span className="toggle-icon" aria-hidden="true">
-                                            {diffLayout === 'side-by-side' ? <FaColumns /> : <FaBars />}
-                                        </span>
-                                    </button>
-                                )}
-
-                                {/* Button 1: shortDiff vs longDiff */}
-                                {showDiffModeToggle && (
-                                    <button
-                                        type="button"
-                                        className={`btn toggle-mode scope-toggle ${diffMode === 'long' ? 'on' : 'off'}`}
-                                        aria-pressed={diffMode === 'long'}
-                                        onClick={() => {
-                                            const next: DiffMode = diffMode === 'short' ? 'long' : 'short'
-
-                                            logUiClick(
-                                                'Diff Mode',
-                                                diffMode === 'long',
-                                                diffModeStateLabel(diffMode),
-                                                diffModeStateLabel(next)
-                                            )
-
-                                            setDiffMode(next)
-                                        }}
-                                        title="Switch between changed lines only and all diff lines"
-                                    >
-                                        <span className="toggle-copy">
-                                            <span className="toggle-label">Lines</span>
-                                            <span className="toggle-value">
-                                                {diffMode === 'short' ? 'Differences' : 'All'}
-                                            </span>
-                                        </span>
-                                        <span className="toggle-icon" aria-hidden="true">
-                                            {diffMode === 'short' ? <FaGripLines /> : <FaAlignJustify />}
-                                        </span>
-                                    </button>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Button 2: Diff Finder */}
-                        {selectedFile && !selectedFile.passed && (!selectedFile.hidden || revealHiddenOutput) && hasIntraInSelected && (
-                            <button
-                                type="button"
-                                className={`btn toggle-intra ${intraEnabled ? 'on' : 'off'}`}
-                                aria-pressed={intraEnabled}
-                                disabled={!hasIntraInSelected}
-                                onClick={() => {
-                                    const next = !intraEnabled
-
-                                    logUiClick(
-                                        'Diff Finder',
-                                        intraEnabled,
-                                        intraEnabled ? 'On' : 'Off',
-                                        next ? 'On' : 'Off'
-                                    )
-
-                                    setIntraEnabled(next)
-                                }}
-                                title={
-                                    hasIntraInSelected
-                                        ? 'Toggle intra-line highlighting'
-                                        : 'Intra-line highlighting is not available for this diff'
-                                }
-                            >
-                                <span className="toggle-copy">
-                                    <span className="toggle-label">Diff Finder</span>
-                                    <span className="toggle-value">{intraEnabled ? 'On' : 'Off'}</span>
-                                </span>
-                                <span className="toggle-icon" aria-hidden="true">
-                                    <FaSearch />
-                                </span>
-                            </button>
-                        )}
-                    </div>
-
-                    <div className={`diff-code ${diffLayout === 'side-by-side' ? 'side-by-side-mode' : ''}`}>
-                        {!selectedFile && <div className="muted">Select a test on the left to view its diff.</div>}
-
-                        {selectedFile && selectedFile.hidden && (
-                            <div className="diff-content">
-                                <div className="diff-empty hidden" role="status" aria-live="polite">
-                                    <div className="empty-icon" aria-hidden="true">
-                                        <FaLock />
-                                    </div>
-                                    <div className="empty-text">
-                                        <div className="empty-title">Output hidden</div>
-                                        <div className="empty-subtitle">
-                                            This testcase’s output is hidden. Result: {selectedFile.passed ? 'Passed' : 'Failed'}.
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {selectedFile && (!selectedFile.hidden || revealHiddenOutput) && selectedFile.passed && (
-
-                            <div className="diff-content">
-                                <div className="diff-empty" role="status" aria-live="polite">
-                                    <div className="empty-icon" aria-hidden="true">
-                                        <FaRegCheckSquare />
-                                    </div>
-                                    <div className="empty-text">
-                                        <div className="empty-title">No differences found</div>
-                                        <div className="empty-subtitle">Your program’s output matches the expected output.</div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {selectedFile && (!selectedFile.hidden || revealHiddenOutput) && !selectedFile.passed && (
-                            diffLayout === 'side-by-side' ? renderSideBySideDiff() : <div className="diff-content">{renderStackedDiff()}</div>
-                        )}
-                    </div>
+                                setIntraEnabled(next)
+                            }}
+                            title={
+                                hasIntraInSelected
+                                    ? 'Toggle intra-line highlighting'
+                                    : 'Intra-line highlighting is not available for this diff'
+                            }
+                        >
+                            <span className="toggle-copy">
+                                <span className="toggle-label">Diff Finder</span>
+                                <span className="toggle-value">{intraEnabled ? 'On' : 'Off'}</span>
+                            </span>
+                            <span className="toggle-icon" aria-hidden="true">
+                                <FaSearch />
+                            </span>
+                        </button>
+                    )}
                 </div>
-            </section>
+
+                <div className={`diff-code ${diffLayout === 'side-by-side' ? 'side-by-side-mode' : ''}`}>
+                    {!selectedFile && <div className="muted">Select a test on the left to view its diff.</div>}
+
+                    {selectedFile && selectedFile.hidden && (
+                        <div className="diff-content">
+                            <div className="diff-empty hidden" role="status" aria-live="polite">
+                                <div className="empty-icon" aria-hidden="true">
+                                    <FaLock />
+                                </div>
+                                <div className="empty-text">
+                                    <div className="empty-title">Output hidden</div>
+                                    <div className="empty-subtitle">
+                                        This testcase’s output is hidden. Result: {selectedFile.passed ? 'Passed' : 'Failed'}.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {selectedFile && (!selectedFile.hidden || revealHiddenOutput) && selectedFile.passed && (
+
+                        <div className="diff-content">
+                            <div className="diff-empty" role="status" aria-live="polite">
+                                <div className="empty-icon" aria-hidden="true">
+                                    <FaRegCheckSquare />
+                                </div>
+                                <div className="empty-text">
+                                    <div className="empty-title">No differences found</div>
+                                    <div className="empty-subtitle">Your program’s output matches the expected output.</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {selectedFile && (!selectedFile.hidden || revealHiddenOutput) && !selectedFile.passed && (
+                        diffLayout === 'side-by-side' ? renderSideBySideDiff() : <div className="diff-content">{renderStackedDiff()}</div>
+                    )}
+                </div>
+            </div>
+        </section>
     )
 
     const renderCodeSection = () => (
-            <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
-                {({ style, tokens, getLineProps, getTokenProps }) => (
-                    <div
-                        className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
-                        ref={effectiveCodeContainerRef}
-                        onMouseLeave={onLineMouseUp ? () => onLineMouseUp() : undefined}
-                        role="region"
-                        aria-label="Submitted source code"
-                    >
-                        <ol className="code-list" style={style}>
-                            {tokens.map((line, i) => {
-                                const lineNo = i + 1
-                                const { key: lineKey, ...lineProps } = getLineProps({ line, key: i })
-                                const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
-                                return (
-                                    <li
-                                        key={lineKey ?? lineNo}
-                                        ref={(el) => {
-                                            if (lineRefs) lineRefs.current[lineNo] = el
-                                        }}
-                                        {...lineProps}
-                                        className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
-                                        onMouseDown={onLineMouseDown ? () => onLineMouseDown(lineNo) : undefined}
-                                        onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
-                                        onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
-                                        onMouseUp={onLineMouseUp ? () => onLineMouseUp() : undefined}
-                                        title={
-                                            onLineMouseDown ? 'Click this line to add or view grading errors' : undefined
-                                        }
-                                    >
-                                        <span className="gutter">
-                                            <span className="line-number">{lineNo}</span>
-                                        </span>
-                                        <span className="code-text">
-                                            {line.map((token, key) => {
-                                                const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key })
-                                                return <span key={tokenKey ?? key} {...tokenProps} />
-                                            })}
-                                        </span>
-                                    </li>
-                                )
-                            })}
-                        </ol>
-                    </div>
-                )}
-            </Highlight>
+        <Highlight theme={themes.vsLight} code={codeText} language={language as any}>
+            {({ style, tokens, getLineProps, getTokenProps }) => (
+                <div
+                    className={`code-block code-viewer ${isLineClickable ? 'line-clickable' : ''}`}
+                    ref={effectiveCodeContainerRef}
+                    onMouseLeave={onLineMouseUp ? () => onLineMouseUp() : undefined}
+                    role="region"
+                    aria-label="Submitted source code"
+                >
+                    <ol className="code-list" style={style}>
+                        {tokens.map((line, i) => {
+                            const lineNo = i + 1
+                            const { key: lineKey, ...lineProps } = getLineProps({ line, key: i })
+                            const extraCls = getLineClassName ? getLineClassName(lineNo) : ''
+                            return (
+                                <li
+                                    key={lineKey ?? lineNo}
+                                    ref={(el) => {
+                                        if (lineRefs) lineRefs.current[lineNo] = el
+                                    }}
+                                    {...lineProps}
+                                    className={`code-line ${extraCls} ${lineProps.className ?? ''}`}
+                                    onMouseDown={onLineMouseDown ? () => onLineMouseDown(lineNo) : undefined}
+                                    onMouseEnter={onLineMouseEnter ? () => onLineMouseEnter(lineNo) : undefined}
+                                    onMouseLeave={onLineMouseLeave ? () => onLineMouseLeave(lineNo) : undefined}
+                                    onMouseUp={onLineMouseUp ? () => onLineMouseUp() : undefined}
+                                    title={
+                                        onLineMouseDown ? 'Click this line to add or view grading errors' : undefined
+                                    }
+                                >
+                                    <span className="gutter">
+                                        <span className="line-number">{lineNo}</span>
+                                    </span>
+                                    <span className="code-text">
+                                        {line.map((token, key) => {
+                                            const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key })
+                                            return <span key={tokenKey ?? key} {...tokenProps} />
+                                        })}
+                                    </span>
+                                </li>
+                            )
+                        })}
+                    </ol>
+                </div>
+            )}
+        </Highlight>
     )
 
     return (

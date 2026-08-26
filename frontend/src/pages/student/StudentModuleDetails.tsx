@@ -24,6 +24,7 @@ import {
 } from "react-icons/fa";
 
 import MenuComponent from "../components/MenuComponent";
+import StarSpendingInfo from "../components/StarSpendingInfo";
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs";
 import "../../styling/StudentModuleDetails.scss";
 
@@ -761,13 +762,16 @@ export default function StudentModuleDetails() {
 
                                 <div className="module-quest-star-card" aria-label="Star balance and star uses">
                                     <div className="module-quest-star-card-header">
-                                        <FaStar aria-hidden="true" />
-                                        <div>
-                                            <div className="module-quest-star-count">
-                                                {formatStarValue(starBalance)}
+                                        <div className="module-quest-star-card-balance">
+                                            <FaStar aria-hidden="true" />
+                                            <div>
+                                                <div className="module-quest-star-count">
+                                                    {formatStarValue(starBalance)}
+                                                </div>
+                                                <div className="module-quest-star-label">Stars available</div>
                                             </div>
-                                            <div className="module-quest-star-label">Stars available</div>
                                         </div>
+                                        <StarSpendingInfo />
                                     </div>
                                 </div>
 
@@ -802,8 +806,8 @@ export default function StudentModuleDetails() {
                                 <div>
                                     <h2>Checkpoint Path</h2>
                                     <p>
-                                        Work through checkpoints in order. Stars can be spent to skip the next 
-                                        available checkpoint for {" "}{checkpointSkipCost} stars, or spent on the 
+                                        Work through checkpoints in order. Stars can be spent to skip the next
+                                        available checkpoint for {" "}{checkpointSkipCost} stars, or spent on the
                                         upload page to bypass the submission cooldown for {cooldownSkipCost} stars.
                                     </p>
                                 </div>

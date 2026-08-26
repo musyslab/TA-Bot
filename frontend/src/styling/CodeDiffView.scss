@@ -492,7 +492,7 @@
                 cursor: pointer;
             }
 
-            > svg {
+            >svg {
                 position: absolute;
                 top: 50%;
                 right: 0.55rem;
@@ -548,7 +548,7 @@
         .testcase-input-store__revealed {
             margin-top: 0.6rem;
 
-            > span {
+            >span {
                 display: block;
                 color: #166534;
                 font-size: 0.7rem;
@@ -1124,7 +1124,7 @@
     font-weight: 950;
 }
 
-.skip-cooldown-confirmation__dialog > p {
+.skip-cooldown-confirmation__dialog>p {
     max-width: 420px;
     margin: 9px auto 0;
     color: #64748b;
@@ -1145,7 +1145,7 @@
     background: #f8fafc;
 }
 
-.skip-cooldown-confirmation__balance > span {
+.skip-cooldown-confirmation__balance>span {
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -1163,7 +1163,7 @@
     text-transform: none;
 }
 
-.skip-cooldown-confirmation__balance > svg {
+.skip-cooldown-confirmation__balance>svg {
     color: #94a3b8;
 }
 

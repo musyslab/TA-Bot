@@ -9,24 +9,18 @@ import SchoolLoginSelect from './pages/public/SchoolLoginSelect';
 import SchoolSelect from './pages/public/SchoolSelect';
 
 import StudentUpload from './pages/student/StudentUpload';
-import StudentOutputDiff from './pages/student/StudentOutputDiff';
 import StudentClassSelection from './pages/student/StudentClassSelection';
 import StudentModuleList from './pages/student/StudentModuleList';
 import StudentModuleDetails from './pages/student/StudentModuleDetails';
-import StudentOfficeHours from './pages/student/StudentOfficeHours';
-import StudentPastSubmissions from "./pages/student/StudentPastSubmissions";
-import StudentPracticeSelect from './pages/student/StudentPracticeSelect';
 
 import AdminClassSelect from './pages/admin/AdminClassSelect';
 import AdminMenu from './pages/admin/AdminMenu';
 import AdminAnalyticsDashboard from './pages/admin/AdminAnalyticsDashboard';
 import AdminGrading from './pages/admin/AdminGrading';
-import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
 import AdminModuleList from './pages/admin/AdminModuleList';
 import AdminModuleDetails from './pages/admin/AdminModuleDetails';
 import AdminProjectManage from './pages/admin/AdminProjectManage';
-import AdminPracticeSelect from './pages/admin/AdminPracticeSelect';
 import AdminStudentList from './pages/admin/AdminStudentList';
 import AdminUpload from './pages/admin/AdminUpload';
 import AdminViewStudentCode from './pages/admin/AdminViewStudentCode';
@@ -132,11 +126,6 @@ class App extends Component {
                             <AdminProjectManage practiceMode />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:id/checkpoint/select" element={
-                        <ProtectedRoute>
-                            <AdminPracticeSelect />
-                        </ProtectedRoute>
-                    } />
 
                     <Route path="/admin/school/:school_id/class/:class_id/module/:module_id/project/:project_id/grade/:id" element={
                         <ProtectedRoute>
@@ -230,11 +219,6 @@ class App extends Component {
                             <AdminPlagiarism />
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/OfficeHours" element={
-                        <ProtectedRoute>
-                            <AdminOfficeHours />
-                        </ProtectedRoute>
-                    } />
                     <Route path="/student/school/:school_id/classes" element={
                         <ProtectedRoute>
                             <StudentClassSelection />
@@ -255,24 +239,9 @@ class App extends Component {
                             <StudentUpload />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/code/:id?" element={
-                        <ProtectedRoute>
-                            <StudentOutputDiff />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/select" element={
-                        <ProtectedRoute>
-                            <StudentPracticeSelect />
-                        </ProtectedRoute>
-                    } />
                     <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/upload" element={
                         <ProtectedRoute>
                             <StudentUpload />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/student/school/:school_id/class/:class_id/module/:module_id/project/:project_id/checkpoint/:checkpoint_id/code/:id?" element={
-                        <ProtectedRoute>
-                            <StudentOutputDiff />
                         </ProtectedRoute>
                     } />
 
@@ -281,29 +250,9 @@ class App extends Component {
                             <StudentUpload />
                         </ProtectedRoute>
                     } />
-                    <Route path="/student/:class_id/checkpoint" element={
-                        <ProtectedRoute>
-                            <StudentPracticeSelect />
-                        </ProtectedRoute>
-                    } />
                     <Route path="/student/:class_id/checkpoint/:checkpoint_id/upload" element={
                         <ProtectedRoute>
                             <StudentUpload />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/student/:class_id/code/:id?" element={
-                        <ProtectedRoute>
-                            <StudentOutputDiff />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/student/PastSubmissions" element={
-                        <ProtectedRoute>
-                            <StudentPastSubmissions />
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/student/:class_id/OfficeHours" element={
-                        <ProtectedRoute>
-                            <StudentOfficeHours />
                         </ProtectedRoute>
                     } />
                     <Route path="*" element={<NotFound />} />

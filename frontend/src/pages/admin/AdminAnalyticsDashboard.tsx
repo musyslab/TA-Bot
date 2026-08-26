@@ -106,6 +106,7 @@ type ProgressCell = {
     passed: boolean | null;
     submissionId: number | null;
     grade: string;
+    skipped: boolean;
 };
 
 type StudentProgressRow = StudentSummary & {
@@ -289,6 +290,9 @@ function normalizeStudentAndCell(
     const isLocked = rowHasSubmissionShape
         ? Boolean(rawRow[11])
         : Boolean(rawRow[12]);
+    const skipped = rowHasSubmissionShape
+        ? Boolean(rawRow[12])
+        : Boolean(rawRow[13]);
 
     return {
         student: {
@@ -310,12 +314,23 @@ function normalizeStudentAndCell(
             passed,
             submissionId,
             grade,
+            skipped,
         },
     };
 }
 
-function cellStatus(cell: ProgressCell | undefined): "complete" | "in-progress" | "not-started" {
-    if (!cell || cell.attempts <= 0 || !cell.submissionId) {
+function cellStatus(
+    cell: ProgressCell | undefined,
+): "complete" | "skipped" | "in-progress" | "not-started" {
+    if (!cell) {
+        return "not-started";
+    }
+
+    if (cell.skipped) {
+        return "skipped";
+    }
+
+    if (cell.attempts <= 0 || !cell.submissionId) {
         return "not-started";
     }
 
@@ -331,6 +346,10 @@ function statusLabel(status: ReturnType<typeof cellStatus>): string {
         return "Complete";
     }
 
+    if (status === "skipped") {
+        return "Skipped";
+    }
+
     if (status === "in-progress") {
         return "Attempted";
     }
@@ -339,7 +358,7 @@ function statusLabel(status: ReturnType<typeof cellStatus>): string {
 }
 
 function statusIcon(status: ReturnType<typeof cellStatus>) {
-    if (status === "complete") {
+    if (status === "complete" || status === "skipped") {
         return <FaCheckCircle aria-hidden="true" />;
     }
 
@@ -596,9 +615,10 @@ export default function AdminAnalyticsDashboard() {
                     })
                     .map((student) => {
                         const cells = cellMap.get(student.userId) || {};
-                        const completed = dashboardItems.filter(
-                            (item) => cellStatus(cells[item.id]) === "complete",
-                        ).length;
+                        const completed = dashboardItems.filter((item) => {
+                            const status = cellStatus(cells[item.id]);
+                            return status === "complete" || status === "skipped";
+                        }).length;
                         const attempted = dashboardItems.filter(
                             (item) => cellStatus(cells[item.id]) !== "not-started",
                         ).length;
@@ -1068,6 +1088,7 @@ export default function AdminAnalyticsDashboard() {
                 className={[
                     "analytics-cell",
                     `analytics-cell-${status}`,
+                    status === "skipped" ? "analytics-cell-complete" : "",
                     item.isFirstInModule ? "analytics-module-start" : "",
                     isHoveredColumn ? "analytics-column-highlight" : "",
                     isHoveredIntersection ? "analytics-intersection-highlight" : "",
@@ -1095,7 +1116,9 @@ export default function AdminAnalyticsDashboard() {
                     </div>
 
                     <div className="analytics-cell-meta">
-                        {cell?.attempts ? (
+                        {status === "skipped" ? (
+                            <span>Skipped with stars</span>
+                        ) : cell?.attempts ? (
                             <span>
                                 {cell.attempts} attempt{cell.attempts === 1 ? "" : "s"}
                             </span>
@@ -1103,13 +1126,19 @@ export default function AdminAnalyticsDashboard() {
                             <span>No attempts</span>
                         )}
 
+                        {status === "skipped" && cell?.attempts ? (
+                            <span>
+                                {cell.attempts} attempt{cell.attempts === 1 ? "" : "s"} before skip
+                            </span>
+                        ) : null}
+
                         {cell?.lastSubmitted && cell.lastSubmitted !== "N/A" ? (
                             <span>{formatDateTime(cell.lastSubmitted)}</span>
                         ) : null}
 
-                        {cellHasGrade ? (
+                        {status !== "skipped" && cellHasGrade ? (
                             <span>Grade: {cell?.grade}</span>
-                        ) : cell?.submissionId ? (
+                        ) : status !== "skipped" && cell?.submissionId ? (
                             <span>No grade yet</span>
                         ) : null}
                     </div>
@@ -1130,7 +1159,7 @@ export default function AdminAnalyticsDashboard() {
                                     <span>{cellHasGrade ? "Regrade" : "Grade"}</span>
                                 </Link>
                             </>
-                        ) : status !== "not-started" ? (
+                        ) : status !== "not-started" && status !== "skipped" ? (
                             <Link to={submissionsPath(item)} title="Open submissions">
                                 <FaFolderOpen aria-hidden="true" />
                                 <span>Submissions</span>
