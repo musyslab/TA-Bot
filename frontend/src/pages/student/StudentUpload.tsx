@@ -2112,7 +2112,7 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                             modulePresentationFileName ||
                             "Module presentation"}
                         </strong>
-                        <small>Optional module presentation</small>
+                        <small>Module presentation</small>
                       </span>
                     </div>
 

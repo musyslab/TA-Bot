@@ -137,10 +137,6 @@ export default function AdminMenu() {
                 {className ? `${className} Admin Menu` : "Admin Menu"}
             </div>
 
-            <p className="projects-subtitle">
-                Choose where you want to go for this class.
-            </p>
-
             <section className="admin-menu-shell" aria-label="Admin menu">
                 <div className="admin-menu-header-row">
                     <div>

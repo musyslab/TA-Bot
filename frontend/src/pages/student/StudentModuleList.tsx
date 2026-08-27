@@ -446,10 +446,6 @@ export default function StudentModuleList() {
                 </div>
             </div>
 
-            <p className="projects-subtitle">
-                Select a module from the list to see its assignment and practice problems.
-            </p>
-
             {errorMessage ? <div className="pageMessage">{errorMessage}</div> : null}
 
             {isLoading ? (

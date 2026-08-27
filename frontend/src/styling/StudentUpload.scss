@@ -5,7 +5,7 @@
 /* Single-panel layout */
 .student-upload-shell {
     width: 95%;
-    margin: 0 auto 24px;
+    margin: 15px auto 24px;
     display: block;
     max-width: none;
     padding: 0;
@@ -1039,10 +1039,6 @@
 }
 
 /* Assignment workspace: three persistent views, available in any order. */
-.student-upload-shell {
-    max-width: 1500px;
-}
-
 .panel-upload {
     padding: 14px 0 18px;
     background: linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%);
@@ -1257,7 +1253,7 @@
 
 .student-workflow {
     width: calc(100% - 28px);
-    max-width: 1360px;
+    max-width: none;
     margin: 18px auto 0;
     padding-left: 0;
 }
