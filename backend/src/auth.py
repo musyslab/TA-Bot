@@ -181,6 +181,15 @@ def split_display_name(name: str) -> Tuple[str, str]:
     cleaned = (name or "").strip()
     if not cleaned:
         return "", ""
+
+    # Microsoft tenants commonly format the display-name claim as
+    # "Last, First". When given_name/family_name are absent, normalize that
+    # format before falling back to the usual "First Last" split.
+    if cleaned.count(",") == 1:
+        last_name, first_name = (part.strip() for part in cleaned.split(",", 1))
+        if first_name and last_name:
+            return first_name, last_name
+
     parts = cleaned.split()
     if len(parts) == 1:
         return parts[0], ""
