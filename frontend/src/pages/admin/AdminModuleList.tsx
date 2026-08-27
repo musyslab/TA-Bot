@@ -1035,11 +1035,6 @@ export default function AdminModuleList() {
                 </section>
             )}
 
-            <p className="projects-subtitle">
-                Select a module from the list to see more details, or switch to calendar
-                view.
-            </p>
-
             {viewMode === "list" && sortedModules.length > 0 && (
                 <section className="module-list-shell" aria-label="Module list">
                     <div className="module-list-header-row">
