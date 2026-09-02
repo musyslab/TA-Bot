@@ -37,6 +37,7 @@ import {
   FaInfoCircle,
   FaLock,
   FaStar,
+  FaUsers,
 } from "react-icons/fa";
 
 type CheckpointLite = {
@@ -113,6 +114,8 @@ type IncentiveState = {
   main_project_cooldown_skip_cost?: number;
   submission_cooldown_seconds?: number;
   cooldown_remaining_seconds?: number;
+  office_hours_cooldown_exempt?: boolean;
+  office_hours_cooldown_exempt_until?: string | null;
   submission_attempt_count?: number;
   next_attempt_number?: number;
   checkpoint_completion_stars?: number;
@@ -126,6 +129,16 @@ type IncentiveState = {
   reward_total_stars?: number;
   reward_already_awarded?: boolean;
   reward_started_early?: boolean;
+};
+
+type OfficeHoursStatus = {
+  status?: "not_queued" | "waiting" | "being_helped";
+  office_hours_active?: boolean;
+  session_ends_at?: string | null;
+  cooldown_exempt?: boolean;
+  cooldown_exempt_until?: string | null;
+  help_remaining_seconds?: number;
+  queue_position?: number | null;
 };
 
 type SubmissionMethod = "editor" | "upload";
@@ -358,6 +371,9 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
   const [isCooldownStateLoading, setIsCooldownStateLoading] = useState<boolean>(true);
 
   const [moduleName, setModuleName] = useState<string>("");
+  const [officeHoursModuleId, setOfficeHoursModuleId] = useState<number | null>(moduleId);
+  const [officeHoursStatus, setOfficeHoursStatus] =
+    useState<OfficeHoursStatus | null>(null);
   const [hasModulePresentation, setHasModulePresentation] =
     useState<boolean>(false);
   const [modulePresentationFileName, setModulePresentationFileName] =
@@ -444,6 +460,7 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
       if (!Number.isFinite(cid) || cid <= 0 || targetProjectId <= 0) {
         setHasModulePresentation(false);
         setModulePresentationFileName("");
+        setOfficeHoursModuleId(moduleId);
         return;
       }
 
@@ -473,6 +490,9 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
             null;
 
           setModuleName(selectedModule?.Name || "");
+          setOfficeHoursModuleId(
+            selectedModule?.Id ? Number(selectedModule.Id) : moduleId,
+          );
           setHasModulePresentation(Boolean(selectedModule?.HasPresentation));
           setModulePresentationFileName(
             selectedModule?.PresentationFileName || "",
@@ -507,7 +527,36 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
     return Math.max(0, Math.ceil((cooldownLiftedAtMs - nowMs) / 1000));
   }, [cooldownLiftedAtMs, nowMs]);
 
-  const isCoolingDown = cooldownRemainingSeconds > 0;
+  const officeHoursExemptUntil =
+    officeHoursStatus?.cooldown_exempt_until ??
+    incentives?.office_hours_cooldown_exempt_until;
+  const officeHoursExemptUntilMs = officeHoursExemptUntil
+    ? Date.parse(officeHoursExemptUntil)
+    : 0;
+  const officeHoursRemainingSeconds =
+    Number.isFinite(officeHoursExemptUntilMs) && officeHoursExemptUntilMs > 0
+      ? Math.max(0, Math.ceil((officeHoursExemptUntilMs - nowMs) / 1000))
+      : Math.max(0, Number(officeHoursStatus?.help_remaining_seconds ?? 0));
+  const isOfficeHoursExempt =
+    Boolean(
+      officeHoursStatus?.cooldown_exempt ||
+      incentives?.office_hours_cooldown_exempt,
+    ) &&
+    officeHoursRemainingSeconds > 0;
+  const officeHoursCooldownDisabled = isOfficeHoursExempt && !passedAllTests;
+  const isCoolingDown = cooldownRemainingSeconds > 0 && !isOfficeHoursExempt;
+  const officeHoursSessionEndsMs = officeHoursStatus?.session_ends_at
+    ? Date.parse(officeHoursStatus.session_ends_at)
+    : 0;
+  const isOfficeHoursSessionActive =
+    Boolean(officeHoursStatus?.office_hours_active) &&
+    (!Number.isFinite(officeHoursSessionEndsMs) ||
+      officeHoursSessionEndsMs === 0 ||
+      officeHoursSessionEndsMs > nowMs);
+  const isWaitingForOfficeHours =
+    isOfficeHoursSessionActive && officeHoursStatus?.status === "waiting";
+  const showOfficeHoursAvailable =
+    isOfficeHoursSessionActive && officeHoursStatus?.status === "not_queued";
   const starBalance = Number(incentives?.star_balance ?? incentives?.stars ?? 0);
   const cooldownSkipCost = Math.max(
     0,
@@ -686,6 +735,11 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
           next_attempt_number: Number(res?.data?.next_attempt_number ?? 1),
           submission_cooldown_seconds: Number(res?.data?.submission_cooldown_seconds ?? 0),
           cooldown_remaining_seconds: Number(res?.data?.cooldown_remaining_seconds ?? 0),
+          office_hours_cooldown_exempt: Boolean(
+            res?.data?.office_hours_cooldown_exempt,
+          ),
+          office_hours_cooldown_exempt_until:
+            res?.data?.office_hours_cooldown_exempt_until ?? null,
         }));
       })
       .catch(() => {
@@ -694,7 +748,7 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
   }, [buildUploadStateScope]);
 
 
-  const loadIncentiveState = useCallback(() => {
+  const loadIncentiveState = useCallback((showLoading = false) => {
     const scope = buildUploadStateScope();
     const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
 
@@ -705,8 +759,10 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
       return;
     }
 
-    setCooldownLiftedAtMs(0);
-    setIsCooldownStateLoading(true);
+    if (showLoading) {
+      setCooldownLiftedAtMs(0);
+      setIsCooldownStateLoading(true);
+    }
 
     axios
       .get(`${import.meta.env.VITE_API_URL}/submissions/incentive-state`, {
@@ -724,13 +780,37 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
         );
       })
       .catch(() => {
-        setIncentives(null);
-        setCooldownLiftedAtMs(0);
+        if (showLoading) {
+          setIncentives(null);
+          setCooldownLiftedAtMs(0);
+        }
       })
       .finally(() => {
-        setIsCooldownStateLoading(false);
+        if (showLoading) setIsCooldownStateLoading(false);
       });
   }, [buildUploadStateScope]);
+
+  const loadOfficeHoursStatus = useCallback(() => {
+    const token = localStorage.getItem("AUTOTA_AUTH_TOKEN");
+
+    if (!token || cid <= 0 || !officeHoursModuleId) {
+      setOfficeHoursStatus(null);
+      return;
+    }
+
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/submissions/office-hours/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          class_id: cid,
+          module_id: officeHoursModuleId,
+        },
+      })
+      .then((res) => setOfficeHoursStatus(res.data || null))
+      .catch(() => {
+        // Keep the last confirmed status during a transient polling failure.
+      });
+  }, [cid, officeHoursModuleId]);
 
   const skipSubmissionCooldown = () => {
     const scope = buildUploadStateScope();
@@ -953,14 +1033,19 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
   }, [loadStudentUploadState]);
 
   useEffect(() => {
-    loadIncentiveState();
+    loadIncentiveState(true);
   }, [loadIncentiveState]);
+
+  useEffect(() => {
+    loadOfficeHoursStatus();
+  }, [loadOfficeHoursStatus]);
 
   useEffect(() => {
     const refreshCooldownState = () => {
       if (document.visibilityState !== "visible") return;
       loadStudentUploadState();
       loadIncentiveState();
+      loadOfficeHoursStatus();
     };
 
     window.addEventListener("focus", refreshCooldownState);
@@ -970,17 +1055,28 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
       window.removeEventListener("focus", refreshCooldownState);
       document.removeEventListener("visibilitychange", refreshCooldownState);
     };
-  }, [loadStudentUploadState, loadIncentiveState]);
+  }, [loadStudentUploadState, loadIncentiveState, loadOfficeHoursStatus]);
 
   useEffect(() => {
-    if (!isCoolingDown && !earlyBonusWindowOpen) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      loadStudentUploadState();
+      loadIncentiveState();
+      loadOfficeHoursStatus();
+    }, 15_000);
+
+    return () => window.clearInterval(interval);
+  }, [loadStudentUploadState, loadIncentiveState, loadOfficeHoursStatus]);
+
+  useEffect(() => {
+    if (!isCoolingDown && !earlyBonusWindowOpen && !isOfficeHoursExempt) return;
 
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [isCoolingDown, earlyBonusWindowOpen]);
+  }, [isCoolingDown, earlyBonusWindowOpen, isOfficeHoursExempt]);
 
   useEffect(() => {
     if (isCoolingDown) {
@@ -1632,6 +1728,11 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
             res?.data?.next_attempt_number ?? previous?.next_attempt_number ?? 1,
           ),
           submission_cooldown_seconds: Number(res?.data?.cooldown_seconds ?? 0),
+          office_hours_cooldown_exempt: Boolean(
+            res?.data?.office_hours_cooldown_exempt,
+          ),
+          office_hours_cooldown_exempt_until:
+            res?.data?.office_hours_cooldown_exempt_until ?? null,
         }));
 
         const sid = getPayloadSubmissionId(res?.data);
@@ -1847,13 +1948,12 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
 
             <div className="assignment-quest-side">
               <div
-                className={`assignment-quest-progress-card ${
-                  passedAllTests
-                    ? "is-passed"
-                    : hasNonPassingSubmission
-                      ? "is-failed"
-                      : ""
-                }`}
+                className={`assignment-quest-progress-card ${passedAllTests
+                  ? "is-passed"
+                  : hasNonPassingSubmission
+                    ? "is-failed"
+                    : ""
+                  }`}
               >
                 <div
                   className="assignment-quest-progress-ring"
@@ -2231,6 +2331,44 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                 </span>
               </header>
 
+              {officeHoursCooldownDisabled ? (
+                <div className="office-hours-cooldown-banner" role="status" aria-live="polite">
+                  <span className="office-hours-cooldown-banner__icon" aria-hidden="true">
+                    <FaUsers />
+                  </span>
+                  <div>
+                    <strong>Office hours: cooldown disabled</strong>
+                    <span>
+                      You may submit as often as needed for the next {formatCooldown(officeHoursRemainingSeconds)}.
+                    </span>
+                  </div>
+                </div>
+              ) : !passedAllTests && isWaitingForOfficeHours ? (
+                <div className="office-hours-cooldown-banner is-waiting" role="status" aria-live="polite">
+                  <span className="office-hours-cooldown-banner__icon" aria-hidden="true">
+                    <FaUsers />
+                  </span>
+                  <div>
+                    <strong>Office hours: waiting for an admin</strong>
+                    <span>
+                      You are in the queue{officeHoursStatus?.queue_position ? ` at position ${officeHoursStatus.queue_position}` : ""}. Cooldowns remain active until an admin starts helping you.
+                    </span>
+                  </div>
+                </div>
+              ) : !passedAllTests && showOfficeHoursAvailable ? (
+                <div className="office-hours-cooldown-banner is-available" role="status" aria-live="polite">
+                  <span className="office-hours-cooldown-banner__icon" aria-hidden="true">
+                    <FaUsers />
+                  </span>
+                  <div>
+                    <strong>Office hours are active</strong>
+                    <span>
+                      Join the queue from Module Details to request cooldown-free help.
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
               {passedAllTests ? (
                 <section
                   className="assignment-complete-screen"
@@ -2551,7 +2689,7 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                   </div>
 
                   <section
-                    className="submission-cooldown-policy"
+                    className={`submission-cooldown-policy ${officeHoursCooldownDisabled ? "is-office-hours" : ""}`}
                     aria-labelledby="submission-cooldown-title"
                   >
                     <div className="submission-cooldown-policy__header">
@@ -2564,7 +2702,9 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                             {isCheckpoint ? "Checkpoint Cooldowns" : "Main Project Cooldowns"}
                           </h2>
                           <p>
-                            After each attempt, wait the time shown before submitting again.
+                            {officeHoursCooldownDisabled
+                              ? "Cooldowns are disabled while your office-hours help session is active."
+                              : "After each attempt, wait the time shown before submitting again."}
                           </p>
                         </div>
                       </div>
@@ -2573,9 +2713,11 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                           "submission-cooldown-policy__current",
                           isCooldownStateLoading
                             ? "is-loading"
-                            : isCoolingDown
-                              ? "is-active"
-                              : "is-ready",
+                            : officeHoursCooldownDisabled
+                              ? "is-office-hours"
+                              : isCoolingDown
+                                ? "is-active"
+                                : "is-ready",
                         ].join(" ")}
                         role="status"
                         aria-live="polite"
@@ -2584,6 +2726,12 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                           <>
                             <FaClock aria-hidden="true" />
                             <span>Checking cooldown</span>
+                          </>
+                        ) : officeHoursCooldownDisabled ? (
+                          <>
+                            <FaUsers aria-hidden="true" />
+                            <span>Office hours</span>
+                            <strong>{formatCooldown(officeHoursRemainingSeconds)}</strong>
                           </>
                         ) : isCoolingDown ? (
                           <>
@@ -2602,18 +2750,20 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                     </div>
 
                     <ol
-                      className={`submission-cooldown-policy__grid ${isCheckpoint ? "is-checkpoint" : "is-main"}`}
-                      aria-label={`${submissionTypeShortLabel} submission cooldown schedule`}
+                      className={`submission-cooldown-policy__grid ${isCheckpoint ? "is-checkpoint" : "is-main"} ${officeHoursCooldownDisabled ? "is-office-hours" : ""}`}
+                      aria-label={`${submissionTypeShortLabel} submission cooldown schedule${officeHoursCooldownDisabled ? "; cooldowns disabled during office hours" : ""}`}
                     >
                       {(isCheckpoint ? CHECKPOINT_SCHEDULE : MAIN_SCHEDULE).map((item, index, arr) => {
                         const isLast = index === arr.length - 1;
                         const isCurrent =
+                          !officeHoursCooldownDisabled &&
                           isCoolingDown &&
                           (
                             submissionAttemptCount === item.attempt ||
                             (isLast && submissionAttemptCount >= item.attempt)
                           );
                         const isNext =
+                          !officeHoursCooldownDisabled &&
                           !isCoolingDown &&
                           (
                             nextAttemptNumber === item.attempt ||
@@ -2629,7 +2779,7 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                             ].filter(Boolean).join(" ")}
                             key={item.attempt}
                             aria-current={isCurrent ? "step" : undefined}
-                            aria-label={`${item.label}: ${item.value} cooldown afterward${isCurrent ? ", active cooldown" : isNext ? ", next cooldown" : ""}`}
+                            aria-label={`${item.label}: ${officeHoursCooldownDisabled ? "cooldown disabled during office hours" : `${item.value} cooldown afterward${isCurrent ? ", active cooldown" : isNext ? ", next cooldown" : ""}`}`}
                           >
                             <div className="submission-cooldown-policy__step-header">
                               <span className="submission-cooldown-policy__attempt">
@@ -2644,7 +2794,11 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                               <FaArrowRight aria-hidden="true" />
                             </span>
                             <div className="submission-cooldown-policy__value">
-                              {isCurrent ? (
+                              {officeHoursCooldownDisabled ? (
+                                <span className="submission-cooldown-policy__state is-office-hours">
+                                  Disabled
+                                </span>
+                              ) : isCurrent ? (
                                 <span className="submission-cooldown-policy__state is-current">
                                   Active
                                 </span>
@@ -2654,11 +2808,11 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
                                 </span>
                               ) : null}
                               <span className="submission-cooldown-policy__value-icon" aria-hidden="true">
-                                <FaClock />
+                                {officeHoursCooldownDisabled ? <FaUsers /> : <FaClock />}
                               </span>
                               <span className="submission-cooldown-policy__value-copy">
-                                <span>Cooldown</span>
-                                <strong>{item.value}</strong>
+                                <span>{officeHoursCooldownDisabled ? "Office hours" : "Cooldown"}</span>
+                                <strong>{officeHoursCooldownDisabled ? "No wait" : item.value}</strong>
                               </span>
                             </div>
                           </li>

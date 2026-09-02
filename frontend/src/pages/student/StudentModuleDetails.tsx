@@ -15,12 +15,16 @@ import {
     FaArrowRight,
     FaBolt,
     FaCheck,
+    FaClock,
     FaFlagCheckered,
     FaForward,
     FaLock,
     FaPlay,
+    FaQuestionCircle,
+    FaSignOutAlt,
     FaStar,
     FaTrophy,
+    FaUsers,
 } from "react-icons/fa";
 
 import MenuComponent from "../components/MenuComponent";
@@ -74,6 +78,25 @@ interface IncentiveSummary {
     early_start_multiplier?: number;
     checkpoint_skip_cost?: number;
     cooldown_skip_cost?: number;
+}
+
+interface OfficeHoursStatus {
+    status: "not_queued" | "waiting" | "being_helped";
+    in_queue: boolean;
+    office_hours_active?: boolean;
+    session_started_at?: string | null;
+    session_ends_at?: string | null;
+    session_remaining_seconds?: number;
+    session_duration_minutes?: number;
+    user_id?: number;
+    module_id?: number;
+    module_name?: string;
+    joined_at?: string | null;
+    selected_at?: string | null;
+    queue_position?: number | null;
+    cooldown_exempt?: boolean;
+    cooldown_exempt_until?: string | null;
+    help_remaining_seconds?: number;
 }
 
 interface PathSegment {
@@ -131,6 +154,11 @@ export default function StudentModuleDetails() {
         segments: [],
     });
     const [nowMs, setNowMs] = useState<number>(() => Date.now());
+    const [officeHoursStatus, setOfficeHoursStatus] =
+        useState<OfficeHoursStatus | null>(null);
+    const [isOfficeHoursLoading, setIsOfficeHoursLoading] = useState(true);
+    const [isOfficeHoursBusy, setIsOfficeHoursBusy] = useState(false);
+    const [officeHoursError, setOfficeHoursError] = useState("");
 
     const modulePathTrackRef = useRef<HTMLDivElement | null>(null);
 
@@ -144,6 +172,20 @@ export default function StudentModuleDetails() {
     const checkpointRewardBase = Math.max(0, Number(incentives?.checkpoint_completion_stars ?? 1));
     const mainRewardBase = Math.max(0, Number(incentives?.main_project_completion_stars ?? 3));
     const earlyStartMultiplier = Math.max(1, Number(incentives?.early_start_multiplier ?? 2));
+    const officeHoursState = officeHoursStatus?.status || "not_queued";
+    const officeHoursSessionEndsMs = officeHoursStatus?.session_ends_at
+        ? Date.parse(officeHoursStatus.session_ends_at)
+        : 0;
+    const officeHoursActive = Boolean(
+        officeHoursStatus?.office_hours_active &&
+        (!officeHoursSessionEndsMs || officeHoursSessionEndsMs > nowMs),
+    );
+    const officeHoursExpiresMs = officeHoursStatus?.cooldown_exempt_until
+        ? Date.parse(officeHoursStatus.cooldown_exempt_until)
+        : 0;
+    const officeHoursRemainingSeconds = Number.isFinite(officeHoursExpiresMs)
+        ? Math.max(0, Math.ceil((officeHoursExpiresMs - nowMs) / 1000))
+        : Math.max(0, Number(officeHoursStatus?.help_remaining_seconds || 0));
 
     const checkpointIsComplete = (problem: Checkpoint): boolean => {
         return Boolean(problem.solved || problem.skipped);
@@ -574,6 +616,48 @@ export default function StudentModuleDetails() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [schoolId, classId, moduleId]);
 
+    const loadOfficeHoursStatus = useCallback((showLoading = false) => {
+        if (!classId || !moduleId) {
+            setOfficeHoursStatus(null);
+            setIsOfficeHoursLoading(false);
+            return;
+        }
+
+        if (showLoading) setIsOfficeHoursLoading(true);
+        axios
+            .get(`${import.meta.env.VITE_API_URL}/submissions/office-hours/status`, {
+                headers: authHeader(),
+                params: {
+                    class_id: Number(classId),
+                    module_id: moduleId,
+                },
+            })
+            .then((response) => {
+                setOfficeHoursStatus(response.data || null);
+                setOfficeHoursError("");
+            })
+            .catch((error) => {
+                setOfficeHoursError(
+                    error.response?.data?.message ||
+                    "Could not load the office-hours queue status.",
+                );
+            })
+            .finally(() => {
+                if (showLoading) setIsOfficeHoursLoading(false);
+            });
+    }, [classId, moduleId]);
+
+    useEffect(() => {
+        loadOfficeHoursStatus(true);
+        const interval = window.setInterval(() => {
+            if (document.visibilityState === "visible") {
+                loadOfficeHoursStatus(false);
+            }
+        }, 15_000);
+
+        return () => window.clearInterval(interval);
+    }, [loadOfficeHoursStatus]);
+
     useEffect(() => {
         const timer = window.setInterval(() => {
             setNowMs(Date.now());
@@ -680,6 +764,59 @@ export default function StudentModuleDetails() {
                 setSkipBusyCheckpointId(null);
                 setSkipConfirmationCheckpointId(null);
             });
+    };
+
+    const joinOfficeHoursQueue = () => {
+        if (!classId || !moduleId || isOfficeHoursBusy) return;
+        setIsOfficeHoursBusy(true);
+        setOfficeHoursError("");
+
+        axios
+            .post(
+                `${import.meta.env.VITE_API_URL}/submissions/office-hours/queue`,
+                {
+                    class_id: Number(classId),
+                    module_id: moduleId,
+                },
+                { headers: authHeader() },
+            )
+            .then((response) => setOfficeHoursStatus(response.data || null))
+            .catch((error) => {
+                setOfficeHoursError(
+                    error.response?.data?.message ||
+                    "Could not join the office-hours queue.",
+                );
+                if (error.response?.data?.status) {
+                    setOfficeHoursStatus(error.response.data);
+                }
+            })
+            .finally(() => setIsOfficeHoursBusy(false));
+    };
+
+    const leaveOfficeHoursQueue = () => {
+        if (!classId || !moduleId || isOfficeHoursBusy) return;
+        setIsOfficeHoursBusy(true);
+        setOfficeHoursError("");
+
+        axios
+            .delete(
+                `${import.meta.env.VITE_API_URL}/submissions/office-hours/queue`,
+                {
+                    headers: authHeader(),
+                    data: {
+                        class_id: Number(classId),
+                        module_id: moduleId,
+                    },
+                },
+            )
+            .then((response) => setOfficeHoursStatus(response.data || null))
+            .catch((error) => {
+                setOfficeHoursError(
+                    error.response?.data?.message ||
+                    "Could not leave the office-hours queue.",
+                );
+            })
+            .finally(() => setIsOfficeHoursBusy(false));
     };
 
     return (
@@ -1021,6 +1158,78 @@ export default function StudentModuleDetails() {
                                 </article>
                             </div>
                         </section>
+
+                        {officeHoursActive ? (
+                            <section
+                                className={`module-office-hours-card is-${officeHoursState}`}
+                                aria-labelledby="module-office-hours-title"
+                            >
+                                <div className="module-office-hours-icon" aria-hidden="true">
+                                    {officeHoursState === "being_helped" ? <FaUsers /> : <FaQuestionCircle />}
+                                </div>
+                                <div className="module-office-hours-copy">
+                                    <div className="module-office-hours-title-row">
+                                        <div>
+                                            <p>Need in-person help?</p>
+                                            <h2 id="module-office-hours-title">Office Hours</h2>
+                                        </div>
+                                    </div>
+
+                                    <p>
+                                        Once an admin accepts you for Office Hours, your submission cooldowns are
+                                        bypassed while your help session is active.
+                                    </p>
+
+                                    {officeHoursError ? (
+                                        <div className="module-office-hours-error" role="alert">
+                                            {officeHoursError}
+                                        </div>
+                                    ) : null}
+                                </div>
+
+                                <div className="module-office-hours-action">
+                                    <span className={`module-office-hours-status is-${officeHoursState}`}>
+                                        {isOfficeHoursLoading
+                                            ? "Checking queue"
+                                            : officeHoursState === "waiting"
+                                                ? `Awaiting Admin${officeHoursStatus?.queue_position ? ` · #${officeHoursStatus.queue_position}` : ""}`
+                                                : officeHoursState === "being_helped"
+                                                    ? "Being helped"
+                                                    : "Not in queue"}
+                                    </span>
+
+                                    {officeHoursState === "being_helped" ? (
+                                        <div className="module-office-hours-countdown" role="status">
+                                            <FaClock aria-hidden="true" />
+                                            <span>Cooldown-free</span>
+                                            <strong>{formatCountdown(officeHoursRemainingSeconds)}</strong>
+                                        </div>
+                                    ) : null}
+
+                                    {officeHoursState === "not_queued" ? (
+                                        <button
+                                            type="button"
+                                            onClick={joinOfficeHoursQueue}
+                                            disabled={isOfficeHoursLoading || isOfficeHoursBusy}
+                                        >
+                                            <FaUsers aria-hidden="true" />
+                                            {isOfficeHoursBusy ? "Joining..." : "Join Office Hours Queue"}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="secondary"
+                                            onClick={leaveOfficeHoursQueue}
+                                            disabled={isOfficeHoursBusy}
+                                        >
+                                            <FaSignOutAlt aria-hidden="true" />
+                                            {isOfficeHoursBusy ? "Leaving..." : "Leave Queue"}
+                                        </button>
+                                    )}
+                                </div>
+                            </section>
+                        ) : null}
+
                     </>
                 ) : null}
             </div>

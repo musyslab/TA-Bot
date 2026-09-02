@@ -23,6 +23,8 @@ from src.repositories.models import (
     Checkpoints,
     Classes,
     ClassAssignments,
+    OfficeHoursQueueEntry,
+    OfficeHoursSession,
     Projects,
     StudentCheckpointSkips,
     StudentCooldownSkips,
@@ -630,6 +632,60 @@ def parse_submission_datetime(value) -> datetime | None:
     return None
 
 
+def active_office_hours_entry_for_project(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+):
+    """Return a help exemption only while the class office-hours window is active."""
+    project = Projects.query.filter(
+        Projects.Id == int(project_id),
+        Projects.ClassId == int(class_id),
+    ).first()
+    module_id = parse_int(getattr(project, "ModuleId", 0), 0)
+    if module_id <= 0:
+        return None
+
+    try:
+        OfficeHoursSession.__table__.create(db.engine, checkfirst=True)
+        OfficeHoursQueueEntry.__table__.create(db.engine, checkfirst=True)
+    except Exception:
+        pass
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    session = OfficeHoursSession.query.filter(
+        OfficeHoursSession.ClassId == int(class_id),
+        OfficeHoursSession.StartedAt <= now,
+        OfficeHoursSession.EndsAt > now,
+    ).order_by(
+        OfficeHoursSession.StartedAt.desc(),
+        OfficeHoursSession.Id.desc(),
+    ).first()
+    if session is None:
+        return None
+
+    return OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.UserId == int(user_id),
+        OfficeHoursQueueEntry.ClassId == int(class_id),
+        OfficeHoursQueueEntry.ModuleId == module_id,
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+        OfficeHoursQueueEntry.SelectedAt.isnot(None),
+        OfficeHoursQueueEntry.CooldownExemptUntil > now,
+        OfficeHoursQueueEntry.JoinedAt >= session.StartedAt,
+        OfficeHoursQueueEntry.JoinedAt < session.EndsAt,
+    ).first()
+
+
+def serialize_utc_datetime(value) -> str | None:
+    if not isinstance(value, datetime):
+        return None
+
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return f"{value.isoformat()}Z"
+
+
 def submission_cooldown_seconds_for_attempt_count(
     completed_attempts: int,
     is_checkpoint: bool,
@@ -678,6 +734,9 @@ def student_submission_cooldown_response(
     is_checkpoint: bool,
     checkpoint_id: int,
 ):
+    if active_office_hours_entry_for_project(user_id, class_id, project_id) is not None:
+        return None
+
     scope_query = student_submission_scope_query(
         user_id,
         project_id,
@@ -1554,9 +1613,22 @@ def file_upload(
         is_checkpoint,
         checkpoint_id,
     ).count()
-    cooldown_seconds = submission_cooldown_seconds_for_attempt_count(
-        completed_attempts,
-        is_checkpoint,
+    office_hours_entry = (
+        active_office_hours_entry_for_project(
+            user_id,
+            class_id_int,
+            int(project.Id),
+        )
+        if not is_staff_upload
+        else None
+    )
+    cooldown_seconds = (
+        0
+        if office_hours_entry is not None
+        else submission_cooldown_seconds_for_attempt_count(
+            completed_attempts,
+            is_checkpoint,
+        )
     )
 
     message = {
@@ -1566,6 +1638,10 @@ def file_upload(
         "cooldown_seconds": cooldown_seconds,
         "submission_attempt_count": completed_attempts,
         "next_attempt_number": completed_attempts + 1,
+        "office_hours_cooldown_exempt": office_hours_entry is not None,
+        "office_hours_cooldown_exempt_until": serialize_utc_datetime(
+            getattr(office_hours_entry, "CooldownExemptUntil", None)
+        ),
         "star_award": star_award,
         "stars": current_star_balance(user_id, class_id_int),
     }

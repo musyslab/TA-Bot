@@ -32,6 +32,8 @@ from src.repositories.models import (
     ClassAssignments,
     Classes,
     Modules,
+    OfficeHoursQueueEntry,
+    OfficeHoursSession,
     Projects,
     StudentCheckpointSkips,
     StudentCooldownSkips,
@@ -59,6 +61,9 @@ MAIN_PROJECT_TESTCASE_INPUT_COST_STARS = 2
 CHECKPOINT_COMPLETION_STARS = 1
 MAIN_PROJECT_COMPLETION_STARS = 3
 EARLY_START_MULTIPLIER = 2
+OFFICE_HOURS_WAIT_MINUTES = 30
+OFFICE_HOURS_HELP_MINUTES = 30
+OFFICE_HOURS_SESSION_MINUTES = 120
 
 
 def parse_int(v, default: int = -1) -> int:
@@ -309,6 +314,370 @@ def seconds_until(value: datetime | None) -> int:
         return 0
 
     return max(0, int((value - current_utc_datetime()).total_seconds() + 0.999))
+
+
+def ensure_office_hours_tables() -> None:
+    """Create office-hours tables when upgrading an existing development database."""
+    for model in (OfficeHoursSession, OfficeHoursQueueEntry):
+        try:
+            model.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            pass
+
+
+def active_office_hours_session(class_id: int):
+    class_id = parse_int(class_id, 0)
+    if class_id <= 0:
+        return None
+
+    ensure_office_hours_tables()
+    now = current_utc_datetime()
+    return OfficeHoursSession.query.filter(
+        OfficeHoursSession.ClassId == class_id,
+        OfficeHoursSession.StartedAt <= now,
+        OfficeHoursSession.EndsAt > now,
+    ).order_by(
+        OfficeHoursSession.StartedAt.desc(),
+        OfficeHoursSession.Id.desc(),
+    ).first()
+
+
+def office_hours_session_for_time(class_id: int, value: datetime | None):
+    class_id = parse_int(class_id, 0)
+    at_time = parse_cooldown_lifted_at(value)
+    if class_id <= 0 or at_time is None:
+        return None
+
+    ensure_office_hours_tables()
+    return OfficeHoursSession.query.filter(
+        OfficeHoursSession.ClassId == class_id,
+        OfficeHoursSession.StartedAt <= at_time,
+        OfficeHoursSession.EndsAt > at_time,
+    ).order_by(
+        OfficeHoursSession.StartedAt.desc(),
+        OfficeHoursSession.Id.desc(),
+    ).first()
+
+
+def serialize_office_hours_session(class_id: int) -> dict:
+    now = current_utc_datetime()
+    session = active_office_hours_session(class_id)
+
+    if session is None:
+        return {
+            "office_hours_active": False,
+            "session_started_at": None,
+            "session_ends_at": None,
+            "session_remaining_seconds": 0,
+            "session_duration_minutes": OFFICE_HOURS_SESSION_MINUTES,
+        }
+
+    started_at = parse_cooldown_lifted_at(getattr(session, "StartedAt", None))
+    ends_at = parse_cooldown_lifted_at(getattr(session, "EndsAt", None))
+    return {
+        "office_hours_active": True,
+        "session_started_at": serialize_cooldown_lifted_at(started_at),
+        "session_ends_at": serialize_cooldown_lifted_at(ends_at),
+        "session_remaining_seconds": (
+            max(0, int((ends_at - now).total_seconds() + 0.999))
+            if ends_at is not None
+            else 0
+        ),
+        "session_duration_minutes": OFFICE_HOURS_SESSION_MINUTES,
+    }
+
+
+def office_hours_status_for_row(row: OfficeHoursQueueEntry | None) -> str:
+    if row is None:
+        return "not_queued"
+
+    now = current_utc_datetime()
+    joined_at = parse_cooldown_lifted_at(getattr(row, "JoinedAt", None))
+    selected_at = parse_cooldown_lifted_at(getattr(row, "SelectedAt", None))
+    completed_at = parse_cooldown_lifted_at(getattr(row, "CompletedAt", None))
+    exempt_until = parse_cooldown_lifted_at(
+        getattr(row, "CooldownExemptUntil", None)
+    )
+    session = office_hours_session_for_time(int(row.ClassId), joined_at)
+    session_ends_at = parse_cooldown_lifted_at(
+        getattr(session, "EndsAt", None)
+    ) if session is not None else None
+
+    waiting_expires_at = (
+        joined_at + timedelta(minutes=OFFICE_HOURS_WAIT_MINUTES)
+        if joined_at is not None
+        else None
+    )
+    if (
+        waiting_expires_at is not None
+        and session_ends_at is not None
+        and session_ends_at < waiting_expires_at
+    ):
+        waiting_expires_at = session_ends_at
+
+    help_expires_at = exempt_until or (
+        selected_at + timedelta(minutes=OFFICE_HOURS_HELP_MINUTES)
+        if selected_at is not None
+        else None
+    )
+    if (
+        help_expires_at is not None
+        and session_ends_at is not None
+        and session_ends_at < help_expires_at
+    ):
+        help_expires_at = session_ends_at
+
+    if completed_at is not None:
+        if selected_at is not None:
+            return "helped"
+
+        if waiting_expires_at is not None and completed_at >= waiting_expires_at:
+            return "expired_waiting"
+
+        return "left_queue"
+
+    if selected_at is not None:
+        return (
+            "being_helped"
+            if help_expires_at is not None and help_expires_at > now
+            else "expired"
+        )
+
+    if waiting_expires_at is not None and waiting_expires_at <= now:
+        return "expired"
+
+    return "waiting"
+
+
+def expire_office_hours_entries(class_id: int | None = None) -> int:
+    """Close queue/help rows when their own timer or the class session expires."""
+    ensure_office_hours_tables()
+    now = current_utc_datetime()
+    query = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+    )
+
+    if class_id is not None:
+        query = query.filter(OfficeHoursQueueEntry.ClassId == int(class_id))
+
+    rows = query.all()
+    expired_rows = []
+
+    for row in rows:
+        joined_at = parse_cooldown_lifted_at(getattr(row, "JoinedAt", None))
+        selected_at = parse_cooldown_lifted_at(getattr(row, "SelectedAt", None))
+        session = office_hours_session_for_time(int(row.ClassId), joined_at)
+        session_ends_at = parse_cooldown_lifted_at(
+            getattr(session, "EndsAt", None)
+        ) if session is not None else None
+
+        if selected_at is not None:
+            expires_at = parse_cooldown_lifted_at(
+                getattr(row, "CooldownExemptUntil", None)
+            ) or (selected_at + timedelta(minutes=OFFICE_HOURS_HELP_MINUTES))
+        else:
+            if joined_at is None:
+                continue
+            expires_at = joined_at + timedelta(minutes=OFFICE_HOURS_WAIT_MINUTES)
+
+        if session_ends_at is not None and session_ends_at < expires_at:
+            expires_at = session_ends_at
+
+        if session is None:
+            # Legacy/open rows that are not tied to a valid office-hours window
+            # should not stay active once session-gated office hours are enabled.
+            expires_at = min(expires_at, now)
+
+        if expires_at <= now:
+            row.CompletedAt = expires_at
+            if selected_at is not None:
+                row.CooldownExemptUntil = expires_at
+            expired_rows.append(row)
+
+    if expired_rows:
+        db.session.commit()
+
+    return len(expired_rows)
+
+
+def active_office_hours_entry_for_project(
+    user_id: int,
+    class_id: int,
+    project_id: int,
+):
+    """Return an active help entry only while the class office-hours window is active."""
+    user_id = parse_int(user_id, 0)
+    class_id = parse_int(class_id, 0)
+    project_id = parse_int(project_id, 0)
+
+    if user_id <= 0 or class_id <= 0 or project_id <= 0:
+        return None
+
+    session = active_office_hours_session(class_id)
+    if session is None:
+        expire_office_hours_entries(class_id)
+        return None
+
+    project = Projects.query.filter(
+        Projects.Id == project_id,
+        Projects.ClassId == class_id,
+    ).first()
+    module_id = parse_int(getattr(project, "ModuleId", 0), 0)
+    if module_id <= 0:
+        return None
+
+    expire_office_hours_entries(class_id)
+    now = current_utc_datetime()
+    session_ends_at = parse_cooldown_lifted_at(getattr(session, "EndsAt", None))
+    return OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.UserId == user_id,
+        OfficeHoursQueueEntry.ClassId == class_id,
+        OfficeHoursQueueEntry.ModuleId == module_id,
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+        OfficeHoursQueueEntry.SelectedAt.isnot(None),
+        OfficeHoursQueueEntry.CooldownExemptUntil > now,
+        OfficeHoursQueueEntry.JoinedAt >= session.StartedAt,
+        OfficeHoursQueueEntry.JoinedAt < session.EndsAt,
+    ).order_by(
+        OfficeHoursQueueEntry.SelectedAt.desc(),
+        OfficeHoursQueueEntry.Id.desc(),
+    ).first() if session_ends_at is not None else None
+
+
+def office_hours_queue_position(row: OfficeHoursQueueEntry) -> int | None:
+    if office_hours_status_for_row(row) != "waiting":
+        return None
+
+    waiting_rows = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.ClassId == int(row.ClassId),
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+        OfficeHoursQueueEntry.SelectedAt.is_(None),
+    ).order_by(
+        OfficeHoursQueueEntry.JoinedAt.asc(),
+        OfficeHoursQueueEntry.Id.asc(),
+    ).all()
+
+    for index, waiting_row in enumerate(waiting_rows, start=1):
+        if int(waiting_row.Id) == int(row.Id):
+            return index
+
+    return None
+
+
+def serialize_office_hours_entry(
+    row: OfficeHoursQueueEntry,
+    *,
+    include_student: bool = False,
+) -> dict:
+    now = current_utc_datetime()
+    status = office_hours_status_for_row(row)
+    module = Modules.query.filter(Modules.Id == int(row.ModuleId)).first()
+    joined_at = parse_cooldown_lifted_at(getattr(row, "JoinedAt", None))
+    selected_at = parse_cooldown_lifted_at(getattr(row, "SelectedAt", None))
+    exempt_until = parse_cooldown_lifted_at(
+        getattr(row, "CooldownExemptUntil", None)
+    )
+    session = office_hours_session_for_time(int(row.ClassId), joined_at)
+    session_ends_at = parse_cooldown_lifted_at(
+        getattr(session, "EndsAt", None)
+    ) if session is not None else None
+    waiting_expires_at = (
+        joined_at + timedelta(minutes=OFFICE_HOURS_WAIT_MINUTES)
+        if joined_at is not None
+        else None
+    )
+    if (
+        waiting_expires_at is not None
+        and session_ends_at is not None
+        and session_ends_at < waiting_expires_at
+    ):
+        waiting_expires_at = session_ends_at
+
+    help_expires_at = (
+        exempt_until
+        or (
+            selected_at + timedelta(minutes=OFFICE_HOURS_HELP_MINUTES)
+            if selected_at is not None
+            else None
+        )
+    )
+    if (
+        help_expires_at is not None
+        and session_ends_at is not None
+        and session_ends_at < help_expires_at
+    ):
+        help_expires_at = session_ends_at
+
+    payload = {
+        "id": int(row.Id),
+        "status": status,
+        "in_queue": status in ("waiting", "being_helped"),
+        "user_id": int(row.UserId),
+        "class_id": int(row.ClassId),
+        "module_id": int(row.ModuleId),
+        "module_name": str(getattr(module, "Name", "") or ""),
+        "joined_at": serialize_cooldown_lifted_at(joined_at),
+        "waiting_expires_at": serialize_cooldown_lifted_at(waiting_expires_at),
+        "selected_at": serialize_cooldown_lifted_at(selected_at),
+        "help_expires_at": serialize_cooldown_lifted_at(help_expires_at),
+        "completed_at": serialize_cooldown_lifted_at(
+            parse_cooldown_lifted_at(getattr(row, "CompletedAt", None))
+        ),
+        "cooldown_exempt": status == "being_helped",
+        "cooldown_exempt_until": serialize_cooldown_lifted_at(exempt_until),
+        "help_remaining_seconds": (
+            max(0, int((help_expires_at - now).total_seconds() + 0.999))
+            if status == "being_helped" and help_expires_at is not None
+            else 0
+        ),
+        "queue_position": office_hours_queue_position(row),
+    }
+
+    if include_student:
+        student = Users.query.filter(Users.Id == int(row.UserId)).first()
+        payload.update({
+            "first_name": str(getattr(student, "Firstname", "") or ""),
+            "last_name": str(getattr(student, "Lastname", "") or ""),
+            "email": str(getattr(student, "Email", "") or ""),
+            "student_number": str(getattr(student, "StudentNumber", "") or ""),
+        })
+
+    return payload
+
+
+def empty_office_hours_status() -> dict:
+    return {
+        "status": "not_queued",
+        "in_queue": False,
+        "waiting_expires_at": None,
+        "help_expires_at": None,
+        "cooldown_exempt": False,
+        "cooldown_exempt_until": None,
+        "help_remaining_seconds": 0,
+        "queue_position": None,
+    }
+
+def validate_student_office_hours_scope(class_id: int, module_id: int):
+    if class_id <= 0 or module_id <= 0:
+        return None, make_response(
+            {"message": "class_id and module_id are required."},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    if not user_is_student_in_class_id(current_user_id(), class_id):
+        return None, make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    module = Modules.query.filter(
+        Modules.Id == int(module_id),
+        Modules.ClassId == int(class_id),
+    ).first()
+    if module is None:
+        return None, make_response(
+            {"message": "Module not found for this class."},
+            HTTPStatus.NOT_FOUND,
+        )
+
+    return module, None
 
 
 def ensure_incentive_tables():
@@ -651,6 +1020,8 @@ def submission_cooldown_state(
             "submission_cooldown_seconds": 0,
             "cooldown_remaining_seconds": 0,
             "cooldown_lifted_at": None,
+            "office_hours_cooldown_exempt": False,
+            "office_hours_cooldown_exempt_until": None,
         }
 
     scope_query = submission_scope_query(
@@ -661,6 +1032,27 @@ def submission_cooldown_state(
     )
     completed_attempts = scope_query.count()
     next_attempt = completed_attempts + 1
+    office_hours_entry = active_office_hours_entry_for_project(
+        user_id,
+        class_id,
+        project_id,
+    )
+
+    if office_hours_entry is not None:
+        return {
+            "submission_attempt_count": completed_attempts,
+            "next_attempt_number": next_attempt,
+            "submission_cooldown_seconds": 0,
+            "cooldown_remaining_seconds": 0,
+            "cooldown_lifted_at": None,
+            "office_hours_cooldown_exempt": True,
+            "office_hours_cooldown_exempt_until": serialize_cooldown_lifted_at(
+                parse_cooldown_lifted_at(
+                    getattr(office_hours_entry, "CooldownExemptUntil", None)
+                )
+            ),
+        }
+
     cooldown_seconds = submission_cooldown_seconds_for_attempt_count(
         completed_attempts,
         checkpoint,
@@ -703,6 +1095,8 @@ def submission_cooldown_state(
         "submission_cooldown_seconds": cooldown_seconds,
         "cooldown_remaining_seconds": remaining_seconds,
         "cooldown_lifted_at": serialize_cooldown_lifted_at(cooldown_lifted_at),
+        "office_hours_cooldown_exempt": False,
+        "office_hours_cooldown_exempt_until": None,
     }
 
 
@@ -1579,6 +1973,363 @@ def codefinder(submission_repo: SubmissionRepository = Provide[Container.submiss
     resp.headers["Cache-Control"] = "no-store"
     resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
     return resp
+
+
+def office_hours_admin_queue_payload(class_id: int) -> dict:
+    expire_office_hours_entries(class_id)
+
+    active_rows = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.ClassId == int(class_id),
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+    ).order_by(
+        OfficeHoursQueueEntry.JoinedAt.asc(),
+        OfficeHoursQueueEntry.Id.asc(),
+    ).all()
+
+    active_entries = [
+        serialize_office_hours_entry(row, include_student=True)
+        for row in active_rows
+        if office_hours_status_for_row(row) in ("waiting", "being_helped")
+    ]
+    waiting = [entry for entry in active_entries if entry["status"] == "waiting"]
+    helping = [entry for entry in active_entries if entry["status"] == "being_helped"]
+
+    completed_rows = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.ClassId == int(class_id),
+        OfficeHoursQueueEntry.CompletedAt.isnot(None),
+    ).order_by(
+        OfficeHoursQueueEntry.CompletedAt.desc(),
+        OfficeHoursQueueEntry.Id.desc(),
+    ).all()
+    completed_entries = [
+        serialize_office_hours_entry(row, include_student=True)
+        for row in completed_rows
+    ]
+    helped = [
+        entry
+        for entry in completed_entries
+        if entry["status"] in ("helped", "expired_waiting")
+    ]
+
+    return {
+        "class_id": int(class_id),
+        **serialize_office_hours_session(class_id),
+        "waiting": waiting,
+        "helping": helping,
+        "helped": helped,
+        "waiting_count": len(waiting),
+        "helping_count": len(helping),
+        "helped_count": len(helped),
+        "server_time": serialize_cooldown_lifted_at(current_utc_datetime()),
+        "wait_duration_minutes": OFFICE_HOURS_WAIT_MINUTES,
+        "help_duration_minutes": OFFICE_HOURS_HELP_MINUTES,
+    }
+
+
+@submission_api.route('/office-hours/session', methods=['POST'])
+@jwt_required()
+def office_hours_start_session():
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get("class_id", 0), 0)
+
+    if class_id <= 0:
+        return make_response(
+            {"message": "class_id is required."},
+            HTTPStatus.BAD_REQUEST,
+        )
+    if not user_can_access_class_id(class_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    ensure_office_hours_tables()
+    now = current_utc_datetime()
+
+    # Serialize starts per class so two admins cannot create overlapping windows.
+    Classes.query.filter(Classes.Id == class_id).with_for_update().first()
+    existing = OfficeHoursSession.query.filter(
+        OfficeHoursSession.ClassId == class_id,
+        OfficeHoursSession.StartedAt <= now,
+        OfficeHoursSession.EndsAt > now,
+    ).order_by(
+        OfficeHoursSession.StartedAt.desc(),
+        OfficeHoursSession.Id.desc(),
+    ).with_for_update().first()
+
+    if existing is not None:
+        db.session.rollback()
+        payload = office_hours_admin_queue_payload(class_id)
+        payload["message"] = "Office hours are already active for this class."
+        return jsonify(payload)
+
+    # Close any legacy/stale active queue rows before opening a new window.
+    stale_rows = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.ClassId == class_id,
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+    ).with_for_update().all()
+    for row in stale_rows:
+        row.CompletedAt = now
+        if (
+            getattr(row, "CooldownExemptUntil", None) is not None
+            and row.CooldownExemptUntil > now
+        ):
+            row.CooldownExemptUntil = now
+
+    session = OfficeHoursSession(
+        ClassId=class_id,
+        StartedAt=now,
+        EndsAt=now + timedelta(minutes=OFFICE_HOURS_SESSION_MINUTES),
+        StartedByUserId=current_user_id(),
+    )
+    db.session.add(session)
+    db.session.commit()
+
+    payload = office_hours_admin_queue_payload(class_id)
+    payload["message"] = (
+        f"Office hours started. Students can join for the next "
+        f"{OFFICE_HOURS_SESSION_MINUTES // 60} hours."
+    )
+    return make_response(jsonify(payload), HTTPStatus.CREATED)
+
+
+@submission_api.route('/office-hours/status', methods=['GET'])
+@jwt_required()
+def office_hours_student_status():
+    class_id = parse_int(request.args.get("class_id", 0), 0)
+    module_id = parse_int(request.args.get("module_id", 0), 0)
+    _, error = validate_student_office_hours_scope(class_id, module_id)
+    if error is not None:
+        return error
+
+    expire_office_hours_entries(class_id)
+    row = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.UserId == current_user_id(),
+        OfficeHoursQueueEntry.ClassId == class_id,
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+    ).order_by(
+        OfficeHoursQueueEntry.JoinedAt.desc(),
+        OfficeHoursQueueEntry.Id.desc(),
+    ).first()
+
+    payload = serialize_office_hours_entry(row) if row is not None else empty_office_hours_status()
+    payload.update(serialize_office_hours_session(class_id))
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@submission_api.route('/office-hours/queue', methods=['GET', 'POST', 'DELETE'])
+@jwt_required()
+def office_hours_queue():
+    if request.method == 'GET':
+        class_id = parse_int(request.args.get("class_id", 0), 0)
+        if class_id <= 0:
+            return make_response(
+                {"message": "class_id is required."},
+                HTTPStatus.BAD_REQUEST,
+            )
+        if not user_can_access_class_id(class_id):
+            return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+        response = jsonify(office_hours_admin_queue_payload(class_id))
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get("class_id", 0), 0)
+    module_id = parse_int(data.get("module_id", 0), 0)
+    _, error = validate_student_office_hours_scope(class_id, module_id)
+    if error is not None:
+        return error
+
+    expire_office_hours_entries(class_id)
+    user_id = current_user_id()
+
+    if request.method == 'POST':
+        session = active_office_hours_session(class_id)
+        if session is None:
+            payload = empty_office_hours_status()
+            payload.update(serialize_office_hours_session(class_id))
+            payload["message"] = "Office hours are not active for this class."
+            return make_response(jsonify(payload), HTTPStatus.CONFLICT)
+
+    # Lock the student's class enrollment so simultaneous join requests cannot
+    # create two active office-hours visits for the same student and class.
+    ClassAssignments.query.filter(
+        ClassAssignments.UserId == user_id,
+        ClassAssignments.ClassId == class_id,
+    ).with_for_update().first()
+
+    row = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.UserId == user_id,
+        OfficeHoursQueueEntry.ClassId == class_id,
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+    ).order_by(
+        OfficeHoursQueueEntry.JoinedAt.desc(),
+        OfficeHoursQueueEntry.Id.desc(),
+    ).with_for_update().first()
+    now = current_utc_datetime()
+
+    if request.method == 'DELETE':
+        if row is not None:
+            row.CompletedAt = now
+            if (
+                getattr(row, "CooldownExemptUntil", None) is not None
+                and row.CooldownExemptUntil > now
+            ):
+                row.CooldownExemptUntil = now
+            db.session.commit()
+        else:
+            db.session.rollback()
+
+        payload = empty_office_hours_status()
+        payload.update(serialize_office_hours_session(class_id))
+        return jsonify(payload)
+
+    if row is not None and office_hours_status_for_row(row) in ("waiting", "being_helped"):
+        if int(row.ModuleId) != module_id:
+            db.session.rollback()
+            return make_response(
+                {
+                    "message": (
+                        "You are already in the office-hours queue for another module. "
+                        "Leave that queue before joining this one."
+                    ),
+                    **serialize_office_hours_entry(row),
+                },
+                HTTPStatus.CONFLICT,
+            )
+
+        db.session.rollback()
+        payload = serialize_office_hours_entry(row)
+        payload.update(serialize_office_hours_session(class_id))
+        return jsonify(payload)
+
+    row = OfficeHoursQueueEntry(
+        UserId=user_id,
+        ClassId=class_id,
+        ModuleId=module_id,
+        JoinedAt=now,
+    )
+    db.session.add(row)
+    db.session.commit()
+
+    payload = serialize_office_hours_entry(row)
+    payload.update(serialize_office_hours_session(class_id))
+    return make_response(
+        jsonify(payload),
+        HTTPStatus.CREATED,
+    )
+
+
+@submission_api.route('/office-hours/help', methods=['POST'])
+@jwt_required()
+def office_hours_help_student():
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get("class_id", 0), 0)
+    student_id = parse_int(data.get("student_id", 0), 0)
+
+    if class_id <= 0 or student_id <= 0:
+        return make_response(
+            {"message": "class_id and student_id are required."},
+            HTTPStatus.BAD_REQUEST,
+        )
+    if not user_can_access_class_id(class_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+    if not user_is_student_in_class_id(student_id, class_id):
+        return make_response(
+            {"message": "Student is not enrolled in this class."},
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    expire_office_hours_entries(class_id)
+    session = active_office_hours_session(class_id)
+    if session is None:
+        return make_response(
+            {"message": "Office hours are not active for this class."},
+            HTTPStatus.CONFLICT,
+        )
+
+    row = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.ClassId == class_id,
+        OfficeHoursQueueEntry.UserId == student_id,
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+        OfficeHoursQueueEntry.SelectedAt.is_(None),
+    ).order_by(
+        OfficeHoursQueueEntry.JoinedAt.desc(),
+        OfficeHoursQueueEntry.Id.desc(),
+    ).with_for_update().first()
+
+    if row is None:
+        db.session.rollback()
+        return make_response(
+            {"message": "Student is no longer waiting for office hours."},
+            HTTPStatus.NOT_FOUND,
+        )
+
+    now = current_utc_datetime()
+    row.SelectedAt = now
+    row.SelectedByUserId = current_user_id()
+    session_ends_at = parse_cooldown_lifted_at(getattr(session, "EndsAt", None))
+    requested_exemption_end = now + timedelta(minutes=OFFICE_HOURS_HELP_MINUTES)
+    row.CooldownExemptUntil = (
+        min(requested_exemption_end, session_ends_at)
+        if session_ends_at is not None
+        else requested_exemption_end
+    )
+    db.session.commit()
+
+    payload = office_hours_admin_queue_payload(class_id)
+    payload["message"] = (
+        f"Started helping the student. Cooldown-free submissions are enabled "
+        f"for up to {OFFICE_HOURS_HELP_MINUTES} minutes."
+    )
+    return jsonify(payload)
+
+
+@submission_api.route('/office-hours/complete', methods=['POST'])
+@jwt_required()
+def office_hours_complete_student():
+    data = request.get_json(silent=True) or {}
+    class_id = parse_int(data.get("class_id", 0), 0)
+    student_id = parse_int(data.get("student_id", 0), 0)
+
+    if class_id <= 0 or student_id <= 0:
+        return make_response(
+            {"message": "class_id and student_id are required."},
+            HTTPStatus.BAD_REQUEST,
+        )
+    if not user_can_access_class_id(class_id):
+        return make_response("Not Authorized", HTTPStatus.UNAUTHORIZED)
+
+    expire_office_hours_entries(class_id)
+    row = OfficeHoursQueueEntry.query.filter(
+        OfficeHoursQueueEntry.ClassId == class_id,
+        OfficeHoursQueueEntry.UserId == student_id,
+        OfficeHoursQueueEntry.CompletedAt.is_(None),
+        OfficeHoursQueueEntry.SelectedAt.isnot(None),
+    ).order_by(
+        OfficeHoursQueueEntry.SelectedAt.desc(),
+        OfficeHoursQueueEntry.Id.desc(),
+    ).with_for_update().first()
+
+    if row is None:
+        db.session.rollback()
+        return make_response(
+            {"message": "The student does not have an active help session."},
+            HTTPStatus.NOT_FOUND,
+        )
+
+    now = current_utc_datetime()
+    row.CompletedAt = now
+    if (
+        getattr(row, "CooldownExemptUntil", None) is not None
+        and row.CooldownExemptUntil > now
+    ):
+        row.CooldownExemptUntil = now
+    db.session.commit()
+
+    payload = office_hours_admin_queue_payload(class_id)
+    payload["message"] = "The help session ended."
+    return jsonify(payload)
 
 
 @submission_api.route('/incentive-state', methods=['GET'])

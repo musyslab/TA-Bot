@@ -1,5 +1,7 @@
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS `OfficeHoursQueueEntries`;
+DROP TABLE IF EXISTS `OfficeHoursSessions`;
 DROP TABLE IF EXISTS `SubmissionAnnotations`;
 DROP TABLE IF EXISTS `StudentStarAwards`;
 DROP TABLE IF EXISTS `StudentTestcaseInputPurchases`;
@@ -158,6 +160,56 @@ CREATE TABLE `ClassAssignments` (
     FOREIGN KEY (`LabId`) REFERENCES `Labs` (`Id`),
   CONSTRAINT `fk_class_assignments_lecture`
     FOREIGN KEY (`LectureId`) REFERENCES `LectureSections` (`Id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `OfficeHoursSessions` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `ClassId` int NOT NULL,
+  `StartedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `EndsAt` datetime NOT NULL,
+  `StartedByUserId` int DEFAULT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `idx_office_hours_sessions_class_time` (`ClassId`, `StartedAt`, `EndsAt`),
+  KEY `idx_office_hours_sessions_started_by` (`StartedByUserId`),
+  CONSTRAINT `fk_office_hours_sessions_class`
+    FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_office_hours_sessions_started_by`
+    FOREIGN KEY (`StartedByUserId`) REFERENCES `Users` (`Id`)
+    ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `OfficeHoursQueueEntries` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UserId` int NOT NULL,
+  `ClassId` int NOT NULL,
+  `ModuleId` int NOT NULL,
+  `JoinedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `SelectedAt` datetime DEFAULT NULL,
+  `SelectedByUserId` int DEFAULT NULL,
+  `CooldownExemptUntil` datetime DEFAULT NULL,
+  `CompletedAt` datetime DEFAULT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `idx_office_hours_student_active`
+    (`UserId`, `ClassId`, `CompletedAt`, `JoinedAt`),
+  KEY `idx_office_hours_class_queue`
+    (`ClassId`, `CompletedAt`, `SelectedAt`, `JoinedAt`),
+  KEY `idx_office_hours_module` (`ModuleId`),
+  KEY `idx_office_hours_exemption`
+    (`UserId`, `ClassId`, `ModuleId`, `CompletedAt`, `CooldownExemptUntil`),
+  KEY `idx_office_hours_selected_by` (`SelectedByUserId`),
+  CONSTRAINT `fk_office_hours_user`
+    FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_office_hours_class`
+    FOREIGN KEY (`ClassId`) REFERENCES `Classes` (`Id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_office_hours_module`
+    FOREIGN KEY (`ModuleId`) REFERENCES `Modules` (`Id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_office_hours_selected_by`
+    FOREIGN KEY (`SelectedByUserId`) REFERENCES `Users` (`Id`)
+    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `Submissions` (

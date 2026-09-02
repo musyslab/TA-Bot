@@ -255,9 +255,6 @@ class SchoolSelectInner extends Component<SchoolSelectProps, SchoolState> {
 
                 <div className="pageTitle">School Selection</div>
 
-                <p className="projects-subtitle">
-                    Select a school.
-                </p>
 
                 {errorMessage ? <div className="pageMessage">{errorMessage}</div> : null}
 
