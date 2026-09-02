@@ -20,6 +20,7 @@ import AdminGrading from './pages/admin/AdminGrading';
 import AdminPlagiarism from "./pages/admin/AdminPlagiarism";
 import AdminModuleList from './pages/admin/AdminModuleList';
 import AdminModuleDetails from './pages/admin/AdminModuleDetails';
+import AdminOfficeHours from './pages/admin/AdminOfficeHours';
 import AdminProjectManage from './pages/admin/AdminProjectManage';
 import AdminStudentList from './pages/admin/AdminStudentList';
 import AdminUpload from './pages/admin/AdminUpload';
@@ -76,6 +77,11 @@ class App extends Component {
                     <Route path="/admin/school/:school_id/class/:class_id/menu" element={
                         <ProtectedRoute>
                             <AdminMenu />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/school/:school_id/class/:class_id/office-hours" element={
+                        <ProtectedRoute>
+                            <AdminOfficeHours />
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/school/:school_id/class/:class_id/upload" element={

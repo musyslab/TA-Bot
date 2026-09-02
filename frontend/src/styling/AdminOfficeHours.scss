@@ -1,0 +1,575 @@
+.admin-office-hours-page {
+    min-height: 100vh;
+    padding-bottom: 3rem;
+    background: #f6f8fb;
+}
+
+.admin-office-hours-shell {
+    width: 95%;
+    margin: 1.25rem auto 0;
+    display: grid;
+    gap: 1.2rem;
+}
+
+.office-hours-intro {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    padding: 1.15rem 1.25rem;
+    border: 1px solid #d8e0e9;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+}
+
+.office-hours-intro-copy {
+    min-width: 0;
+}
+
+.office-hours-kicker {
+    display: block;
+    margin-bottom: 0.3rem;
+    color: #64748b;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.office-hours-intro p {
+    margin: 0;
+    color: #334155;
+    font-size: 0.96rem;
+    font-weight: 600;
+    line-height: 1.55;
+}
+
+.office-hours-intro p strong {
+    color: #0f172a;
+    font-weight: 850;
+}
+
+.office-hours-intro button,
+.office-hours-table button {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.58rem 0.95rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    background: #ffffff;
+    color: #334155;
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease,
+        border-color 120ms ease,
+        background 120ms ease;
+}
+
+.office-hours-refresh-button {
+    flex: 0 0 auto;
+}
+
+.office-hours-table button.primary {
+    min-width: 76px;
+    border-color: #1d4ed8;
+    background: #2563eb;
+    color: #ffffff;
+}
+
+.office-hours-table button.success {
+    min-width: 82px;
+    border-color: #15803d;
+    background: #16a34a;
+    color: #ffffff;
+}
+
+.office-hours-intro button:hover:not(:disabled),
+.office-hours-table button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.11);
+}
+
+.office-hours-intro button:hover:not(:disabled) {
+    border-color: #94a3b8;
+    background: #f8fafc;
+}
+
+.office-hours-table button.primary:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
+.office-hours-table button.success:hover:not(:disabled) {
+    background: #15803d;
+}
+
+.office-hours-intro button:focus-visible,
+.office-hours-table button:focus-visible {
+    outline: 3px solid rgba(37, 99, 235, 0.22);
+    outline-offset: 2px;
+}
+
+.office-hours-intro button:disabled,
+.office-hours-table button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    transform: none;
+    box-shadow: none;
+}
+
+.office-hours-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.85rem;
+}
+
+.office-hours-stat {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 74px;
+    padding: 0.9rem 1rem;
+    border: 1px solid #dbe2ea;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 3px 12px rgba(15, 23, 42, 0.04);
+}
+
+.office-hours-stat::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: #94a3b8;
+}
+
+.office-hours-stat.is-waiting::before {
+    background: #f59e0b;
+}
+
+.office-hours-stat.is-helping::before {
+    background: #22c55e;
+}
+
+.office-hours-stat.is-helped::before {
+    background: #64748b;
+}
+
+.office-hours-stat span {
+    color: #475569;
+    font-size: 0.87rem;
+    font-weight: 800;
+}
+
+.office-hours-stat strong {
+    color: #0f172a;
+    font-size: 1.65rem;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.office-hours-notice {
+    padding: 0.9rem 1rem;
+    border: 1px solid;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 750;
+    line-height: 1.45;
+}
+
+.office-hours-notice.is-success {
+    border-color: #86efac;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.office-hours-notice.is-error {
+    border-color: #fecaca;
+    background: #fff7f7;
+    color: #991b1b;
+}
+
+.office-hours-panel {
+    overflow: hidden;
+    border: 1px solid #d8e0e9;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.045);
+}
+
+.office-hours-panel.is-waiting {
+    border-top: 3px solid #f59e0b;
+}
+
+.office-hours-panel.is-helping {
+    border-top: 3px solid #22c55e;
+}
+
+.office-hours-panel.is-helped {
+    border-top: 3px solid #94a3b8;
+}
+
+.office-hours-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fbfcfe;
+}
+
+.office-hours-panel.is-waiting .office-hours-panel-header {
+    background: #fffbeb;
+}
+
+.office-hours-panel.is-helping .office-hours-panel-header {
+    background: #f0fdf4;
+}
+
+.office-hours-panel-header h2 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 1.08rem;
+    font-weight: 900;
+}
+
+.office-hours-panel-header p {
+    margin: 0.22rem 0 0;
+    color: #64748b;
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.office-hours-count {
+    min-width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    padding: 0 0.55rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #334155;
+    font-size: 0.84rem;
+    font-weight: 900;
+}
+
+.office-hours-panel.is-waiting .office-hours-count {
+    border-color: #fcd34d;
+    color: #92400e;
+}
+
+.office-hours-panel.is-helping .office-hours-count {
+    border-color: #86efac;
+    color: #166534;
+}
+
+.office-hours-empty {
+    padding: 2rem 1rem;
+    color: #64748b;
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.office-hours-table-wrap {
+    overflow-x: auto;
+}
+
+.office-hours-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+}
+
+.office-hours-table th,
+.office-hours-table td {
+    padding: 0.9rem 1.15rem;
+    border-bottom: 1px solid #e8edf3;
+    color: #334155;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.office-hours-table th {
+    background: #ffffff;
+    color: #64748b;
+    font-size: 0.71rem;
+    font-weight: 900;
+    letter-spacing: 0.055em;
+    white-space: nowrap;
+    text-transform: uppercase;
+}
+
+.office-hours-table td {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.office-hours-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.office-hours-table tbody tr {
+    transition: background 100ms ease;
+}
+
+.office-hours-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.office-hours-student-cell strong,
+.office-hours-student-cell>span {
+    display: block;
+}
+
+.office-hours-student-cell strong {
+    color: #0f172a;
+    font-weight: 850;
+}
+
+.office-hours-student-cell>span {
+    margin-top: 0.22rem;
+    color: #64748b;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.office-hours-expiration {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 86px;
+    padding: 0.32rem 0.58rem;
+    border: 1px solid;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 850;
+    white-space: nowrap;
+}
+
+.office-hours-expiration.is-waiting {
+    border-color: #fde68a;
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.office-hours-expiration.is-helping {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.office-hours-action-column,
+.office-hours-action-cell {
+    width: 1%;
+    text-align: right !important;
+    white-space: nowrap;
+}
+
+
+.office-hours-session-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    padding: 1.2rem 1.25rem;
+    border: 1px solid #cbd5e1;
+    border-left-width: 5px;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+}
+
+.office-hours-session-card.is-active {
+    border-left-color: #16a34a;
+    background: #f8fff9;
+}
+
+.office-hours-session-card.is-inactive {
+    border-left-color: #64748b;
+}
+
+.office-hours-session-copy {
+    min-width: 0;
+}
+
+.office-hours-session-heading-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.office-hours-session-heading-row h2 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 1.2rem;
+    font-weight: 900;
+}
+
+.office-hours-session-copy p {
+    margin: 0.45rem 0 0;
+    color: #475569;
+    font-size: 0.9rem;
+    font-weight: 650;
+    line-height: 1.5;
+}
+
+.office-hours-session-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 26px;
+    padding: 0.25rem 0.58rem;
+    border: 1px solid;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.035em;
+    text-transform: uppercase;
+}
+
+.office-hours-session-status.is-active {
+    border-color: #86efac;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.office-hours-session-status.is-inactive {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+    color: #475569;
+}
+
+.office-hours-session-actions {
+    flex: 0 0 auto;
+}
+
+.office-hours-start-button {
+    min-height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1rem;
+    border: 1px solid #1d4ed8;
+    border-radius: 9px;
+    background: #2563eb;
+    color: #ffffff;
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.office-hours-start-button:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
+.office-hours-start-button:focus-visible {
+    outline: 3px solid rgba(37, 99, 235, 0.22);
+    outline-offset: 2px;
+}
+
+.office-hours-start-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.office-hours-session-countdown {
+    min-width: 176px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.55rem;
+    row-gap: 0.1rem;
+    align-items: center;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid #bbf7d0;
+    border-radius: 10px;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.office-hours-session-countdown svg {
+    grid-row: 1 / span 2;
+}
+
+.office-hours-session-countdown span {
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.office-hours-session-countdown strong {
+    font-size: 1rem;
+    font-weight: 900;
+}
+
+.office-hours-table-empty {
+    height: 76px;
+    color: #64748b !important;
+    text-align: center !important;
+    font-weight: 700 !important;
+}
+
+@media (max-width: 900px) {
+    .office-hours-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .office-hours-session-card {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .office-hours-session-actions {
+        width: 100%;
+    }
+
+    .office-hours-start-button,
+    .office-hours-session-countdown {
+        width: 100%;
+    }
+
+    .office-hours-stat {
+        min-height: 62px;
+    }
+}
+
+@media (max-width: 700px) {
+    .admin-office-hours-shell {
+        width: calc(100% - 1.5rem);
+    }
+
+    .office-hours-intro {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .office-hours-intro button {
+        width: 100%;
+    }
+
+    .office-hours-panel-header {
+        align-items: flex-start;
+    }
+
+    .office-hours-panel-header p {
+        max-width: 28rem;
+    }
+}

@@ -173,10 +173,6 @@ class AdminClassSelectInner extends Component<AdminClassSelectProps, ClassState>
                     {hasSelectedSchool && selectedSchoolName ? `Admin · ${selectedSchoolName}` : "Admin Class Selection"}
                 </div>
 
-                <p className="projects-subtitle">
-                    Select a class to open its admin menu.
-                </p>
-
                 <section className="module-list-shell" aria-label="Class list">
                     <div className="module-list-header-row">
                         <div>

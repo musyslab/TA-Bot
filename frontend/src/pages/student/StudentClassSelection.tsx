@@ -174,10 +174,6 @@ class StudentClassSelectionInner extends Component<StudentClassSelectionProps, C
                     {hasSelectedSchool && selectedSchoolName ? `Student · ${selectedSchoolName}` : "Class Selection"}
                 </div>
 
-                <p className="projects-subtitle">
-                    Select a class to view its modules.
-                </p>
-
                 <section className="module-list-shell" aria-label="Class list">
                     <div className="module-list-header-row">
                         <div>

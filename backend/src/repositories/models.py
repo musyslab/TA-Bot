@@ -191,6 +191,56 @@ class ClassAssignments(db.Model):
     )
     Role = Column(Integer, nullable=False, default=0)
 
+
+class OfficeHoursSession(db.Model):
+    """One class-level office-hours window started by an admin or instructor."""
+
+    __tablename__ = "OfficeHoursSessions"
+
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    ClassId = Column(
+        Integer,
+        ForeignKey("Classes.Id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    StartedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+    EndsAt = Column(DateTime, nullable=False)
+    StartedByUserId = Column(
+        Integer,
+        ForeignKey("Users.Id", ondelete="SET NULL"),
+    )
+
+
+class OfficeHoursQueueEntry(db.Model):
+    """One office-hours visit, retained after the visit ends for history."""
+
+    __tablename__ = "OfficeHoursQueueEntries"
+
+    Id = Column(Integer, primary_key=True, autoincrement=True)
+    UserId = Column(
+        Integer,
+        ForeignKey("Users.Id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ClassId = Column(
+        Integer,
+        ForeignKey("Classes.Id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ModuleId = Column(
+        Integer,
+        ForeignKey("Modules.Id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    JoinedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+    SelectedAt = Column(DateTime)
+    SelectedByUserId = Column(
+        Integer,
+        ForeignKey("Users.Id", ondelete="SET NULL"),
+    )
+    CooldownExemptUntil = Column(DateTime)
+    CompletedAt = Column(DateTime)
+
 class Submissions(db.Model):
     __tablename__ = "Submissions"
 

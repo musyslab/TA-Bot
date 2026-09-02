@@ -7,6 +7,7 @@ import {
     FaChevronRight,
     FaListUl,
     FaUpload,
+    FaUsers,
 } from "react-icons/fa";
 
 import MenuComponent from "../components/MenuComponent";
@@ -68,6 +69,7 @@ export default function AdminMenu() {
     const moduleListPath = `/admin/school/${schoolId}/class/${classId}/modules`;
     const analyticsPath = `/admin/school/${schoolId}/class/${classId}/analytics`;
     const adminUploadPath = `/admin/school/${schoolId}/class/${classId}/upload`;
+    const officeHoursPath = `/admin/school/${schoolId}/class/${classId}/office-hours`;
 
     const menuOptions: AdminMenuOption[] = [
         {
@@ -90,6 +92,13 @@ export default function AdminMenu() {
             to: adminUploadPath,
             icon: <FaUpload aria-hidden="true" />,
             actionLabel: "Open Admin Upload",
+        },
+        {
+            title: "Office Hours",
+            description: "View the in-person queue and start 30-minute help sessions",
+            to: officeHoursPath,
+            icon: <FaUsers aria-hidden="true" />,
+            actionLabel: "Open Office Hours",
         },
     ];
 
@@ -172,8 +181,8 @@ export default function AdminMenu() {
                                 <div className="admin-menu-card-actions">
                                     <span
                                         className={`admin-menu-action ${option.disabled
-                                                ? "admin-menu-action-secondary admin-menu-disabled-action"
-                                                : "admin-menu-action-primary"
+                                            ? "admin-menu-action-secondary admin-menu-disabled-action"
+                                            : "admin-menu-action-primary"
                                             }`}
                                     >
                                         {option.actionLabel}
