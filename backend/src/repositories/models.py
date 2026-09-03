@@ -243,6 +243,12 @@ class OfficeHoursQueueEntry(db.Model):
 
 class Submissions(db.Model):
     __tablename__ = "Submissions"
+    __table_args__ = (
+        CheckConstraint(
+            "SubmissionMethod IN ('upload', 'editor', 'unknown')",
+            name="ck_submissions_submission_method",
+        ),
+    )
 
     Id = Column(Integer, primary_key=True, autoincrement=True)
     OutputFilepath = Column(String(1000), nullable=False)
@@ -254,6 +260,7 @@ class Submissions(db.Model):
         ForeignKey("Assignments.Id", ondelete="SET NULL"),
         nullable=True,
     )
+    SubmissionMethod = Column(String(20), nullable=False, default="unknown")
     Time = Column(DateTime, nullable=False, default=datetime.utcnow)
     User = Column(Integer, ForeignKey("Users.Id"), nullable=False)
     Project = Column(

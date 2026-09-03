@@ -1282,6 +1282,17 @@ def file_upload(
     if class_id_int <= 0:
         return make_response({"message": "Invalid class_id"}, HTTPStatus.BAD_REQUEST)
 
+    submission_method = request.form.get("submission_method", "").strip().lower()
+
+    if not submission_method:
+        submission_method = "upload" if "student_id" in request.form else "unknown"
+
+    if submission_method not in {"upload", "editor", "unknown"}:
+        return make_response(
+            {"message": "Invalid submission_method"},
+            HTTPStatus.BAD_REQUEST,
+        )
+
     is_staff_upload = user_can_access_class_id(class_id_int)
 
     if "student_id" in request.form and not is_staff_upload:
@@ -1461,6 +1472,13 @@ def file_upload(
         )
 
     grader_language = normalize_grader_language(effective_language, solution_path)
+
+    if submission_method == "editor" and grader_language != "py":
+        return make_response(
+            {"message": "The Python editor can only submit Python assignments"},
+            HTTPStatus.BAD_REQUEST,
+        )
+
     expected_extensions = expected_extensions_for_language(effective_language)
 
     if not expected_extensions:
@@ -1593,6 +1611,7 @@ def file_upload(
         testcase_results=testcase_results,
         is_checkpoint=is_checkpoint,
         checkpoint_id=(checkpoint_id if is_checkpoint else None),
+        submission_method=submission_method,
     )
 
     star_award = None

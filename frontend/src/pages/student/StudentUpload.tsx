@@ -1692,6 +1692,7 @@ const StudentUpload = ({ initialSection }: StudentUploadProps = {}) => {
     submissionFiles.forEach((f) => formData.append("files", f, f.name));
     formData.append("class_id", cid.toString());
     formData.append("project_id", project_id.toString());
+    formData.append("submission_method", submissionMethod);
 
     if (hasModuleRoute && moduleId) {
       formData.append("module_id", moduleId.toString());
