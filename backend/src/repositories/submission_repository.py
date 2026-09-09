@@ -112,6 +112,7 @@ class SubmissionRepository:
         testcase_results,
         is_checkpoint: bool = False,
         checkpoint_id: int = None,
+        submission_method: str = "unknown",
     ):
         """Creates a new submission record in the database.
 
@@ -122,7 +123,10 @@ class SubmissionRepository:
             time (str): The time at which the submission was made.
             project_id (int): The ID of the project for which the code was submitted.
             status (bool): Whether the submission passed or failed.
-            score (int): The score awarded to the submission.
+            testcase_results: The testcase results produced by the grader.
+            is_checkpoint (bool): Whether this is a checkpoint submission.
+            checkpoint_id (int): The checkpoint ID when this is a checkpoint submission.
+            submission_method (str): How the student supplied the program: "upload", "editor", or "unknown".
 
         Returns:
             int: The ID of the newly created submission record.
@@ -136,8 +140,9 @@ class SubmissionRepository:
             IsPassing=status,
             IsCheckpoint=bool(is_checkpoint),
             CheckpointId=(int(checkpoint_id) if (is_checkpoint and checkpoint_id is not None) else None),
+            SubmissionMethod=submission_method,
             TestCaseResults=str(testcase_results),
-        )        
+        )
         db.session.add(submission)
         db.session.commit()
         created_id = submission.Id  # Assuming the auto-incremented ID field is named "ID"

@@ -219,6 +219,7 @@ CREATE TABLE `Submissions` (
   `IsPassing` tinyint(1) NOT NULL DEFAULT 0,
   `IsCheckpoint` tinyint(1) NOT NULL DEFAULT 0,
   `CheckpointId` int DEFAULT NULL,
+  `SubmissionMethod` varchar(20) NOT NULL DEFAULT 'unknown',
   `Time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `User` int NOT NULL,
   `Project` int NOT NULL,
@@ -235,7 +236,9 @@ CREATE TABLE `Submissions` (
     ON DELETE CASCADE,
   CONSTRAINT `fk_submissions_checkpoint`
     FOREIGN KEY (`CheckpointId`) REFERENCES `Assignments` (`Id`)
-    ON DELETE SET NULL
+    ON DELETE SET NULL,
+  CONSTRAINT `ck_submissions_submission_method`
+    CHECK (`SubmissionMethod` IN ('upload', 'editor', 'unknown'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `Testcases` (
