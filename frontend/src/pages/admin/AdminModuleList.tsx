@@ -22,6 +22,7 @@ import {
     FaTimes,
 } from "react-icons/fa";
 
+import DefaultContentImport from "../components/DefaultContentImport";
 import MenuComponent from "../components/MenuComponent";
 import "../../styling/ModuleList.scss";
 import DirectoryBreadcrumbs from "../components/DirectoryBreadcrumbs";
@@ -929,6 +930,7 @@ export default function AdminModuleList() {
             </div>
 
             <div className="module-calendar-command-row">
+                {classId && <DefaultContentImport key={classId} classId={classId} onImported={loadModules} />}
                 <button
                     className="button button-create-assignment"
                     type="button"

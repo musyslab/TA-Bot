@@ -14,8 +14,43 @@
         display: flex;
         align-items: stretch;
         justify-content: center;
-        gap: 15rem;
-        flex-wrap: nowrap;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+
+        > .button-create-assignment,
+        > .default-import-trigger,
+        > .module-view-toggle {
+            box-sizing: border-box;
+            flex: 1 1 15rem;
+            min-width: 0;
+            max-width: 100%;
+        }
+
+        > .button-create-assignment,
+        > .default-import-trigger {
+            white-space: normal;
+            overflow-wrap: anywhere;
+            line-height: 1.4;
+        }
+
+        > .default-import-trigger svg,
+        > .button-create-assignment svg,
+        .module-view-toggle-button svg {
+            flex-shrink: 0;
+        }
+
+        > [role="status"],
+        > [role="alert"] {
+            flex: 1 0 100%;
+            margin: 0;
+            overflow-wrap: anywhere;
+        }
+    }
+
+    @media (min-width: 901px) {
+        .module-calendar-command-row:not(:has(> .default-import-trigger)) {
+            column-gap: clamp(3rem, 12vw, 15rem);
+        }
     }
 
     .button-create-assignment {
