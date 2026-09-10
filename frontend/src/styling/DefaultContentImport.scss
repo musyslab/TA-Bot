@@ -122,6 +122,21 @@
     gap: 12px;
 }
 
+.default-import-content > .default-import-actions {
+    margin-top: 16px;
+}
+
+.default-import-content > .default-import-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.default-import-content > .default-import-actions button svg {
+    flex-shrink: 0;
+}
+
 .default-import-folder {
     border: 1px solid #dbe2ea;
     border-radius: 12px;

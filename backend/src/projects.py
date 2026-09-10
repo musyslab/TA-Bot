@@ -1604,10 +1604,10 @@ def module_presentation_path(module: Modules | None) -> str | None:
             and os.path.splitext(name)[1].lower() in ALLOWED_PRESENTATION_EXTS
         ]
     except OSError:
-        return None
+        candidates = []
 
     if not candidates:
-        return None
+        return ProjectRepository().default_module_presentation(module)
 
     return max(candidates, key=lambda path: os.path.getmtime(path))
 
